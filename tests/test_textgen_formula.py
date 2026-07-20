@@ -150,6 +150,35 @@ def test_active_visual_fusion_rejects_unsupported_model_without_tokenizing():
     assert clip.tokenize_calls == []
 
 
+def test_qwen_visual_encoding_strips_alpha_before_tokenization():
+    seen = []
+
+    class Clip:
+        @staticmethod
+        def tokenize(prompt, images, image, **kwargs):
+            seen.append((images[0], image))
+            return {"qwen": [[(1, 1.0)]]}
+
+    class Model:
+        @staticmethod
+        def process_tokens(rows, device):
+            info = [{"type": "image", "index": 0, "size": 1, "extra": torch.tensor([[1, 2, 2]])}]
+            return torch.zeros((1, 1, 2)), None, None, info
+
+    rgba = torch.rand((1, 2, 2, 4))
+    textgen_nodes._encode_qwen_visual_sources(Clip(), Model(), "cpu", "prompt", [rgba], False)
+
+    assert len(seen) == 1
+    assert seen[0][0].shape == seen[0][1].shape == (1, 2, 2, 3)
+    assert torch.equal(seen[0][0], rgba[..., :3])
+
+
+@pytest.mark.parametrize("image", [torch.zeros((1, 2, 2, 2)), torch.zeros((2, 2, 3))])
+def test_qwen_visual_encoding_rejects_invalid_image_shape_or_channels(image):
+    with pytest.raises(ValueError, match="Qwen vision input"):
+        textgen_nodes._encode_qwen_visual_sources(None, None, "cpu", "prompt", [image], False)
+
+
 def test_qwen35_fused_generation_uses_primary_visual_block_and_mrope():
     class Transformer:
         generated = None

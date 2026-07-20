@@ -103,6 +103,17 @@ def _token_rows(tokens):
     return [[item[0] for item in batch] for batch in tokens]
 
 
+def _qwen_rgb_image(image):
+    """Keep Core Qwen vision inputs in ComfyUI's BHWC RGB contract."""
+    if not torch.is_tensor(image) or image.ndim != 4:
+        shape = getattr(image, "shape", None)
+        raise ValueError(f"Qwen vision input must be a BHWC image tensor, received shape {shape!r}.")
+    channels = image.shape[-1]
+    if channels < 3:
+        raise ValueError(f"Qwen vision input requires at least 3 channels, received {channels}.")
+    return image[..., :3] if channels > 3 else image
+
+
 def _visual_grid_metadata(info):
     extra = info.get("extra")
     grid = extra.get("grid") if isinstance(extra, dict) else extra
@@ -135,6 +146,7 @@ def _load_qwen_generation_model(clip):
 def _encode_qwen_visual_sources(clip, model, device, full_prompt, images, thinking):
     passes = []
     for image in images:
+        image = _qwen_rgb_image(image)
         tokens = clip.tokenize(full_prompt, skip_template=True, min_length=1, thinking=thinking, images=[image], image=image)
         embeds, _, _, info = model.process_tokens(_token_rows(tokens), device)
         visual = [entry for entry in info if entry.get("type") == "image"]
