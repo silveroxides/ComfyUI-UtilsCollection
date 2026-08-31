@@ -5,6 +5,7 @@ from __future__ import annotations
 import bisect
 import contextvars
 import hashlib
+import inspect
 import logging
 import math
 import os
@@ -1060,6 +1061,30 @@ def run_minimax_h3_blocks(
     return hidden_states
 
 
+def _call_minimax_h3_final_layer(
+    final_layer: Any,
+    hidden_states: torch.Tensor,
+    timestep_embedding: torch.Tensor,
+    video_seg: tuple[Any, ...],
+    audio_seg: tuple[Any, ...],
+    sigma: torch.Tensor,
+    sample_sigmas: Any,
+    shifts: tuple[float, float],
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Call Core FinalLayer with either the 4-arg or extended sigma signature."""
+    target = final_layer.forward if isinstance(final_layer, torch.nn.Module) else final_layer
+    try:
+        params = inspect.signature(target).parameters
+    except (TypeError, ValueError):
+        params = {}
+    extra: tuple[Any, ...] = ()
+    if "sigma" in params:
+        extra = (sigma, sample_sigmas, shifts)
+    return final_layer(
+        hidden_states, timestep_embedding, video_seg, audio_seg, *extra
+    )
+
+
 def minimax_h3_block_patch_forward(
     self: minimax_model.MiniMaxH3Model,
     x: list[torch.Tensor],
@@ -1272,7 +1297,8 @@ def minimax_h3_block_patch_forward(
         for start, end, kind in layout.segments
         if kind == "audio"
     )
-    video_result, audio_result = self.final_layer(
+    video_result, audio_result = _call_minimax_h3_final_layer(
+        self.final_layer,
         hidden_states,
         timestep_embedding,
         video_seg,
