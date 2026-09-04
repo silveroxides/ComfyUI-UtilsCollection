@@ -151,10 +151,13 @@ paths = [
   "node_metadata.py",
   "node_replacements.py",
   "lama_nodes.py",
+  "model_nodes.py",
+  "model_helpers.py",
 ]
 python_tests = [
   "tests/test_node_metadata.py",
   "tests/test_node_module_structure.py",
+  "tests/test_sam3_tiling.py",
 ]
 frontend_tests = []
 

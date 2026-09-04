@@ -17,6 +17,7 @@ from .composite_nodes import *
 from .logic_math_nodes import *
 from .patcher_nodes import *
 from .lama_nodes import *
+from .model_nodes import *
 
 from comfy_api.latest import ComfyExtension, io
 from .node_replacements import register_replacements
@@ -164,6 +165,7 @@ class SamplingUtils(ComfyExtension):
             UC_MarkdownPreview,
             UC_LoraLoaderCLIPOnly,
             UC_SAM31CheckpointLoader,
+            UC_SAM3Detect,
             UC_LoadImageWithAlpha,
             UC_LoadLaMaModel,
             UC_LaMaInpaint,
