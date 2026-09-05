@@ -1518,6 +1518,62 @@ def test_minimax_h3_full_reference_assembled_context_contracts():
         assert instruction.count("{system_query}") == 1
 
 
+def test_minimax_h3_reference_debug_preserves_control_and_fixes_label_contract():
+    runtime_key = "video_timeline_minimax_h3_reference_system_instruction_debug"
+    readable_name = "VIDEO_TIMELINE_MINIMAX_H3_REFERENCE_SYSTEM_INSTRUCTION_DEBUG"
+    control = vlm_presets.system_instructions_vlm[
+        "video_timeline_minimax_h3_reference_system_instruction"
+    ]
+    debug = vlm_presets.system_instructions_vlm[runtime_key]
+    readable = runpy.run_path(str(CUSTOM_NODE_ROOT / "vlm_presets_vars.py"))
+    basic_options = vlm_nodes.UC_VLMSysInstrPresets.define_schema().inputs[0].options
+    advanced_options = (
+        vlm_nodes.UC_VLMSysInstrAdvPresets.define_schema().inputs[0].options
+    )
+
+    assert debug == readable[readable_name]
+    assert runtime_key in basic_options
+    assert runtime_key in advanced_options
+    assert debug != control
+
+    control_subjects = control[
+        control.index("#### subject_definitions") : control.index("#### summary")
+    ]
+    debug_subjects = debug[
+        debug.index("#### subject_definitions") : debug.index("#### summary")
+    ]
+    debug_timeline = debug[
+        debug.index("#### detailed_description and Timeline") : debug.index(
+            "#### Shots and Camera"
+        )
+    ]
+
+    assert "| `<Subject N>:` |" in control_subjects
+    assert "every mentioned Subject action must include" in control_subjects
+    for tag in ("Subject", "Picture", "Video", "Audio"):
+        assert f"| `<{tag} N> is ...` |" in debug_subjects
+        assert f"| `<{tag} N>:` |" not in debug_subjects
+    assert "every mentioned Subject action must include" not in debug_subjects
+    assert "In generated output, emit it as plain text" in debug_subjects
+    assert "Separate the tag from following prose with whitespace" in debug_subjects
+    assert "literal alias at first introduction" in debug_timeline
+    assert "Otherwise use a concise ordinary name, role, or pronoun" in debug_timeline
+    assert "Do not repeat the alias at every action mention" in debug_timeline
+
+    system_query = "SYSTEM QUERY DEBUG SENTINEL"
+    user_query = "USER QUERY DEBUG SENTINEL: create a 6.00s video."
+    assembled = vlm_nodes.UC_VLMSysInstrAdvPresets.execute(
+        runtime_key,
+        False,
+        system_query,
+        user_query,
+    ).args[0]
+    assert assembled.startswith(debug)
+    assert assembled.count(system_query) == 1
+    assert assembled.count(user_query) == 1
+    assert assembled.index(system_query) < assembled.index(user_query)
+
+
 def test_experimental_h3_reference_keeps_regression_contract():
     instruction = vlm_experimental_presets.system_instructions_vlm_experimental[
         "video_timeline_minimax_h3_reference_system_instruction"
