@@ -47,11 +47,10 @@ from .encoder_helpers import(
     CONSENSUS_BLEND_PRESETS,
     execute_advanced_visual_consensus,
     execute_advanced_minimax_h3_image_to_video,
-    execute_advanced_minimax_h3_image_to_video_combined,
+    execute_minimax_h3_vlm_guide,
     build_minimax_h3_media_config,
     MINIMAX_H3_MEDIA_STRUCTURE,
     MINIMAX_H3_VIDEO_LATENT_MODES,
-    execute_minimax_h3_first_frame_references,
     execute_token_fusion_visual_conditioning,
 )
 from .image_helpers import VIDEO_FRAME_TIMESTAMP_FORMATS
@@ -355,6 +354,12 @@ class UC_VisualFusionConfig(io.ComfyNode):
 
 
 class UC_AdvancedConsensusConfiguration(UC_TextConsensusBlendConfig):
+    # Core fills these together; this subclass has a different output socket.
+    _RETURN_TYPES = None
+    _RETURN_NAMES = None
+    _OUTPUT_IS_LIST = None
+    _OUTPUT_TOOLTIPS = None
+
     @classmethod
     def define_schema(cls) -> io.Schema:
         schema = super().define_schema()
@@ -3345,6 +3350,8 @@ class UC_MiniMaxH3MediaConfig(io.ComfyNode):
                     step=1,
                     tooltip="Number of evenly spaced Video points kept from beginning through end in even keyframes mode. Lower values use less sampling memory.",
                 ),
+                io.Int.Input("temporal_density", default=1, min=1, max=24, step=1, tooltip="Offset sample density used only by the experimental temporal encoders."),
+                io.Combo.Input("temporal_fusion_method", options=["consensus", "spatial"], default="consensus", tooltip="Video-block fusion used only by the experimental temporal encoders."),
             ],
             outputs=[MiniMaxH3MediaConfig.Output(display_name="media_config", tooltip="Runtime media configuration for the Advanced MiniMax H3 encoder nodes.")],
         )
@@ -3358,6 +3365,8 @@ class UC_MiniMaxH3MediaConfig(io.ComfyNode):
         video_fps=2,
         video_latent_mode="even keyframes",
         video_latent_keyframes=4,
+        temporal_density=1,
+        temporal_fusion_method="consensus",
     ):
         return io.NodeOutput(build_minimax_h3_media_config(
             timestamps,
@@ -3366,7 +3375,30 @@ class UC_MiniMaxH3MediaConfig(io.ComfyNode):
             video_fps,
             video_latent_mode,
             video_latent_keyframes,
+            temporal_density,
+            temporal_fusion_method,
         ))
+
+
+class UC_MiniMaxH3VLMGuide(io.ComfyNode):
+    @classmethod
+    def define_schema(cls):
+        return io.Schema(
+            node_id="UC_MiniMaxH3VLMGuide", display_name="MiniMax H3 VLM Guide",
+            category="advanced/conditioning", is_experimental=True,
+            inputs=[
+                io.Conditioning.Input("conditioning"),
+                io.Clip.Input("clip"),
+                io.Image.Input("image"),
+                io.Float.Input("timestamp", default=0.0, min=0.0, step=0.1, tooltip="Guide time in seconds."),
+                io.Int.Input("vlm_resolution", default=384, min=0, max=4096, step=32, tooltip="Equivalent-square Qwen target from 256 to 3584. Values outside that range preserve original resolution."),
+            ],
+            outputs=[io.Conditioning.Output()],
+        )
+
+    @classmethod
+    def execute(cls, conditioning, clip, image, timestamp, vlm_resolution=384):
+        return io.NodeOutput(execute_minimax_h3_vlm_guide(conditioning, clip, image, timestamp, vlm_resolution))
 
 
 class UC_AdvancedMiniMaxH3ImageToVideo(io.ComfyNode):
@@ -3511,8 +3543,8 @@ class UC_AdvancedMiniMaxH3ImageToVideo(io.ComfyNode):
                     tooltip="Optionally formats Picture timestamps, sets Qwen Video sampling, and controls Video motion guidance. Its default Picture constructor matches Core handling.",
                 ),
                 io.Image.Input("video", optional=True, tooltip="Complete Video frame batch at 24 fps. The configurator controls Qwen sampling and full, spaced, or disabled VAE motion guidance."),
-                io.Audio.Input("audio", optional=True, tooltip="Optional H3 reference audio."),
-                io.Vae.Input("audio_vae", optional=True, tooltip="Required with audio. Resamples and encodes the reference audio."),
+                io.Audio.Input("audio", optional=True, tooltip="Optional H3 reference audio. Missing audio from a video is ignored."),
+                io.Vae.Input("audio_vae", optional=True, lazy=True, tooltip="Required only when audio is present. Skipped when audio is absent; otherwise resamples and encodes the reference audio."),
             ],
             outputs=[
                 io.Conditioning.Output(display_name="positive"),
@@ -3520,6 +3552,10 @@ class UC_AdvancedMiniMaxH3ImageToVideo(io.ComfyNode):
             ],
             is_experimental=True,
         )
+
+    @classmethod
+    def check_lazy_status(cls, audio=None, audio_vae=None, **kwargs):
+        return ["audio_vae"] if audio is not None and audio_vae is None else []
 
     @classmethod
     def execute(
@@ -3566,242 +3602,6 @@ class UC_AdvancedMiniMaxH3ImageToVideo(io.ComfyNode):
             audio_vae=audio_vae,
         )
         return io.NodeOutput(conditioning, latent)
-
-
-class UC_AdvancedMiniMaxH3ImageToVideoCombined(
-    UC_AdvancedMiniMaxH3ImageToVideo
-):
-    @classmethod
-    def define_schema(cls):
-        schema = super().define_schema()
-        schema.node_id = "UC_AdvancedMiniMaxH3ImageToVideoCombined"
-        schema.display_name = "Advanced MiniMax H3 Image to Video (Combined)"
-        schema.description = (
-            "Extends the Advanced MiniMax H3 encoder with reference-derived first/final "
-            "VAE keyframes and native references. Connect the returned model to the same "
-            "sampling branch as the positive conditioning and latent. The inherited media "
-            "configuration controls Qwen Video presentation, Video motion guidance, and optional native audio conditioning."
-        )
-        schema.inputs.insert(
-            0,
-            io.Model.Input(
-                "model",
-                tooltip=(
-                    "MiniMax H3 diffusion model. Mixed keyframe/reference modes return a "
-                    "patched clone; single conditioning modes return this model unchanged."
-                ),
-            ),
-        )
-        inputs = {value.id: value for value in schema.inputs}
-        inputs["ref_image_size"].options = [
-            "match",
-            "max",
-            "none",
-            "first + match",
-            "first + max",
-            "first + last + match",
-            "first + last + max",
-        ]
-        inputs["ref_image_size"].tooltip = (
-            "Match, max, and none retain the Advanced node behavior. First modes route the "
-            "first ordered reference to frame zero; first + last modes also route the final "
-            "reference to the final frame when more than one exists. Match or max applies "
-            "only to remaining native references. Each endpoint is VAE-encoded once."
-        )
-        inputs["reference_images"].tooltip = (
-            "Ordered native H3 references and numbered Qwen pictures. Hybrid ref_image_size "
-            "modes derive endpoint keyframes after socket and batch flattening. Reference "
-            "mode cannot be combined with explicit frame or fusion inputs."
-        )
-        schema.outputs.insert(0, io.Model.Output(display_name="model"))
-        return schema
-
-    @classmethod
-    def execute(
-        cls,
-        model,
-        clip,
-        vae=None,
-        prompt=None,
-        width=None,
-        height=None,
-        length=None,
-        first_frame=None,
-        last_frame=None,
-        reference_images: io.Autogrow.Type = None,
-        fusion_images: io.Autogrow.Type = None,
-        visual_fusion_config=None,
-        multiplier=1.0,
-        ref_image_size="match",
-        vlm_resolution=384,
-        vlm_video_resolution=384,
-        media_config=None,
-        video=None,
-        audio=None,
-        audio_vae=None,
-    ) -> io.NodeOutput:
-        patched_model, conditioning, latent = (
-            execute_advanced_minimax_h3_image_to_video_combined(
-                model,
-                clip,
-                vae,
-                prompt,
-                width,
-                height,
-                length,
-                first_frame=first_frame,
-                last_frame=last_frame,
-                reference_images=reference_images,
-                fusion_images=fusion_images,
-                visual_fusion_config=visual_fusion_config,
-                multiplier=multiplier,
-                ref_image_size=ref_image_size,
-                vlm_resolution=vlm_resolution,
-                vlm_video_resolution=vlm_video_resolution,
-                media_config=media_config,
-                video=video,
-                audio=audio,
-                audio_vae=audio_vae,
-            )
-        )
-        return io.NodeOutput(patched_model, conditioning, latent)
-
-
-class UC_MiniMaxH3FirstFrameReferences(io.ComfyNode):
-    @classmethod
-    def define_schema(cls):
-        reference_names = [f"reference_image_{index}" for index in range(1, 17)]
-        reference_template = io.Autogrow.TemplateNames(
-            io.Image.Input(
-                "reference_image",
-                tooltip=(
-                    "Ordered image reference. reference_image_1 becomes Qwen <Picture 2>; "
-                    "a batch expands in order before the next socket."
-                ),
-            ),
-            names=reference_names,
-            min=0,
-        )
-        return io.Schema(
-            node_id="UC_MiniMaxH3FirstFrameReferences",
-            display_name="MiniMax H3 First/Last Frame + References",
-            category="model/conditioning/minimax",
-            description=(
-                "Creates a true MiniMax H3 frame-zero anchor, an optional final-frame anchor, and separate "
-                "ordered image references. The first frame is Qwen <Picture 1>; references start at <Picture 2> "
-                "without a last frame or <Picture 3> with one. The "
-                "returned patched model must be connected to the sampler together with positive and latent."
-            ),
-            inputs=[
-                io.Model.Input(
-                    "model",
-                    tooltip="MiniMax H3 diffusion model. The returned patched clone must feed the sampler.",
-                ),
-                io.Clip.Input(
-                    "clip",
-                    tooltip="MiniMax H3 Qwen3-VL 32B text encoder (qwen3vl_32b).",
-                ),
-                io.Vae.Input(
-                    "vae",
-                    tooltip="MiniMax H3 video VAE used for the first frame and every image reference.",
-                ),
-                io.Image.Input(
-                    "first_frame",
-                    tooltip="Exactly one frame-zero image. It is Qwen <Picture 1> and the VAE keyframe anchor.",
-                ),
-                io.Image.Input(
-                    "last_frame",
-                    optional=True,
-                    tooltip=(
-                        "Optional final-frame anchor. When connected it becomes Qwen <Picture 2>, and references "
-                        "start at <Picture 3>."
-                    ),
-                ),
-                io.String.Input(
-                    "prompt",
-                    multiline=True,
-                    dynamic_prompts=True,
-                    tooltip="Raw MiniMax H3 prompt; no image placeholders or aliases are interpreted.",
-                ),
-                io.Int.Input("width", default=1344, min=32, max=nodes.MAX_RESOLUTION, step=32),
-                io.Int.Input("height", default=768, min=32, max=nodes.MAX_RESOLUTION, step=32),
-                io.Int.Input(
-                    "length",
-                    default=124,
-                    min=5,
-                    max=3600,
-                    step=17,
-                    tooltip="Frame count at 24 fps, snapped upward to MiniMax H3's 17k+5 temporal grid.",
-                ),
-                io.Combo.Input(
-                    "ref_image_size",
-                    options=["match", "max"],
-                    default="match",
-                    tooltip=(
-                        "Match limits each reference to the generation pixel area; max limits its short edge "
-                        "to 2048 pixels. Both preserve aspect ratio and align to 32 pixels."
-                    ),
-                ),
-                io.Int.Input(
-                    "vlm_resolution",
-                    default=384,
-                    min=0,
-                    max=4096,
-                    step=32,
-                    tooltip=(
-                        "Equivalent-square Qwen3-VL target from 256 to 3584. Values outside that range preserve "
-                        "the original image resolution. This is independent of VAE frame and reference sizing."
-                    ),
-                ),
-                io.Autogrow.Input(
-                    "reference_images",
-                    template=reference_template,
-                    optional=True,
-                    tooltip=(
-                        "Optional one-based ordered references. Socket order is numeric and images inside a batch retain "
-                        "batch order. reference_image_1 is Qwen <Picture 2>."
-                    ),
-                ),
-            ],
-            outputs=[
-                io.Model.Output(display_name="model"),
-                io.Conditioning.Output(display_name="positive"),
-                io.Latent.Output(),
-            ],
-            is_experimental=True,
-        )
-
-    @classmethod
-    def execute(
-        cls,
-        model,
-        clip,
-        vae,
-        first_frame,
-        prompt,
-        width,
-        height,
-        length,
-        ref_image_size,
-        reference_images: io.Autogrow.Type = None,
-        last_frame=None,
-        vlm_resolution=384,
-    ) -> io.NodeOutput:
-        patched_model, conditioning, latent = execute_minimax_h3_first_frame_references(
-            model,
-            clip,
-            vae,
-            first_frame,
-            last_frame,
-            prompt,
-            width,
-            height,
-            length,
-            ref_image_size,
-            reference_images,
-            vlm_resolution,
-        )
-        return io.NodeOutput(patched_model, conditioning, latent)
 
 
 class UC_AdvancedVisConEncoder(io.ComfyNode):
@@ -4209,37 +4009,49 @@ class UC_AdvMiniMaxH3ImageToVideoTokenFusion(UC_AdvancedMiniMaxH3ImageToVideo):
         return io.NodeOutput(conditioning, latent)
 
 
-class UC_AdvMiniMaxH3ImageToVideoCombinedTokenFusion(
-    UC_AdvancedMiniMaxH3ImageToVideoCombined
-):
+class UC_AdvMiniMaxH3ImageToVideoTemporalFusion(UC_AdvancedMiniMaxH3ImageToVideo):
+    TEMPORAL_TOKEN_FUSION = False
+
     @classmethod
     def define_schema(cls):
         schema = super().define_schema()
-        schema.node_id = "UC_AdvMiniMaxH3ImageToVideoCombinedTokenFusion"
-        schema.display_name = "Adv MiniMax H3 Image to Video Combined (TokenFusion)"
+        schema.node_id = "UC_AdvMiniMaxH3ImageToVideoTemporalFusion"
+        schema.display_name = "Adv MiniMax H3 Image to Video (Temporal Fusion)"
+        schema.description = "Experimentally fuses corresponding video visual blocks after separate Qwen encodes, preserving the ordinary video token budget."
+        schema.inputs = [value for value in schema.inputs if value.id != "fusion_images"]
+        schema.inputs.append(TextBlendConfig.Input("text_blend_config", optional=True, tooltip="Temporal consensus settings. Disconnected uses custom index consensus with norm rescaling."))
         return schema
 
     @classmethod
     def execute(
-        cls, model, clip, vae=None, prompt=None, width=None, height=None, length=None,
+        cls, clip, vae=None, prompt=None, width=None, height=None, length=None,
         first_frame=None, last_frame=None, reference_images=None,
-        fusion_images=None, visual_fusion_config=None, multiplier=1.0,
-        ref_image_size="match", vlm_resolution=384, vlm_video_resolution=384,
-        media_config=None,
-        video=None, audio=None, audio_vae=None,
+        visual_fusion_config=None, multiplier=1.0, ref_image_size="match",
+        vlm_resolution=384, vlm_video_resolution=384, media_config=None,
+        video=None, audio=None, audio_vae=None, text_blend_config=None,
     ):
-        patched_model, conditioning, latent = (
-            execute_advanced_minimax_h3_image_to_video_combined(
-                model, clip, vae, prompt, width, height, length,
-                first_frame=first_frame, last_frame=last_frame,
-                reference_images=reference_images, fusion_images=fusion_images,
-                visual_fusion_config=visual_fusion_config, multiplier=multiplier,
-                ref_image_size=ref_image_size, vlm_resolution=vlm_resolution,
-                vlm_video_resolution=vlm_video_resolution,
-                media_config=media_config, video=video, audio=audio,
-                audio_vae=audio_vae, token_fusion=True,
-            )
+        conditioning, latent = execute_advanced_minimax_h3_image_to_video(
+            clip, vae, prompt, width, height, length,
+            first_frame=first_frame, last_frame=last_frame, reference_images=reference_images,
+            visual_fusion_config=visual_fusion_config, multiplier=multiplier,
+            ref_image_size=ref_image_size, vlm_resolution=vlm_resolution,
+            vlm_video_resolution=vlm_video_resolution, media_config=media_config,
+            video=video, audio=audio, audio_vae=audio_vae,
+            temporal_fusion=True, temporal_token_fusion=cls.TEMPORAL_TOKEN_FUSION,
+            text_blend_config=text_blend_config,
         )
-        return io.NodeOutput(patched_model, conditioning, latent)
+        return io.NodeOutput(conditioning, latent)
+
+
+class UC_AdvMiniMaxH3ImageToVideoTemporalTokenFusion(UC_AdvMiniMaxH3ImageToVideoTemporalFusion):
+    TEMPORAL_TOKEN_FUSION = True
+
+    @classmethod
+    def define_schema(cls):
+        schema = super().define_schema()
+        schema.node_id = "UC_AdvMiniMaxH3ImageToVideoTemporalTokenFusion"
+        schema.display_name = "Adv MiniMax H3 Image to Video (Temporal TokenFusion)"
+        schema.description = "Experimentally fuses corresponding video features and DeepStack before one Qwen encode per schedule, preserving the ordinary video token budget."
+        return schema
 
 

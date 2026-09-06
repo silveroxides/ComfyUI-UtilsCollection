@@ -17,10 +17,10 @@ The list below uses the canonical node IDs. Deprecated compatibility aliases rem
 - `UC_AdvancedVisualConditioningEncodeTokenFusion`
 - `UC_AdvancedMiniMaxH3ImageToVideo`
 - `UC_AdvMiniMaxH3ImageToVideoTokenFusion`
-- `UC_AdvancedMiniMaxH3ImageToVideoCombined`
-- `UC_AdvMiniMaxH3ImageToVideoCombinedTokenFusion`
+- `UC_AdvMiniMaxH3ImageToVideoTemporalFusion`
+- `UC_AdvMiniMaxH3ImageToVideoTemporalTokenFusion`
+- `UC_MiniMaxH3VLMGuide`
 - `UC_MiniMaxH3MediaConfig`
-- `UC_MiniMaxH3FirstFrameReferences`
 - `UC_AdvancedVisConEncoder`
 - `UC_AdvancedVisConEncoderTokenFusion`
 - `UC_VisualConsensusConfiguration`
@@ -36,6 +36,14 @@ The list below uses the canonical node IDs. Deprecated compatibility aliases rem
 - `UC_Krea2LayerAblator`
 - `UC_MiniMaxH3ClipProjectionPatcher`
 - `UC_EncoderNodesGuide`
+
+#### MiniMax H3 experiments
+
+The temporal encoders fuse offset video samples into the ordinary video token budget. Set temporal density and consensus/spatial method on `UC_MiniMaxH3MediaConfig`; density 1 preserves ordinary sampling. Consensus uses `UC_TextConsensusBlendConfig`, spatial fusion uses `UC_VisualFusionConfig`.
+
+`UC_MiniMaxH3VLMGuide` inserts an independently encoded timestamp/image block before the prompt in compatible H3 conditioning. Chained guides retain insertion order. This experiment does not re-encode the original prompt jointly with the guide.
+
+`UC_MiniMaxH3FirstFrameReferences`, `UC_AdvancedMiniMaxH3ImageToVideoCombined`, and `UC_AdvMiniMaxH3ImageToVideoCombinedTokenFusion` were removed. Workflows using these IDs report missing nodes; no aliases or migration are provided.
 
 #### MiniMax H3 CLIP projection models
 

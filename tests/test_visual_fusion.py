@@ -771,7 +771,6 @@ def test_token_fusion_alternative_nodes_have_distinct_ids_and_matching_sockets()
         (encoder_nodes.UC_AdvancedVisualConditioningEncodeTokenFusion, encoder_nodes.UC_AdvancedVisualConditioningEncode),
         (encoder_nodes.UC_Krea2TokenAttentionWeightTokenFusion, encoder_nodes.UC_Krea2TokenAttentionWeight),
         (encoder_nodes.UC_AdvMiniMaxH3ImageToVideoTokenFusion, encoder_nodes.UC_AdvancedMiniMaxH3ImageToVideo),
-        (encoder_nodes.UC_AdvMiniMaxH3ImageToVideoCombinedTokenFusion, encoder_nodes.UC_AdvancedMiniMaxH3ImageToVideoCombined),
     ]
     for alternative, original in pairs:
         alternative_schema = alternative.define_schema()

@@ -1,3 +1,13 @@
+[groups.minimax_h3_guide]
+paths = ["minimax_h3_guide_helpers.py"]
+python_tests = ["tests/test_minimax_h3_guide.py"]
+frontend_tests = []
+
+[groups.minimax_h3_temporal]
+paths = ["minimax_h3_temporal_helpers.py"]
+python_tests = ["tests/test_minimax_h3_temporal.py"]
+frontend_tests = []
+
 [groups.encoder]
 paths = [
   "encoder_helpers.py",

@@ -138,7 +138,6 @@ def test_encoder_guide_explains_advanced_minimax_h3_role_contract():
     images = UC_EncoderNodesGuide.execute("image_inputs_and_placeholders").args[0]
 
     assert "`UC_AdvancedMiniMaxH3ImageToVideo`" in catalog
-    assert "`UC_AdvancedMiniMaxH3ImageToVideoCombined`" in catalog
     assert "Connected `first_frame` or `last_frame` inputs select the keyframe path" in images
     assert "`reference_images` autogrow selects native-reference mode" in images
     assert "`fusion_images` autogrow is Qwen-only" in images
@@ -146,27 +145,8 @@ def test_encoder_guide_explains_advanced_minimax_h3_role_contract():
     assert "`ref_image_size`" in images
     assert "`vlm_resolution` independently prepares every Qwen copy" in images
     assert "passed directly to the native H3 tokenizer without a system template" in images
-    assert "`first + last + max`" in images
-    assert "endpoint images are excluded from `minimax_refs`" in images
-    assert "patched only when keyframes and native references coexist" in images
     assert "Qwen-only visual conditioning" in images
     assert "do not create `minimax_keyframes` or an H3 latent" in images
-
-
-def test_encoder_guide_explains_combined_minimax_h3_patched_model_contract():
-    catalog = UC_EncoderNodesGuide.execute("node_catalog").args[0]
-    images = UC_EncoderNodesGuide.execute("image_inputs_and_placeholders").args[0]
-
-    assert "`UC_MiniMaxH3FirstFrameReferences`" in catalog
-    assert "true first-frame anchor, an optional last-frame anchor" in catalog
-    assert "all three outputs must feed the same sampling branch" in catalog
-    assert "Qwen `<Picture 1>`" in images
-    assert "`last_frame`" in images
-    assert "`reference_image_1`" in images
-    assert "`<Picture 3>`" in images
-    assert "passes `prompt` directly" in images
-    assert "does not provide fusion or consensus" in images
-    assert "bypassing the model output" in images
 
 
 def test_encoder_guide_lists_only_registered_compatibility_migrations_as_mappings():

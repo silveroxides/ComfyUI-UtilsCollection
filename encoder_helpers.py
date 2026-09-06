@@ -22,13 +22,15 @@ import numpy as np
 import folder_paths
 import node_helpers
 import comfy
-import comfy.model_base
 import comfy.model_management
 import comfy.nested_tensor
-import comfy.patcher_extension
 import comfy.utils
 from .helper_functions import resize_nchw
 from .image_helpers import VIDEO_FRAME_TIMESTAMP_FORMATS, format_video_timestamp, parse_video_timestamps
+from .minimax_h3_guide_helpers import LAYOUT_KEY, build_layout, splice_conditioning
+from .minimax_h3_temporal_helpers import (
+    encode_temporal_conditioning, fuse_temporal_block, minimax_h3_temporal_frame_pairs,
+)
 
 from comfy.ldm.flux.math import apply_rope
 from comfy.ldm.modules.attention import optimized_attention
@@ -37,13 +39,6 @@ from comfy.text_encoders.minimax import token_tags_from_embeds_info
 
 
 _VISUAL_ENCODER_PATH_LOCK = threading.RLock()
-_MINIMAX_H3_COMBINED_WRAPPER_KEY = "uc_minimax_h3_combined_visual_latents"
-_MINIMAX_H3_REFERENCE_KEYFRAME_MODES = {
-    "first + match": ("first", "match"),
-    "first + max": ("first", "max"),
-    "first + last + match": ("first_last", "match"),
-    "first + last + max": ("first_last", "max"),
-}
 MINIMAX_H3_MEDIA_STRUCTURE = "<<picture>>: <<visual>>"
 MINIMAX_H3_VIDEO_LATENT_MODES = (
     "full video",
@@ -457,7 +452,7 @@ def tokenize_minimax_h3_media_prompt(
 def build_minimax_h3_media_config(
     timestamps, timestamp_format="0.0s", structure=MINIMAX_H3_MEDIA_STRUCTURE,
     video_fps=2, video_latent_mode="even keyframes",
-    video_latent_keyframes=4,
+    video_latent_keyframes=4, temporal_density=1, temporal_fusion_method="consensus",
 ):
     if isinstance(timestamp_format, list):
         timestamp_format = timestamp_format[0] if timestamp_format else "0.0s"
@@ -486,6 +481,14 @@ def build_minimax_h3_media_config(
     if timestamp_format not in VIDEO_FRAME_TIMESTAMP_FORMATS:
         raise ValueError(f"Unsupported video timestamp format: {timestamp_format}")
     structure = _validate_minimax_h3_media_structure(structure)
+    if isinstance(temporal_density, list):
+        temporal_density = temporal_density[0] if temporal_density else 1
+    if isinstance(temporal_fusion_method, list):
+        temporal_fusion_method = temporal_fusion_method[0] if temporal_fusion_method else "consensus"
+    if isinstance(temporal_density, bool) or not isinstance(temporal_density, numbers.Integral) or not 1 <= temporal_density <= 24:
+        raise ValueError("MiniMax H3 temporal density must be an integer from 1 to 24.")
+    if temporal_fusion_method not in ("consensus", "spatial"):
+        raise ValueError("Unsupported MiniMax H3 temporal fusion method.")
     return {
         "schema_version": 3,
         "timestamps_seconds": tuple(timestamps),
@@ -495,6 +498,8 @@ def build_minimax_h3_media_config(
         "video_fps": video_fps,
         "video_latent_mode": video_latent_mode,
         "video_latent_keyframes": video_latent_keyframes,
+        "temporal_density": int(temporal_density),
+        "temporal_fusion_method": temporal_fusion_method,
     }
 
 
@@ -545,10 +550,10 @@ def _validate_minimax_h3_media_config(media_config, output_frame_count):
 
 
 def _encode_minimax_h3_audio_reference(audio, audio_vae):
-    if (audio is None) != (audio_vae is None):
-        raise ValueError("MiniMax H3 requires audio and audio_vae together.")
     if audio is None:
         return None
+    if audio_vae is None:
+        raise ValueError("MiniMax H3 requires audio_vae when audio is provided.")
     if not isinstance(audio, dict) or not torch.is_tensor(audio.get("waveform")):
         raise ValueError("MiniMax H3 audio must contain a waveform tensor.")
     waveform = audio["waveform"]
@@ -813,65 +818,6 @@ def minimax_h3_video_sample_indices(frame_count: int, video_fps: int) -> list[in
             indices.append(source_index)
         sample_index += 1
     return indices
-
-
-def validate_minimax_h3_model_patcher(
-    model, context="MiniMax H3 First Frame + References"
-):
-    """Require the installed Core MiniMax H3 model before any expensive work."""
-    if not isinstance(getattr(model, "model", None), comfy.model_base.MiniMaxH3):
-        raise ValueError(f"{context} requires a MiniMax H3 model.")
-
-
-def minimax_h3_combined_payload_wrapper(executor, *args, **kwargs):
-    """Restore combined keyframe/reference latent rows in Core packed-layout order."""
-    payload = kwargs.get("minimax_payload")
-    if not isinstance(payload, dict):
-        return executor(*args, **kwargs)
-
-    keyframes = payload.get("keyframes")
-    references = payload.get("refs")
-    if not keyframes or not references:
-        return executor(*args, **kwargs)
-    if not isinstance(keyframes, (list, tuple)) or not isinstance(references, (list, tuple)):
-        raise ValueError("Malformed combined MiniMax H3 keyframe/reference payload.")
-
-    visual_latents = []
-    for keyframe in keyframes:
-        if not isinstance(keyframe, dict) or not torch.is_tensor(keyframe.get("latent")):
-            raise ValueError("Malformed combined MiniMax H3 keyframe/reference payload.")
-        visual_latents.append(keyframe["latent"])
-    for reference in references:
-        if not isinstance(reference, dict):
-            raise ValueError("Malformed combined MiniMax H3 keyframe/reference payload.")
-        latent = reference.get("latent")
-        if latent is None:
-            if reference.get("kind") == "audio":
-                continue
-            raise ValueError("Malformed combined MiniMax H3 keyframe/reference payload.")
-        if not torch.is_tensor(latent):
-            raise ValueError("Malformed combined MiniMax H3 keyframe/reference payload.")
-        visual_latents.append(latent)
-
-    updated_payload = payload.copy()
-    updated_payload["cond_video_latents"] = visual_latents
-    updated_kwargs = kwargs.copy()
-    updated_kwargs["minimax_payload"] = updated_payload
-    return executor(*args, **updated_kwargs)
-
-
-def patch_minimax_h3_combined_model(model):
-    """Clone an H3 patcher and install exactly one stateless payload wrapper."""
-    validate_minimax_h3_model_patcher(model)
-    patched = model.clone()
-    wrapper_type = comfy.patcher_extension.WrappersMP.DIFFUSION_MODEL
-    patched.remove_wrappers_with_key(wrapper_type, _MINIMAX_H3_COMBINED_WRAPPER_KEY)
-    patched.add_wrapper_with_key(
-        wrapper_type,
-        _MINIMAX_H3_COMBINED_WRAPPER_KEY,
-        minimax_h3_combined_payload_wrapper,
-    )
-    return patched
 
 
 def prepare_image_placeholder_prompt(prompt: str, image_count: int, fusion_active: bool, context: str) -> tuple[str, tuple[int, ...]]:
@@ -2865,6 +2811,7 @@ def encode_embedding_classical_scaled_bias(
     llama_template=None,
     visual_encoder_path="grid-deepstack",
     tokenize_callback=None,
+    encode_callback=None,
     **kwargs,
 ):
     if clip is None:
@@ -2877,7 +2824,7 @@ def encode_embedding_classical_scaled_bias(
 
     if "(" not in text or ")" not in text:
         tokens = tokenize(text)
-        return _encode_scheduled_with_visual_path(clip, tokens, visual_encoder_path)
+        return encode_callback(tokens) if encode_callback is not None else _encode_scheduled_with_visual_path(clip, tokens, visual_encoder_path)
 
     clean_text = ""
     biases_to_apply = []
@@ -2894,7 +2841,7 @@ def encode_embedding_classical_scaled_bias(
             biases_to_apply.append({"start": start_count, "end": end_count, "strength": float(strength)})
 
     tokens = tokenize(clean_text)
-    conditioning = _encode_scheduled_with_visual_path(clip, tokens, visual_encoder_path)
+    conditioning = encode_callback(tokens) if encode_callback is not None else _encode_scheduled_with_visual_path(clip, tokens, visual_encoder_path)
 
     if not biases_to_apply:
         return conditioning
@@ -3329,7 +3276,21 @@ def _spatially_fuse_visual_consensus_sources(
     return [[tensor, metadata]]
 
 
-def _execute_advanced_minimax_h3_image_to_video(
+def execute_minimax_h3_vlm_guide(conditioning, clip, image, timestamp, vlm_resolution=384):
+    if not is_minimax_h3_text_encoder(clip):
+        raise ValueError("MiniMax H3 VLM Guide requires the qwen3vl_32b text encoder.")
+    if not math.isfinite(timestamp) or timestamp < 0:
+        raise ValueError("MiniMax H3 guide timestamp must be finite nonnegative seconds.")
+    if not torch.is_tensor(image) or image.ndim != 4 or image.shape[0] != 1 or image.shape[-1] < 3:
+        raise ValueError("MiniMax H3 VLM Guide requires exactly one BHWC image.")
+    prepared = prepare_vlm_image(image, vlm_resolution)
+    entries = _minimax_h3_text_entries(clip, f"<{timestamp:.1f} seconds>")
+    entries += _minimax_h3_visual_token_entries(clip, prepared)
+    guide = _encode_scheduled_with_visual_path(clip, {"qwen3vl_32b": [entries]}, "grid-deepstack")
+    return splice_conditioning(conditioning, guide)
+
+
+def execute_advanced_minimax_h3_image_to_video(
     clip,
     vae,
     prompt,
@@ -3349,8 +3310,10 @@ def _execute_advanced_minimax_h3_image_to_video(
     video=None,
     audio=None,
     audio_vae=None,
-    allow_combined_reference_routing=False,
     token_fusion=False,
+    temporal_fusion=False,
+    temporal_token_fusion=False,
+    text_blend_config=None,
 ):
     """Build coordinated Qwen conditioning, H3 image controls, and AV latent."""
     if not is_minimax_h3_text_encoder(clip):
@@ -3365,37 +3328,13 @@ def _execute_advanced_minimax_h3_image_to_video(
         raise ValueError(
             "MiniMax H3 frame inputs cannot be combined with native reference images."
         )
-    if keyframe_mode and video is not None and not allow_combined_reference_routing:
+    if keyframe_mode and video is not None:
         raise ValueError(
-            "MiniMax H3 frame inputs with reference video require the Combined node."
+            "MiniMax H3 frame inputs cannot be used with reference video."
         )
     native_reference_mode = bool(flat_references)
-    reference_keyframe_mode = None
-    reference_size_mode = ref_image_size
-    if ref_image_size in _MINIMAX_H3_REFERENCE_KEYFRAME_MODES:
-        if not allow_combined_reference_routing:
-            raise ValueError(
-                f"Unsupported MiniMax H3 reference image size: {ref_image_size}"
-            )
-        if not flat_references:
-            raise ValueError(
-                f"MiniMax H3 {ref_image_size} requires at least one reference image."
-            )
-        reference_keyframe_mode, reference_size_mode = (
-            _MINIMAX_H3_REFERENCE_KEYFRAME_MODES[ref_image_size]
-        )
-    elif native_reference_mode and ref_image_size not in ("match", "max", "none"):
+    if native_reference_mode and ref_image_size not in ("match", "max", "none"):
         raise ValueError(f"Unsupported MiniMax H3 reference image size: {ref_image_size}")
-
-    keyframe_first_image = first_frame
-    keyframe_last_image = last_frame
-    native_reference_images = flat_references
-    if reference_keyframe_mode is not None:
-        keyframe_first_image = flat_references[0]
-        native_reference_images = flat_references[1:]
-        if reference_keyframe_mode == "first_last" and len(flat_references) > 1:
-            keyframe_last_image = flat_references[-1]
-            native_reference_images = flat_references[1:-1]
 
     frame_vae_enabled = ref_image_size != "none"
     visual_sources = []
@@ -3455,11 +3394,10 @@ def _execute_advanced_minimax_h3_image_to_video(
         if (
             resolved_video_latent_mode == "even keyframes"
             and frame_vae_enabled
-            and native_reference_images
-            and not allow_combined_reference_routing
+            and flat_references
         ):
             raise ValueError(
-                "MiniMax H3 even Video keyframes with native reference images require the Combined node or ref_image_size none."
+                "MiniMax H3 even Video keyframes with native reference images require ref_image_size none."
             )
         video_frames, video_reference = prepare_minimax_h3_reference_video(
             video,
@@ -3478,21 +3416,21 @@ def _execute_advanced_minimax_h3_image_to_video(
             )
     audio_reference = _encode_minimax_h3_audio_reference(audio, audio_vae)
     prepared_first = (
-        prepare_minimax_h3_frame(keyframe_first_image, width, height, "disabled")
-        if keyframe_first_image is not None and frame_vae_enabled
+        prepare_minimax_h3_frame(first_frame, width, height, "disabled")
+        if first_frame is not None and frame_vae_enabled
         else None
     )
     prepared_last = (
-        prepare_minimax_h3_frame(keyframe_last_image, width, height, "center")
-        if keyframe_last_image is not None and frame_vae_enabled
+        prepare_minimax_h3_frame(last_frame, width, height, "center")
+        if last_frame is not None and frame_vae_enabled
         else None
     )
     prepared_references = (
         [
             prepare_minimax_h3_reference_image(
-                image, width, height, reference_size_mode
+                image, width, height, ref_image_size
             )
-            for image in native_reference_images
+            for image in flat_references
         ]
         if native_reference_mode and frame_vae_enabled
         else []
@@ -3525,6 +3463,12 @@ def _execute_advanced_minimax_h3_image_to_video(
         fusion_vlm_images = []
     fusion_active = visual_method != "off" and bool(fusion_vlm_images)
     visual_encoder_path = config.get("visual_encoder_path", "grid-deepstack")
+    actual_prompt = prompt if token_fusion and fusion_active else strip_contextual_weight_syntax(prompt)
+    prompt_entries = _minimax_h3_text_entries(clip, actual_prompt)
+    prompt_spans = [_conditioning_token_span(entry) for entry in prompt_entries]
+    if any(span is None for span in prompt_spans):
+        raise ValueError("MiniMax H3 prompt contains an unsupported embedding span.")
+    prompt_length = sum(prompt_spans)
     def tokenize_presentation(text, images):
         if media_config is not None:
             collapse_default_picture = default_single_visual and video_frames is None
@@ -3581,6 +3525,47 @@ def _execute_advanced_minimax_h3_image_to_video(
                 ],
             )
         return clip.tokenize(text, images=images)
+
+    temporal_encode = None
+    if temporal_fusion and video_frames is not None:
+        temporal_config = media_config or {}
+        density = temporal_config.get("temporal_density", 1)
+        method = temporal_config.get("temporal_fusion_method", "consensus")
+        if isinstance(density, bool) or not isinstance(density, numbers.Integral) or not 1 <= density <= 24:
+            raise ValueError("MiniMax H3 temporal density must be an integer from 1 to 24.")
+        if method not in ("consensus", "spatial"):
+            raise ValueError("Unsupported MiniMax H3 temporal fusion method.")
+        default_consensus = {
+            "blend_preset": "custom", "alignment_method": "index", "consensus_type": "median",
+            "power_alpha": 2.0, "diversity_beta": 0.0, "rescale_norm": True, "global_scale": 1.0,
+        }
+        settings = resolve_consensus_blend_settings(default_consensus if text_blend_config is None else text_blend_config)
+        enabled = settings["blend_preset"] != "off" if method == "consensus" else visual_method != "off"
+        if density > 1 and enabled:
+            indices = minimax_h3_video_sample_indices(video_frames.shape[0], video_fps) if media_config is not None else list(range(0, video_frames.shape[0], 12))
+            frame_pairs = minimax_h3_temporal_frame_pairs(video_frames.shape[0], indices, int(density))
+
+            def fuse_video_block(sources, grids, deepstack):
+                return fuse_temporal_block(
+                    sources, method, settings, config, grids,
+                    spatial_fuse_callback=fuse_visual_token_sources,
+                    position_score_callback=_position_biased_similarity_scores,
+                    deepstack_layers=deepstack,
+                )
+
+            def temporal_encode(tokens):
+                return encode_temporal_conditioning(
+                    clip, tokens, frame_pairs,
+                    lambda pair: prepare_minimax_h3_vlm_video_frames(video_frames[list(pair)], vlm_video_resolution),
+                    token_fusion=temporal_token_fusion,
+                    fusion_callback=fuse_video_block,
+                    encode_tokens_callback=lambda value: _encode_scheduled_with_visual_path(clip, value, "grid-deepstack"),
+                    active_clip_model_callback=_active_clip_model,
+                    encode_preprocessed_callback=_encode_preprocessed_clip_model,
+                    visual_context_callback=lambda: qwen3vl_visual_encoder_path(clip, "grid-deepstack"),
+                    video_grid_callback=lambda data, size: visual_fusion_grid(data, size, False),
+                    token_spans_callback=build_token_to_conditioning_map,
+                )
 
     if fusion_active and (keyframe_mode or native_reference_mode):
         if keyframe_mode:
@@ -3728,8 +3713,9 @@ def _execute_advanced_minimax_h3_image_to_video(
             prompt,
             tokenize_callback=tokenize_callback,
             visual_encoder_path="grid-deepstack",
+            encode_callback=temporal_encode,
         )
-        if len(conditioning) != 1:
+        if len(conditioning) != 1 and not temporal_fusion:
             raise ValueError(
                 "MiniMax H3 visual conditioning requires one schedule entry."
             )
@@ -3744,6 +3730,7 @@ def _execute_advanced_minimax_h3_image_to_video(
                 list(range(len(presentation_images))),
             )
 
+    layout_conditioning = []
     for tensor, metadata in conditioning:
         tags = metadata.get("minimax_token_tags")
         if not torch.is_tensor(tags) or tags.numel() != tensor.shape[1]:
@@ -3753,6 +3740,12 @@ def _execute_advanced_minimax_h3_image_to_video(
                 f"tags={tuple(tags.shape) if torch.is_tensor(tags) else type(tags).__name__}, "
                 f"metadata_keys={sorted(metadata)}."
             )
+        metadata = metadata.copy()
+        empty_padding = not actual_prompt and not base_vlm_images and not fusion_vlm_images and video_frames is None and audio_reference is None
+        boundary = 0 if empty_padding else tensor.shape[1] - prompt_length
+        metadata[LAYOUT_KEY] = build_layout(tensor, tags, boundary)
+        layout_conditioning.append([tensor, metadata])
+    conditioning = layout_conditioning
 
     if multiplier != 1.0:
         scaled = []
@@ -3800,262 +3793,7 @@ def _execute_advanced_minimax_h3_image_to_video(
         metadata["minimax_refs"] = references
     if metadata:
         conditioning = node_helpers.conditioning_set_values(conditioning, metadata)
-    return conditioning, latent, bool(
-        keyframes and any(reference.get("latent") is not None for reference in references)
-    )
-
-
-def execute_advanced_minimax_h3_image_to_video(
-    clip,
-    vae,
-    prompt,
-    width,
-    height,
-    length,
-    first_frame=None,
-    last_frame=None,
-    reference_images=None,
-    fusion_images=None,
-    visual_fusion_config=None,
-    multiplier=1.0,
-    ref_image_size="match",
-    vlm_resolution=384,
-    vlm_video_resolution=384,
-    media_config=None,
-    video=None,
-    audio=None,
-    audio_vae=None,
-    token_fusion=False,
-):
-    conditioning, latent, _requires_combined_wrapper = (
-        _execute_advanced_minimax_h3_image_to_video(
-            clip,
-            vae,
-            prompt,
-            width,
-            height,
-            length,
-            first_frame=first_frame,
-            last_frame=last_frame,
-            reference_images=reference_images,
-            fusion_images=fusion_images,
-            visual_fusion_config=visual_fusion_config,
-            multiplier=multiplier,
-            ref_image_size=ref_image_size,
-            vlm_resolution=vlm_resolution,
-            vlm_video_resolution=vlm_video_resolution,
-            media_config=media_config,
-            video=video,
-            audio=audio,
-            audio_vae=audio_vae,
-            token_fusion=token_fusion,
-        )
-    )
     return conditioning, latent
-
-
-def execute_advanced_minimax_h3_image_to_video_combined(
-    model,
-    clip,
-    vae,
-    prompt,
-    width,
-    height,
-    length,
-    first_frame=None,
-    last_frame=None,
-    reference_images=None,
-    fusion_images=None,
-    visual_fusion_config=None,
-    multiplier=1.0,
-    ref_image_size="match",
-    vlm_resolution=384,
-    vlm_video_resolution=384,
-    media_config=None,
-    video=None,
-    audio=None,
-    audio_vae=None,
-    token_fusion=False,
-):
-    """Build Advanced H3 conditioning and patch only mixed visual payloads."""
-    validate_minimax_h3_model_patcher(
-        model, "Advanced MiniMax H3 Image to Video (Combined)"
-    )
-    conditioning, latent, requires_combined_wrapper = (
-        _execute_advanced_minimax_h3_image_to_video(
-            clip,
-            vae,
-            prompt,
-            width,
-            height,
-            length,
-            first_frame=first_frame,
-            last_frame=last_frame,
-            reference_images=reference_images,
-            fusion_images=fusion_images,
-            visual_fusion_config=visual_fusion_config,
-            multiplier=multiplier,
-            ref_image_size=ref_image_size,
-            vlm_resolution=vlm_resolution,
-            vlm_video_resolution=vlm_video_resolution,
-            media_config=media_config,
-            video=video,
-            audio=audio,
-            audio_vae=audio_vae,
-            allow_combined_reference_routing=True,
-            token_fusion=token_fusion,
-        )
-    )
-    output_model = (
-        patch_minimax_h3_combined_model(model)
-        if requires_combined_wrapper
-        else model
-    )
-    return output_model, conditioning, latent
-
-
-def execute_minimax_h3_first_frame_references(
-    model,
-    clip,
-    vae,
-    first_frame,
-    last_frame,
-    prompt,
-    width,
-    height,
-    length,
-    ref_image_size,
-    reference_images,
-    vlm_resolution=384,
-):
-    """Build native combined H3 keyframe/reference conditioning and patched model."""
-    validate_minimax_h3_model_patcher(model)
-    if not is_minimax_h3_text_encoder(clip):
-        raise ValueError(
-            "MiniMax H3 First Frame + References requires the qwen3vl_32b text encoder."
-        )
-    if (
-        not torch.is_tensor(first_frame)
-        or first_frame.ndim != 4
-        or first_frame.shape[0] != 1
-        or first_frame.shape[1] < 1
-        or first_frame.shape[2] < 1
-        or first_frame.shape[3] < 3
-    ):
-        raise ValueError(
-            "MiniMax H3 first frame must contain exactly one BHWC image with at least three channels."
-        )
-    if last_frame is not None and (
-        not torch.is_tensor(last_frame)
-        or last_frame.ndim != 4
-        or last_frame.shape[0] != 1
-        or last_frame.shape[1] < 1
-        or last_frame.shape[2] < 1
-        or last_frame.shape[3] < 3
-    ):
-        raise ValueError(
-            "MiniMax H3 last frame must contain exactly one BHWC image with at least three channels."
-        )
-    if ref_image_size not in ("match", "max"):
-        raise ValueError(f"Unsupported MiniMax H3 reference image size: {ref_image_size}")
-    width = int(width)
-    height = int(height)
-    if width < 32 or height < 32 or width % 32 or height % 32:
-        raise ValueError("MiniMax H3 width and height must be multiples of 32.")
-
-    _, flat_references, _ = extract_and_flatten_images(reference_images)
-    for index, image in enumerate(flat_references, start=1):
-        if (
-            not torch.is_tensor(image)
-            or image.ndim != 4
-            or image.shape[0] != 1
-            or image.shape[1] < 1
-            or image.shape[2] < 1
-            or image.shape[3] < 3
-        ):
-            raise ValueError(
-                f"MiniMax H3 reference image {index} must contain exactly one BHWC image with at least three channels."
-            )
-
-    prepared_first = prepare_minimax_h3_frame(
-        first_frame, width, height, "disabled"
-    )
-    prepared_last = None
-    if last_frame is not None:
-        prepared_last = prepare_minimax_h3_frame(
-            last_frame, width, height, "center"
-        )
-    prepared_references = [
-        prepare_minimax_h3_reference_image(image, width, height, ref_image_size)
-        for image in flat_references
-    ]
-    presentation_images = [prepare_vlm_image(first_frame, vlm_resolution)]
-    if last_frame is not None:
-        presentation_images.append(prepare_vlm_image(last_frame, vlm_resolution))
-    presentation_images.extend(
-        prepare_vlm_image(image, vlm_resolution) for image in flat_references
-    )
-    reference_items = [
-        {"type": "image", "data": image} for image in presentation_images
-    ]
-    if prepared_references:
-        tokenize_callback = lambda text: clip.tokenize(
-            text, minimax_ref_items=reference_items
-        )
-    else:
-        tokenize_callback = lambda text: clip.tokenize(
-            text, images=presentation_images
-        )
-    conditioning = encode_embedding_classical_scaled_bias(
-        clip,
-        prompt,
-        tokenize_callback=tokenize_callback,
-        visual_encoder_path="grid-deepstack",
-    )
-    if len(conditioning) != 1:
-        raise ValueError(
-            "MiniMax H3 First Frame + References requires one conditioning schedule entry."
-        )
-    for tensor, metadata in conditioning:
-        tags = metadata.get("minimax_token_tags")
-        if not torch.is_tensor(tags) or tags.numel() != tensor.shape[1]:
-            raise ValueError(
-                "MiniMax H3 modality tags do not match the conditioning sequence length."
-            )
-
-    latent, frame_count = minimax_h3_empty_av_latent(width, height, length)
-    keyframes = [
-        {
-            "resolved_frame_index": 0,
-            "latent": vae.encode(prepared_first),
-        }
-    ]
-    if prepared_last is not None:
-        keyframes.append(
-            {
-                "resolved_frame_index": frame_count - 1,
-                "latent": vae.encode(prepared_last),
-            }
-        )
-    references = []
-    for image in prepared_references:
-        references.append(
-            {
-                "kind": "image",
-                "latent_h": image.shape[1] // 16,
-                "latent_w": image.shape[2] // 16,
-                "latent": vae.encode(image),
-            }
-        )
-    metadata = {
-        "minimax_keyframes": keyframes,
-        "minimax_frame_count": frame_count,
-    }
-    if references:
-        metadata["minimax_refs"] = references
-    conditioning = node_helpers.conditioning_set_values(conditioning, metadata)
-    output_model = patch_minimax_h3_combined_model(model) if references else model
-    return output_model, conditioning, latent
 
 
 def execute_advanced_visual_consensus(
