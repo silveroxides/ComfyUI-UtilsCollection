@@ -13,6 +13,7 @@ sys.modules.setdefault(PACKAGE_NAME, package)
 
 from utils_collection_h3_guide_test.minimax_h3_guide_helpers import (
     LAYOUT_KEY,
+    assemble_conditioning_sections,
     build_layout,
     layout_from_token_boundary,
     splice_conditioning,
@@ -29,6 +30,25 @@ def _entry(values, boundary=None, tags=None, **metadata):
             "version": 1, "sequence_length": tensor.shape[1], "prompt_start": boundary
         }
     return [tensor, metadata]
+
+
+def test_assemble_sections_keeps_prompt_separate_and_rebuilds_layout():
+    image = [_entry([10, 11], tags=[0, 0], clip_start_percent=0.0, clip_end_percent=1.0)]
+    video = [_entry([20], tags=[0], clip_start_percent=0.0, clip_end_percent=1.0)]
+    prompt = [_entry([30, 31], tags=[1, 1], clip_start_percent=0.0, clip_end_percent=1.0, pooled_output=torch.tensor([1.0]))]
+    result = assemble_conditioning_sections([image, video], prompt)[0]
+    assert result[0].flatten().tolist() == [10, 11, 20, 30, 31]
+    assert result[1]["minimax_token_tags"].tolist() == [0, 0, 0, 1, 1]
+    assert result[1][LAYOUT_KEY] == {"version": 1, "sequence_length": 5, "prompt_start": 3}
+    assert result[1]["pooled_output"].tolist() == [1.0]
+
+
+def test_assemble_media_only_and_schedule_boundaries():
+    first = [_entry([10, 11], tags=[0, 0], clip_start_percent=0.0)]
+    result = assemble_conditioning_sections([first])[0]
+    assert result[1][LAYOUT_KEY]["prompt_start"] == 2
+    with pytest.raises(ValueError, match="schedule boundaries"):
+        assemble_conditioning_sections([first], [_entry([20], clip_start_percent=0.5)])
 
 
 @pytest.mark.parametrize(

@@ -387,6 +387,108 @@ class _RecordingMiniMaxVAE:
         return torch.full((1, 4, 1, 1), float(image.mean()))
 
 
+@pytest.mark.parametrize("mode", ["all", "images_only", "video_only"])
+def test_h3_decoupled_prompt_and_media_have_independent_cache_keys(mode):
+    clip = _MiniMaxH3TestClip()
+    images = {"reference_image_1": torch.full((1, 32, 32, 3), 0.25)}
+    video = torch.arange(48, dtype=torch.float32).reshape(48, 1, 1, 1).expand(-1, 32, 32, 3).clone() / 48
+
+    def execute(prompt):
+        return encoder_helpers.execute_advanced_minimax_h3_image_to_video(
+            clip, None, prompt, 64, 32, 56, reference_images=images, video=video,
+            ref_image_size="none", vlm_resolution=0, vlm_video_resolution=0, enable_caching=mode,
+        )[0]
+
+    first = execute("first")
+    initial_calls = len(clip.encoded_tokens)
+    second = execute("second")
+    new_calls = clip.encoded_tokens[initial_calls:]
+    visuals = [entry[0] for tokens in new_calls for entry in tokens["qwen3vl_32b"][0] if encoder_helpers.is_image_token(entry)]
+    assert len(visuals) == {"all": 0, "images_only": 2, "video_only": 1}[mode]
+    for tokens in clip.encoded_tokens:
+        row = tokens["qwen3vl_32b"][0]
+        if any(encoder_helpers.is_image_token(entry) for entry in row):
+            assert not any(isinstance(entry[0], str) for entry in row)
+    boundary = second[0][1][encoder_helpers.LAYOUT_KEY]["prompt_start"]
+    torch.testing.assert_close(first[0][0][:, :boundary], second[0][0][:, :boundary])
+    if mode == "all":
+        initial_calls = len(clip.encoded_tokens)
+        images["reference_image_1"].add_(0.1)
+        execute("second")
+        assert len(clip.encoded_tokens) == initial_calls + 1
+        assert not clip.encoded_tokens[-1]["qwen3vl_32b"][0][1][0].get("minimax_video_block", False)
+        initial_calls = len(clip.encoded_tokens)
+        video[0].add_(0.1)
+        execute("second")
+        assert len(clip.encoded_tokens) == initial_calls + 1
+        assert clip.encoded_tokens[-1]["qwen3vl_32b"][0][1][0]["minimax_video_block"]
+
+
+@pytest.mark.parametrize("temporal", [False, True])
+def test_h3_decoupled_fusion_caches_final_output_before_encoding_sources(temporal, monkeypatch):
+    def unexpected_joint_temporal(*args, **kwargs):
+        pytest.fail("Cached temporal execution entered the joint temporal pipeline")
+    monkeypatch.setattr(encoder_helpers, "encode_temporal_conditioning", unexpected_joint_temporal)
+    clip = _MiniMaxH3TestClip()
+    source = torch.full((25 if temporal else 1, 32, 32, 3), 0.25)
+    fusion_image = torch.full((1, 32, 32, 3), 0.75)
+    kwargs = dict(ref_image_size="none", vlm_resolution=0, vlm_video_resolution=0, enable_caching="all")
+    if temporal:
+        kwargs.update(video=source, temporal_fusion=True, media_config=encoder_helpers.build_minimax_h3_media_config(
+            None, video_latent_mode="off", temporal_density=3,
+        ))
+    else:
+        kwargs.update(reference_images={"reference_image_1": source}, fusion_images={"fusion_image_1": fusion_image},
+                      visual_fusion_config={"visual_fusion_method": "spatial-checkerboard", "visual_block_size": 2})
+    def execute(prompt):
+        return encoder_helpers.execute_advanced_minimax_h3_image_to_video(clip, None, prompt, 64, 32, 39, **kwargs)
+    execute("first")
+    count = len(clip.encoded_tokens)
+    execute("second")
+    assert len(clip.encoded_tokens) == count + 1
+    count = len(clip.encoded_tokens)
+    (source if temporal else fusion_image)[0].add_(0.05)
+    execute("second")
+    assert len(clip.encoded_tokens) > count
+
+
+@pytest.mark.parametrize("variant", ["disabled", "token", "temporal_token"])
+def test_h3_joint_paths_bypass_section_pipeline_and_disk(variant, monkeypatch, tmp_path):
+    monkeypatch.setattr(encoder_helpers, "_minimax_h3_decoupled_conditioning",
+                        lambda *args, **kwargs: pytest.fail("Joint execution entered decoupled pipeline"))
+    encoder_helpers.execute_advanced_minimax_h3_image_to_video(
+        _MiniMaxH3TestClip(), None, "subject", 64, 32, 5,
+        first_frame=torch.ones(1, 32, 32, 3), ref_image_size="none", vlm_resolution=0,
+        enable_caching="disabled" if variant == "disabled" else "all",
+        token_fusion=variant == "token", temporal_token_fusion=variant == "temporal_token",
+    )
+    assert not list(tmp_path.rglob("*.safetensors"))
+
+
+def test_h3_cached_fusion_export_runs_on_hits_without_qwen(monkeypatch):
+    exported = []
+    def raw_blocks(clip, tokens, device, cache=None):
+        assert cache is not None  # Export helper loads the model even on cache hits.
+        image = tokens["qwen3vl_32b"][0][1][0]["data"]
+        height, width = encoder_helpers.qwen3vl_visual_grid(image)
+        block = torch.zeros(1, height * width + 2, 4)
+        block[:, 1:-1] = image.mean()
+        return [{"block": block, "interior": block[:, 1:-1]}]
+    monkeypatch.setattr(encoder_helpers, "_visual_token_embedding_blocks", raw_blocks)
+    monkeypatch.setattr(encoder_helpers, "save_blended_visual_embeddings", lambda *args: exported.append(args))
+    clip = _MiniMaxH3TestClip()
+    config = {"visual_fusion_method": "spatial-checkerboard", "save_blended_embeds": True, "save_path": "first"}
+    kwargs = dict(reference_images={"reference_image_1": torch.ones(1, 32, 32, 3)},
+                  fusion_images={"fusion_image_1": torch.zeros(1, 32, 32, 3)},
+                  ref_image_size="none", vlm_resolution=0, enable_caching="all", visual_fusion_config=config)
+    encoder_helpers.execute_advanced_minimax_h3_image_to_video(clip, None, "subject", 64, 32, 5, **kwargs)
+    count = len(clip.encoded_tokens)
+    config["save_path"] = "second"
+    encoder_helpers.execute_advanced_minimax_h3_image_to_video(clip, None, "subject", 64, 32, 5, **kwargs)
+    assert len(clip.encoded_tokens) == count
+    assert len(exported) == 2
+
+
 def test_minimax_h3_prompt_tokens_preserve_inline_order_and_raw_syntax():
     clip = _MiniMaxH3TestClip()
     first = torch.tensor([1.0])
@@ -826,6 +928,7 @@ def test_advanced_minimax_h3_media_config_uses_default_two_fps_presentation(
             encoder_helpers.build_minimax_h3_media_config(None)
             if connect_media_config else None
         ),
+        enable_caching="disabled",
     )
     video_calls = [
         call for call in clip.tokenize_calls
@@ -870,6 +973,7 @@ def test_advanced_minimax_h3_video_fps_samples_source_and_keeps_latent():
         media_config=encoder_helpers.build_minimax_h3_media_config(
             None, video_fps=5, video_latent_mode="full video"
         ),
+        enable_caching="disabled",
     )
     video_call = next(
         call for call in clip.tokenize_calls
@@ -902,6 +1006,7 @@ def test_advanced_minimax_h3_explicit_full_video_is_independent_of_ref_image_siz
         media_config=encoder_helpers.build_minimax_h3_media_config(
             None, video_latent_mode="full video"
         ),
+        enable_caching="disabled",
     )
     assert conditioning[0][1]["minimax_refs"][0]["kind"] == "video"
 
@@ -921,6 +1026,7 @@ def test_advanced_minimax_h3_disconnected_config_preserves_none_video_fallback()
         video=torch.ones(22, 64, 64, 3),
         ref_image_size="none",
         media_config=None,
+        enable_caching="disabled",
     )
     assert "minimax_refs" not in conditioning[0][1]
     assert "minimax_keyframes" not in conditioning[0][1]
@@ -943,6 +1049,7 @@ def test_advanced_minimax_h3_video_latent_off_keeps_qwen_video_without_vae():
         media_config=encoder_helpers.build_minimax_h3_media_config(
             None, video_latent_mode="off"
         ),
+        enable_caching="disabled",
     )
     assert "minimax_refs" not in conditioning[0][1]
     assert any(
@@ -972,6 +1079,7 @@ def test_advanced_minimax_h3_even_video_keyframes_override_none():
             video_latent_mode="even keyframes",
             video_latent_keyframes=4,
         ),
+        enable_caching="disabled",
     )
     keyframes = conditioning[0][1]["minimax_keyframes"]
     assert [item["resolved_frame_index"] for item in keyframes] == [0, 17]
@@ -1024,6 +1132,7 @@ def test_minimax_h3_video_latent_modes_do_not_change_qwen_video_presentation():
             media_config=encoder_helpers.build_minimax_h3_media_config(
                 None, video_fps=5, video_latent_mode=mode
             ),
+            enable_caching="disabled",
         )
         video_item = next(
             call["minimax_ref_items"][0]
@@ -1071,6 +1180,7 @@ def test_advanced_minimax_h3_video_qwen_frames_use_vlm_resolution(
         media_config=media_config,
         vlm_resolution=256,
         vlm_video_resolution=512,
+        enable_caching="disabled",
     )
     assert calls == [((1, 64, 96, 3), 512), ((1, 64, 96, 3), 512)]
 
@@ -1104,6 +1214,7 @@ def test_advanced_minimax_h3_keeps_reference_pictures_and_video_together(
         reference_images={"reference_image_1": reference},
         video=video,
         media_config=media_config,
+        enable_caching="disabled",
     )
     entries = clip.encoded_tokens[-1]["qwen3vl_32b"][0]
     text = "".join(entry[0] for entry in entries if isinstance(entry[0], str))
@@ -1140,6 +1251,7 @@ def test_advanced_minimax_h3_default_media_keeps_all_pictures_with_video():
         video=torch.full((22, 64, 64, 3), 0.5),
         media_config=media_config,
         ref_image_size="none",
+        enable_caching="disabled",
     )
 
     entries = clip.encoded_tokens[-1]["qwen3vl_32b"][0]
@@ -1174,6 +1286,7 @@ def test_advanced_minimax_h3_even_video_keyframes_reject_native_image_latents():
             media_config=encoder_helpers.build_minimax_h3_media_config(
                 None, video_latent_mode="even keyframes"
             ),
+            enable_caching="disabled",
         )
 
 
@@ -1410,6 +1523,7 @@ def test_advanced_minimax_h3_reference_mode_preserves_flat_order_and_pixels():
             "reference_image_2": third,
         },
         visual_fusion_config=None,
+        enable_caching="disabled",
     ).args
 
     entries = clip.encoded_tokens[-1]["qwen3vl_32b"][0]
@@ -1475,6 +1589,7 @@ def test_advanced_minimax_h3_reference_fusion_pairs_flattened_inputs():
             "visual_fusion_method": "linear",
             "visual_encoder_path": "grid-deepstack",
         },
+        enable_caching="disabled",
     )
 
     encoded_images = [
@@ -1519,6 +1634,7 @@ def test_advanced_minimax_h3_reference_fusion_singleton_broadcasts():
             "visual_fusion_method": "linear",
             "visual_encoder_path": "grid-deepstack",
         },
+        enable_caching="disabled",
     )
 
     encoded_images = [
@@ -1560,6 +1676,7 @@ def test_advanced_minimax_h3_reference_fusion_second_socket_disables_broadcast()
             "visual_fusion_method": "linear",
             "visual_encoder_path": "grid-deepstack",
         },
+        enable_caching="disabled",
     )
 
     encoded_images = [
@@ -1595,6 +1712,7 @@ def test_advanced_minimax_h3_reference_fusion_off_ignores_fusion_inputs():
         reference_images={"reference_image_1": references},
         fusion_images={"fusion_image_1": fusion},
         visual_fusion_config=None,
+        enable_caching="disabled",
     )
 
     entries = clip.encoded_tokens[-1]["qwen3vl_32b"][0]
@@ -1634,6 +1752,7 @@ def test_advanced_minimax_h3_reference_save_exports_each_visual_span(monkeypatch
             "visual_fusion_method": "linear",
             "save_blended_embeds": True,
         },
+        enable_caching="disabled",
     )
 
     assert len(exported) == 1
@@ -1659,6 +1778,7 @@ def test_advanced_minimax_h3_none_keeps_frame_pictures_without_vae_keyframes():
         width=64,
         height=32,
         length=5,
+        enable_caching="disabled",
     ).args
 
     qwen_images = [
@@ -1695,6 +1815,7 @@ def test_advanced_minimax_h3_reference_none_is_ordered_vlm_only():
             "reference_image_1": torch.cat([first, second], dim=0),
             "reference_image_2": third,
         },
+        enable_caching="disabled",
     ).args
 
     native_call = clip.tokenize_calls[-1]
@@ -1734,6 +1855,7 @@ def test_advanced_minimax_h3_vlm_resolution_is_independent_for_every_role():
         height=32,
         length=5,
         fusion_images={"fusion_image_1": fusion},
+        enable_caching="disabled",
     )
     keyframe_images = [
         entry[0]["data"]
@@ -1758,6 +1880,7 @@ def test_advanced_minimax_h3_vlm_resolution_is_independent_for_every_role():
         height=32,
         length=5,
         reference_images={"reference_image_1": reference},
+        enable_caching="disabled",
     )
     reference_qwen = next(
         entry[0]["data"]
@@ -1785,7 +1908,7 @@ def test_advanced_minimax_h3_rejects_simultaneous_native_modes_before_encoding()
         with pytest.raises(ValueError, match=message):
             UC_AdvancedMiniMaxH3ImageToVideo.execute(
                 clip, vae, "subject", 64, 32, 5, **kwargs
-            )
+            , enable_caching="disabled")
         assert clip.encoded_tokens == []
         assert vae.images == []
 
@@ -1815,6 +1938,7 @@ def test_advanced_minimax_h3_frame_fusion_targets_matching_picture_slots():
             "visual_fusion_method": "linear",
             "visual_encoder_path": "grid-deepstack",
         },
+        enable_caching="disabled",
     )
 
     conditioning, latent = output.args
@@ -1868,6 +1992,7 @@ def test_advanced_minimax_h3_first_frame_fusion_uses_only_picture_one():
         length=5,
         fusion_images={"fusion_image_1": fusion},
         visual_fusion_config={"visual_fusion_method": "linear"},
+        enable_caching="disabled",
     ).args
 
     encoded_images = [
@@ -1914,6 +2039,7 @@ def test_advanced_minimax_h3_fusion_batches_stay_on_their_socket_slots():
             "fusion_image_2": last_fusion,
         },
         visual_fusion_config={"visual_fusion_method": "linear"},
+        enable_caching="disabled",
     )
 
     encoded_images = [
@@ -1954,6 +2080,7 @@ def test_advanced_minimax_h3_rejects_unpaired_frame_fusion_input():
                 "fusion_image_2": fusion,
             },
             visual_fusion_config={"visual_fusion_method": "linear"},
+            enable_caching="disabled",
         )
     assert clip.encoded_tokens == []
     assert vae.images == []
@@ -1981,6 +2108,7 @@ def test_advanced_minimax_h3_fusion_off_keeps_all_images_as_separate_pictures():
         length=5,
         fusion_images={"fusion_image_1": images},
         visual_fusion_config=None,
+        enable_caching="disabled",
     ).args
 
     entries = clip.encoded_tokens[-1]["qwen3vl_32b"][0]
@@ -2017,6 +2145,7 @@ def test_advanced_minimax_h3_keeps_placeholder_like_text_raw(monkeypatch):
         width=64,
         height=32,
         length=5,
+        enable_caching="disabled",
     )
 
     native_call = clip.tokenize_calls[-1]
@@ -2036,6 +2165,7 @@ def test_advanced_minimax_h3_validates_encoder():
             64,
             32,
             5,
+            enable_caching="disabled",
         )
 
 
@@ -2045,7 +2175,7 @@ def test_advanced_minimax_h3_accepts_text_only_and_last_only():
 
     conditioning, _latent = UC_AdvancedMiniMaxH3ImageToVideo.execute(
         clip, vae, "subject", 64, 32, 5, multiplier=2.0
-    ).args
+    , enable_caching="disabled").args
 
     assert vae.images == []
     assert torch.all(conditioning[0][0] == 2.0)
@@ -2062,6 +2192,7 @@ def test_advanced_minimax_h3_accepts_text_only_and_last_only():
         32,
         5,
         last_frame=last,
+        enable_caching="disabled",
     ).args
 
     assert [item["resolved_frame_index"] for item in conditioning[0][1]["minimax_keyframes"]] == [4]
@@ -2077,7 +2208,7 @@ def test_minimax_h3_layout_marks_actual_prompt_suffix(prompt, media):
         kwargs["first_frame"] = torch.zeros(1, 32, 64, 3)
     elif media == "video":
         kwargs["video"] = torch.zeros(5, 32, 64, 3)
-    conditioning, _ = UC_AdvancedMiniMaxH3ImageToVideo.execute(clip, None, prompt, 64, 32, 5, **kwargs).args
+    conditioning, _ = UC_AdvancedMiniMaxH3ImageToVideo.execute(clip, None, prompt, 64, 32, 5, **kwargs, enable_caching="disabled").args
     tensor, metadata = conditioning[0]
     layout = metadata["uc_minimax_h3_vlm_layout"]
     expected = 0 if media == "text" else tensor.shape[1] - int(bool(prompt))
@@ -2088,7 +2219,7 @@ def test_minimax_h3_layout_marks_actual_prompt_suffix(prompt, media):
 
 def test_minimax_h3_guide_integration_preserves_conditioning_and_native_timestamp():
     clip = _MiniMaxH3TestClip()
-    base, _ = UC_AdvancedMiniMaxH3ImageToVideo.execute(clip, None, "subject", 64, 32, 5, ref_image_size="none").args
+    base, _ = UC_AdvancedMiniMaxH3ImageToVideo.execute(clip, None, "subject", 64, 32, 5, ref_image_size="none", enable_caching="disabled").args
     result = encoder_nodes.UC_MiniMaxH3VLMGuide.execute(base, clip, torch.zeros(1, 32, 64, 3), 1.25, 0).args[0]
     assert torch.equal(result[0][0][:, -1:], base[0][0])
     assert base[0][1]["uc_minimax_h3_vlm_layout"]["prompt_start"] == 0
@@ -2106,7 +2237,7 @@ def test_minimax_h3_temporal_media_fields_are_additive_and_standard_ignores_them
     outputs = []
     for payload in (config, legacy):
         clip = _MiniMaxH3TestClip()
-        outputs.append(UC_AdvancedMiniMaxH3ImageToVideo.execute(clip, None, "subject", 64, 32, 5, first_frame=image, ref_image_size="none", vlm_resolution=0, media_config=payload).args[0])
+        outputs.append(UC_AdvancedMiniMaxH3ImageToVideo.execute(clip, None, "subject", 64, 32, 5, first_frame=image, ref_image_size="none", vlm_resolution=0, media_config=payload, enable_caching="disabled").args[0])
         assert len(clip.encoded_tokens) == 1
     assert torch.equal(outputs[0][0][0], outputs[1][0][0])
     assert outputs[0][0][1]["uc_minimax_h3_vlm_layout"] == outputs[1][0][1]["uc_minimax_h3_vlm_layout"]
@@ -2128,11 +2259,11 @@ def test_temporal_nodes_bypass_without_alternative_encoding(monkeypatch, node_na
     if bypass == "spatial_off":
         kwargs["visual_fusion_config"] = {"visual_fusion_method": "off"}
     clip = _MiniMaxH3TestClip()
-    result, latent = node.execute(clip, None, "subject", 64, 32, 25, **kwargs).args
+    result, latent = node.execute(clip, None, "subject", 64, 32, 25, **kwargs, enable_caching="disabled").args
     assert len(clip.encoded_tokens) == 1
     ordinary = dict(kwargs)
     ordinary.pop("text_blend_config", None)
-    expected, expected_latent = UC_AdvancedMiniMaxH3ImageToVideo.execute(_MiniMaxH3TestClip(), None, "subject", 64, 32, 25, **ordinary).args
+    expected, expected_latent = UC_AdvancedMiniMaxH3ImageToVideo.execute(_MiniMaxH3TestClip(), None, "subject", 64, 32, 25, **ordinary, enable_caching="disabled").args
     assert torch.equal(result[0][0], expected[0][0])
     assert result[0][1]["uc_minimax_h3_vlm_layout"] == expected[0][1]["uc_minimax_h3_vlm_layout"]
     assert latent.keys() == expected_latent.keys()
@@ -2157,6 +2288,7 @@ def test_temporal_post_node_fuses_only_video_interiors_and_keeps_budget():
         clip, None, "(subject:2)", 64, 32, 25, video=video, media_config=config,
         ref_image_size="none", vlm_video_resolution=0,
         text_blend_config={"blend_preset": "custom", "blend_method": "linear", "global_scale": 1.0},
+        enable_caching="disabled",
     ).args
     tensor, metadata = conditioning[0]
     assert len(clip.encoded_tokens) == 2

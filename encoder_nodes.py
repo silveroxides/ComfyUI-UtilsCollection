@@ -3391,7 +3391,7 @@ class UC_MiniMaxH3VLMGuide(io.ComfyNode):
                 io.Image.Input("image"),
                 io.Float.Input("timestamp", default=0.0, min=0.0, step=0.1, tooltip="Guide time in seconds."),
                 io.Int.Input("vlm_resolution", default=384, min=0, max=4096, step=32, tooltip="Equivalent-square Qwen target from 256 to 3584. Values outside that range preserve original resolution."),
-                io.Combo.Input("enable_caching", options=list(H3_CACHE_MODES), default="all", tooltip="Disk caching. Every enabled mode caches encoded conditioning sections. Images only/all cache image VAE outputs; video only leaves guide image VAE work uncached."),
+                io.Combo.Input("enable_caching", options=list(H3_CACHE_MODES), default="all", tooltip="Disk caching for this independently encoded image Guide. Images only/all cache its final guide section; video only does not."),
             ],
             outputs=[io.Conditioning.Output()],
         )
@@ -3516,7 +3516,7 @@ class UC_AdvancedMiniMaxH3ImageToVideo(io.ComfyNode):
                         "Values outside 256 to 3584 preserve the input resolution."
                     ),
                 ),
-                io.Combo.Input("enable_caching", options=list(H3_CACHE_MODES), default="all", tooltip="Disk caching. Every enabled mode caches post-Qwen encoded conditioning sections. Images caches image VAE outputs; video caches video VAE outputs; all also caches audio VAE outputs. Raw vision, DeepStack, token, and pre-Qwen fusion data are never written. Disabled bypasses cache reads and writes."),
+                io.Combo.Input("enable_caching", options=list(H3_CACHE_MODES), default="all", tooltip="Disk caching uses independently encoded final sections. Images only caches prompt text plus image/final regular-fusion sections; video only caches prompt text plus video/final regular-temporal sections; all caches both. Raw vision, DeepStack, tokens, and pre-Qwen fusion data are never written. Disabled keeps joint Qwen encoding."),
                 io.Autogrow.Input(
                     "reference_images",
                     template=reference_template,
@@ -3986,6 +3986,9 @@ class UC_AdvMiniMaxH3ImageToVideoTokenFusion(UC_AdvancedMiniMaxH3ImageToVideo):
         schema = super().define_schema()
         schema.node_id = "UC_AdvMiniMaxH3ImageToVideoTokenFusion"
         schema.display_name = "Adv MiniMax H3 Image to Video (TokenFusion)"
+        for value in schema.inputs:
+            if value.id == "enable_caching":
+                value.tooltip = "TokenFusion does not cache H3 conditioning or pre-Qwen tokens. Image/video modes cache their matching VAE outputs; all also caches audio VAE outputs. Disabled bypasses disk caching."
         return schema
 
     @classmethod
@@ -4057,6 +4060,9 @@ class UC_AdvMiniMaxH3ImageToVideoTemporalTokenFusion(UC_AdvMiniMaxH3ImageToVideo
         schema = super().define_schema()
         schema.node_id = "UC_AdvMiniMaxH3ImageToVideoTemporalTokenFusion"
         schema.display_name = "Adv MiniMax H3 Image to Video (Temporal TokenFusion)"
+        for value in schema.inputs:
+            if value.id == "enable_caching":
+                value.tooltip = "Temporal TokenFusion does not cache H3 conditioning or pre-Qwen tokens. Image/video modes cache their matching VAE outputs; all also caches audio VAE outputs. Disabled bypasses disk caching."
         schema.description = "Experimentally fuses corresponding video features and DeepStack before one Qwen encode per schedule, preserving the ordinary video token budget."
         return schema
 

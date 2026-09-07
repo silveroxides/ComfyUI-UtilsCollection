@@ -264,7 +264,7 @@ class H3EncoderCache:
         if enable_caching not in H3_CACHE_MODES:
             raise ValueError(f"Unsupported H3 caching mode: {enable_caching}")
         self.enable_caching = enable_caching
-        self.root = Path(folder_paths.get_temp_directory()) / "utilscollection_h3_encoder_cache" / "v1"
+        self.root = Path(folder_paths.get_temp_directory()) / "utilscollection_h3_encoder_cache" / "v2"
         self.hits = Counter()
         self.misses = Counter()
         self.timings = Counter()
@@ -304,7 +304,7 @@ class H3EncoderCache:
 
     def _read(self, path, stage, key, dependencies):
         with UnifiedSafetensorsLoader(str(path), low_memory=True) as loader:
-            expected = {"uc_h3_cache_version": "1", "uc_h3_cache_stage": stage, "uc_h3_cache_key": key}
+            expected = {"uc_h3_cache_version": "2", "uc_h3_cache_stage": stage, "uc_h3_cache_key": key}
             if loader.metadata() != expected:
                 raise ValueError("H3 cache header mismatch")
             properties_key = f"{key}.properties"
@@ -312,7 +312,7 @@ class H3EncoderCache:
                 raise ValueError("H3 cache properties must be uint8")
             properties = tensor_to_dict(loader.get_tensor(properties_key))
             loader.mark_processed(properties_key)
-            if (properties["version"], properties["stage"], properties["fingerprint"], properties["dependencies"]) != (1, stage, key, dependencies):
+            if (properties["version"], properties["stage"], properties["fingerprint"], properties["dependencies"]) != (2, stage, key, dependencies):
                 raise ValueError("H3 cache dependencies mismatch")
             specs = _tensor_specs(properties["result"])
             names = [spec["key"] for spec in specs]
@@ -332,14 +332,14 @@ class H3EncoderCache:
 
     def _write(self, path, stage, key, dependencies, result):
         tensors = {}
-        properties = {"version": 1, "stage": stage, "fingerprint": key,
+        properties = {"version": 2, "stage": stage, "fingerprint": key,
                       "dependencies": dependencies, "result": _pack(result, key, tensors)}
         properties_tensor = dict_to_tensor(properties)
         path.parent.mkdir(parents=True, exist_ok=True)
         temporary = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
         try:
             with IncrementalSafetensorsWriter(str(temporary), metadata={
-                "uc_h3_cache_version": "1", "uc_h3_cache_stage": stage, "uc_h3_cache_key": key,
+                "uc_h3_cache_version": "2", "uc_h3_cache_stage": stage, "uc_h3_cache_key": key,
             }) as writer:
                 writer.write(f"{key}.properties", properties_tensor)
                 for name, tensor in tensors.items():
@@ -356,11 +356,24 @@ class H3EncoderCache:
             self.enable_caching == "video_only" and media == "video"
         ) or (self.enable_caching == "images_only" and media == "image")
 
+    def allows_encoded_section(self, section_kind):
+        if self.enable_caching == "disabled" or section_kind == "joint":
+            return False
+        if section_kind == "text":
+            return True
+        if self.enable_caching == "all":
+            return section_kind in {
+                "image", "video", "regular_fusion", "regular_temporal", "guide",
+            }
+        if self.enable_caching == "images_only":
+            return section_kind in {"image", "regular_fusion", "guide"}
+        return section_kind in {"video", "regular_temporal"}
+
     def _allows_stage(self, stage, dependencies):
         if self.enable_caching == "disabled":
             return False
         if stage == "encoded_section":
-            return True
+            return self.allows_encoded_section(dependencies.get("section_kind", "joint"))
         return self._allows_media(dependencies["media"])
 
     def get_or_compute(self, stage, dependencies, compute, eligible=None):
@@ -371,7 +384,7 @@ class H3EncoderCache:
         start = time.perf_counter()
         try:
             description = describe_value(dependencies, self._describe_tensor)
-            key = hashlib.sha256(json.dumps([1, stage, description], sort_keys=True, separators=(",", ":"), ensure_ascii=True).encode("ascii")).hexdigest()
+            key = hashlib.sha256(json.dumps([2, stage, description], sort_keys=True, separators=(",", ":"), ensure_ascii=True).encode("ascii")).hexdigest()
         except (TypeError, ValueError) as error:
             self._warning(error)
             return compute()
@@ -414,15 +427,17 @@ class H3EncoderCache:
             self._clip_identity = clip_description(clip)
         return clip
 
-    def encode_scheduled(self, clip, tokens, visual_path, compute):
-        if self.enable_caching == "disabled":
+    def encode_scheduled(self, clip, tokens, visual_path, compute, *, section_kind="joint", section_id="joint", section_inputs=None):
+        if not self.allows_encoded_section(section_kind):
             return compute()
         outputs = None
         hooks = clip.patcher.forced_hooks
         schedules = hooks.get_hooks_for_clip_schedule() if hooks is not None and clip.use_clip_schedule else [None]
         dependencies = {
-            "tokens": tokens, "model": self._clip_identity or clip_description(clip), "visual_path": visual_path,
+            "section_kind": section_kind, "section_id": section_id, "tokens": tokens,
+            "model": self._clip_identity or clip_description(clip), "visual_path": visual_path,
             "output_device": str(comfy.model_management.intermediate_device()),
+            "section_inputs": section_inputs,
         }
 
         def compute_section(index):

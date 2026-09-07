@@ -99,6 +99,48 @@ def _validated_entry(entry, *, require_layout):
     return tensor, metadata, tags, layout["prompt_start"]
 
 
+def assemble_conditioning_sections(prefix_sections, prompt_conditioning=None):
+    """Join independently encoded H3 sections while retaining prompt position."""
+    sections = list(prefix_sections)
+    if prompt_conditioning is not None:
+        sections.append(prompt_conditioning)
+    if not sections:
+        raise ValueError("MiniMax H3 section assembly requires one encoded section.")
+    schedule_count = len(sections[0])
+    if schedule_count < 1 or any(len(section) != schedule_count for section in sections):
+        raise ValueError("MiniMax H3 encoded sections must have matching schedule counts.")
+    output = []
+    for index in range(schedule_count):
+        validated = [_validated_entry(section[index], require_layout=False) for section in sections]
+        tensor, metadata, tags, _ = validated[-1] if prompt_conditioning is not None else validated[0]
+        if any(value[0].shape[2] != tensor.shape[2] for value in validated):
+            raise ValueError("MiniMax H3 encoded sections have different feature dimensions.")
+        if any(
+            value[1].get("clip_start_percent") != metadata.get("clip_start_percent")
+            or value[1].get("clip_end_percent") != metadata.get("clip_end_percent")
+            for value in validated
+        ):
+            raise ValueError("MiniMax H3 encoded sections have different schedule boundaries.")
+        batch = tensor.shape[0]
+        if any(value[0].shape[0] not in (1, batch) for value in validated):
+            raise ValueError("MiniMax H3 encoded sections have incompatible batch sizes.")
+        tensors, tag_values = [], []
+        for section_tensor, _, section_tags, _ in validated:
+            current = section_tensor.to(device=tensor.device, dtype=tensor.dtype)
+            if current.shape[0] != batch:
+                current = current.expand(batch, -1, -1)
+            tensors.append(current)
+            tag_values.append(section_tags.to(device=tags.device))
+        assembled = torch.cat(tensors, dim=1)
+        assembled_tags = torch.cat(tag_values)
+        prompt_start = sum(value.shape[1] for value in tensors[:-1]) if prompt_conditioning is not None else assembled.shape[1]
+        updated = metadata.copy()
+        updated["minimax_token_tags"] = assembled_tags
+        updated[LAYOUT_KEY] = build_layout(assembled, assembled_tags, prompt_start)
+        output.append([assembled, updated])
+    return output
+
+
 def splice_conditioning(base_conditioning, guide_conditioning):
     """Insert one complete guide encoding before every compatible base prompt.
 

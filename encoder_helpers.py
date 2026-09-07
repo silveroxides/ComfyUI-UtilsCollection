@@ -27,10 +27,12 @@ import comfy.nested_tensor
 import comfy.utils
 from .helper_functions import resize_nchw
 from .image_helpers import VIDEO_FRAME_TIMESTAMP_FORMATS, format_video_timestamp, parse_video_timestamps
-from .minimax_h3_guide_helpers import LAYOUT_KEY, build_layout, splice_conditioning
+from .minimax_h3_guide_helpers import (
+    LAYOUT_KEY, assemble_conditioning_sections, build_layout, splice_conditioning,
+)
 from .minimax_h3_cache_helpers import H3EncoderCache, spatial_cache_settings, temporal_cache_settings
 from .minimax_h3_temporal_helpers import (
-    encode_temporal_conditioning, fuse_temporal_block, minimax_h3_temporal_frame_pairs,
+    encode_temporal_conditioning, encode_temporal_section, fuse_temporal_block, minimax_h3_temporal_frame_pairs,
 )
 
 from comfy.ldm.flux.math import apply_rope
@@ -3324,8 +3326,127 @@ def execute_minimax_h3_vlm_guide(conditioning, clip, image, timestamp, vlm_resol
     prepared = prepare_vlm_image(image, vlm_resolution)
     entries = _minimax_h3_text_entries(clip, f"<{timestamp:.1f} seconds>")
     entries += _minimax_h3_visual_token_entries(clip, prepared)
-    guide = _encode_scheduled_with_visual_path(clip, {"qwen3vl_32b": [entries]}, "grid-deepstack", cache=cache)
+    guide = _encode_minimax_h3_section(
+        clip, {"qwen3vl_32b": [entries]}, "grid-deepstack", cache=cache,
+        section_kind="guide", section_id="guide",
+    )
     return splice_conditioning(conditioning, guide)
+
+
+def _encode_minimax_h3_section(clip, tokens, visual_path, cache, *, section_kind, section_id):
+    return cache.encode_scheduled(
+        clip, tokens, visual_path, lambda: _encode_scheduled_with_visual_path(clip, tokens, visual_path),
+        section_kind=section_kind, section_id=section_id,
+    )
+
+
+def _minimax_h3_fused_section(clip, tokens, images, config, visual_path, cache):
+    """Cache a final spatially fused Picture, excluding prompt and other Pictures."""
+    source_tokens = [tokens]
+    source_tokens.extend({"qwen3vl_32b": [_minimax_h3_visual_token_entries(clip, image)]} for image in images)
+    fusion_config = {key: value for key, value in config.items() if key not in ("save_blended_embeds", "save_path")}
+
+    def compute():
+        encoded = [_encode_scheduled_with_visual_path(clip, source, visual_path) for source in source_tokens]
+        if any(len(value) != len(encoded[0]) for value in encoded):
+            raise ValueError("MiniMax H3 fusion sources have different schedule counts.")
+        result = []
+        for schedule in range(len(encoded[0])):
+            branches = []
+            for source, conditioning in zip(source_tokens, encoded):
+                tensor, metadata = conditioning[schedule]
+                if any(metadata.get(key) != encoded[0][schedule][1].get(key) for key in ("clip_start_percent", "clip_end_percent")):
+                    raise ValueError("MiniMax H3 fusion sources have different schedule boundaries.")
+                visual_range = find_visual_token_range(
+                    source, tensor, legacy_krea_spatial=visual_path == "legacy-flat",
+                    minimax_token_tags=metadata.get("minimax_token_tags"), minimax_visual_index=0,
+                )
+                data = next(entry[0]["data"] for entry in source["qwen3vl_32b"][0] if is_image_token(entry))
+                branches.append({
+                    "tensor": tensor, "pooled": metadata.get("pooled_output"), "metadata": metadata,
+                    "tokens": source, "visual_range": visual_range, "raw_visual_index": 0,
+                    "grid": visual_fusion_grid(data, visual_range[1] - visual_range[0], visual_path == "legacy-flat"),
+                })
+            result.extend(_spatially_fuse_visual_consensus_sources(branches, fusion_config, clip, allow_export=False))
+        return result
+
+    result = cache.encode_scheduled(
+        clip, tokens, visual_path, compute, section_kind="regular_fusion", section_id="picture",
+        section_inputs={"sources": source_tokens, "settings": spatial_cache_settings(fusion_config)},
+    )
+    if config.get("save_blended_embeds", False):
+        device = comfy.model_management.get_torch_device()
+        blocks = [_visual_token_embedding_blocks(clip, source, device, cache=cache)[0] for source in source_tokens]
+        reference = blocks[0]["block"]
+        if any(block["block"].shape != reference.shape or not torch.equal(block["block"][:, :1], reference[:, :1])
+               or not torch.equal(block["block"][:, -1:], reference[:, -1:]) for block in blocks[1:]):
+            raise ValueError("Visual embedding export requires matching Qwen vision block boundaries.")
+        grids = [visual_fusion_grid(
+            next(entry[0]["data"] for entry in source["qwen3vl_32b"][0] if is_image_token(entry)),
+            block["interior"].shape[1], visual_path == "legacy-flat",
+        ) for source, block in zip(source_tokens, blocks)]
+        save_blended_visual_embeddings([
+            torch.cat((reference[batch, :1], fuse_visual_token_sources(
+                [block["interior"][batch] for block in blocks], fusion_config, device, {},
+                blocks[0]["interior"].shape[1], grids,
+            ), reference[batch, -1:]), dim=0).detach()
+            for batch in range(reference.shape[0])
+        ], config, "qwen3vl_32b")
+    return result
+
+
+def _minimax_h3_decoupled_conditioning(
+    clip, tokens, prompt_entries, prompt_text, cache, *, image_encode=None, video_encode=None,
+):
+    """Encode presentation prefix sections independently from the prompt suffix."""
+    entries = _token_entries(tokens, "qwen3vl_32b")
+    if len(prompt_entries) > len(entries):
+        raise ValueError("MiniMax H3 prompt entries exceed presentation entries.")
+    prefix_end = len(entries) - len(prompt_entries)
+    prefix = entries[:prefix_end]
+    prompt = entries[prefix_end:]
+    chunks = []
+    cursor = 0
+    image_index = video_index = 0
+    for index, entry in enumerate(prefix):
+        if not is_image_token(entry):
+            continue
+        if index < 1 or index + 1 >= len(prefix) or prefix[index - 1][0] != 151652 or prefix[index + 1][0] != 151653:
+            raise ValueError("MiniMax H3 visual section requires native vision wrapper tokens.")
+        if cursor < index - 1:
+            chunks.append(("text", prefix[cursor:index - 1], None))
+        kind = "video" if entry[0].get("minimax_video_block", False) else "image"
+        ordinal = video_index if kind == "video" else image_index
+        chunks.append((kind, prefix[index - 1:index + 2], ordinal))
+        video_index += kind == "video"
+        image_index += kind == "image"
+        cursor = index + 2
+    if cursor < len(prefix):
+        chunks.append(("text", prefix[cursor:], None))
+    sections = []
+    for kind, section_entries, ordinal in chunks:
+        section_tokens = {"qwen3vl_32b": [section_entries]}
+        callback = video_encode if kind == "video" else image_encode if kind == "image" else None
+        if callback is not None:
+            sections.append(callback(section_tokens, ordinal))
+            continue
+        sections.append(_encode_minimax_h3_section(
+            clip, section_tokens, "grid-deepstack", cache=cache,
+            section_kind=kind, section_id="media_prefix" if kind == "text" else kind,
+        ))
+    prompt_conditioning = None
+    if prompt:
+        prompt_conditioning = cache.encode_scheduled(
+            clip, {"qwen3vl_32b": [prompt]}, "grid-deepstack",
+            lambda: encode_embedding_classical_scaled_bias(
+                clip, prompt_text,
+                tokenize_callback=lambda value: {"qwen3vl_32b": [_minimax_h3_text_entries(clip, value)]},
+            ),
+            section_kind="text", section_id="prompt", section_inputs={"weighted_prompt": prompt_text},
+        )
+    if not sections and prompt_conditioning is None:
+        return _encode_scheduled_with_visual_path(clip, tokens, "grid-deepstack")
+    return assemble_conditioning_sections(sections, prompt_conditioning)
 
 
 def execute_advanced_minimax_h3_image_to_video(
@@ -3584,6 +3705,7 @@ def execute_advanced_minimax_h3_image_to_video(
         return clip.tokenize(text, images=images)
 
     temporal_encode = None
+    temporal_section_encode = None
     if temporal_fusion and video_frames is not None:
         temporal_config = media_config or {}
         density = temporal_config.get("temporal_density", 1)
@@ -3633,7 +3755,67 @@ def execute_advanced_minimax_h3_image_to_video(
                     cache=cache,
                 )
 
-    if fusion_active and (keyframe_mode or native_reference_mode):
+            def temporal_section_encode(tokens, ordinal):
+                pairs = frame_pairs[ordinal]
+                prepared_pairs = [prepare_minimax_h3_vlm_video_frames(
+                    video_frames[list(pair)], vlm_video_resolution,
+                ) for pair in pairs]
+                def compute():
+                    return encode_temporal_section(
+                        tokens, prepared_pairs,
+                        fusion_callback=lambda sources, grids, deepstack: fuse_temporal_block(
+                            sources, method, settings, config, grids,
+                            spatial_fuse_callback=fuse_visual_token_sources,
+                            position_score_callback=_position_biased_similarity_scores,
+                        ),
+                        encode_tokens_callback=lambda value: _encode_scheduled_with_visual_path(clip, value, "grid-deepstack"),
+                        video_grid_callback=lambda data, size: visual_fusion_grid(data, size, False),
+                        token_spans_callback=build_token_to_conditioning_map,
+                    )
+                return cache.encode_scheduled(
+                    clip, tokens, "grid-deepstack", compute,
+                    section_kind="regular_temporal", section_id="video",
+                    section_inputs={"pairs": prepared_pairs, "method": method,
+                                    "settings": temporal_cache_settings(method, settings, config)},
+                )
+
+    decoupled = cache.enable_caching != "disabled" and not token_fusion and not temporal_token_fusion
+    if decoupled:
+        fusion_targets = {}
+        presentation_images = list(base_vlm_images)
+        if fusion_active:
+            if keyframe_mode:
+                if any(number < 1 or number > len(base_vlm_images) for number, _ in fusion_socket_batches):
+                    raise ValueError("MiniMax H3 frame fusion has a fusion image without a matching picture slot.")
+                fusion_targets = {number - 1: [prepare_vlm_image(image, vlm_resolution) for image in images]
+                                  for number, images in fusion_socket_batches}
+            elif native_reference_mode:
+                if len(fusion_socket_batches) == 1 and fusion_socket_batches[0][0] == 1 and len(fusion_socket_batches[0][1]) == 1:
+                    fusion_targets = {index: fusion_vlm_images for index in range(len(base_vlm_images))}
+                else:
+                    fusion_targets = {index: [image] for index, image in enumerate(fusion_vlm_images[:len(base_vlm_images)])}
+            else:
+                presentation_images.append(fusion_vlm_images[0])
+                fusion_targets[len(presentation_images) - 1] = fusion_vlm_images[1:]
+        else:
+            presentation_images.extend(fusion_vlm_images)
+
+        def image_section_encode(tokens, ordinal):
+            if ordinal in fusion_targets:
+                return _minimax_h3_fused_section(clip, tokens, fusion_targets[ordinal], config, visual_encoder_path, cache)
+            result = _encode_minimax_h3_section(
+                clip, tokens, "grid-deepstack", cache=cache, section_kind="image", section_id="picture",
+            )
+            if config.get("save_blended_embeds", False):
+                save_source_visual_embeddings(clip, tokens, config, visual_embedding_key(clip, tokens),
+                                              comfy.model_management.get_torch_device(), [0], cache)
+            return result
+
+        conditioning = _minimax_h3_decoupled_conditioning(
+            clip, tokenize_presentation(actual_prompt, presentation_images), prompt_entries, prompt, cache,
+            image_encode=image_section_encode, video_encode=temporal_section_encode,
+        )
+    elif fusion_active and (keyframe_mode or native_reference_mode):
         if keyframe_mode:
             if any(
                 socket_number < 1 or socket_number > len(base_vlm_images)

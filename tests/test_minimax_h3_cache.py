@@ -77,15 +77,15 @@ def test_each_scheduled_qwen_result_has_its_own_cache_file():
 
     with cache_module.H3EncoderCache() as cache:
         cache._clip_identity = {"model": "test"}
-        first = cache.encode_scheduled(clip, {"qwen3vl_32b": [[(1, 1.0)]]}, "grid-deepstack", compute)
-        second = cache.encode_scheduled(clip, {"qwen3vl_32b": [[(1, 1.0)]]}, "grid-deepstack", compute)
+        first = cache.encode_scheduled(clip, {"qwen3vl_32b": [[(1, 1.0)]]}, "grid-deepstack", compute, section_kind="text", section_id="prompt")
+        second = cache.encode_scheduled(clip, {"qwen3vl_32b": [[(1, 1.0)]]}, "grid-deepstack", compute, section_kind="text", section_id="prompt")
         assert len(calls) == 1
         assert len(list((cache.root / "encoded_section").glob("*.safetensors"))) == 2
         torch.testing.assert_close(first[0][0], second[0][0])
         torch.testing.assert_close(first[1][0], second[1][0])
 
 
-def test_preprocessed_qwen_result_round_trips_without_deepstack():
+def test_preprocessed_qwen_result_is_not_persisted():
     embeds = torch.arange(12, dtype=torch.float32).reshape(1, 3, 4)
     info = [{"type": "image", "index": 0, "size": 2, "extra": {"deepstack": [torch.ones(2, 4)]}}]
     model = types.SimpleNamespace(layer="last", layer_idx=None, enable_attention_masks=False,
@@ -100,11 +100,27 @@ def test_preprocessed_qwen_result_round_trips_without_deepstack():
         )
         second = cache.encode_preprocessed(
             model, embeds, torch.ones((1, 3), dtype=torch.long), [3], info, "grid-deepstack", None,
-            lambda: pytest.fail("cached encoded section was not reused"),
+            lambda: (calls.append(True) or (embeds, {"minimax_token_tags": torch.zeros(3, dtype=torch.long)})),
         )
-        assert len(calls) == 1
+        assert len(calls) == 2
         torch.testing.assert_close(first[0], second[0])
-        assert len(list((cache.root / "encoded_section").glob("*.safetensors"))) == 1
+        assert not (cache.root / "encoded_section").exists()
+
+
+@pytest.mark.parametrize(
+    ("mode", "kind", "cached"),
+    [
+        ("disabled", "text", False), ("images_only", "text", True),
+        ("video_only", "text", True), ("images_only", "image", True),
+        ("video_only", "image", False), ("video_only", "video", True),
+        ("images_only", "video", False), ("images_only", "regular_fusion", True),
+        ("video_only", "regular_temporal", True), ("video_only", "guide", False),
+        ("images_only", "guide", True), ("all", "video", True), ("all", "joint", False),
+    ],
+)
+def test_encoded_section_selection_follows_mode(mode, kind, cached):
+    with cache_module.H3EncoderCache(mode) as cache:
+        assert cache.allows_encoded_section(kind) is cached
 
 
 @pytest.mark.parametrize(
