@@ -557,7 +557,7 @@ def test_schema_exposes_stable_cache_controls():
     inputs = {value.id: value for value in schema.inputs}
 
     assert schema.node_id == "UC_MiniMaxH3Cache"
-    assert schema.is_experimental
+    assert not schema.is_experimental
     assert [value.id for value in schema.inputs] == [
         "model",
         "reuse_threshold",

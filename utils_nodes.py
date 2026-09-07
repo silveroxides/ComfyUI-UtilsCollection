@@ -131,7 +131,6 @@ class UC_SwitchInverseNode(SwitchNode):
             node_id="UC_SwitchInverseNode",
             display_name="Switch (Inverse)",
             category="logic",
-            is_experimental=True,
             inputs=[
                 io.Boolean.Input("switch"),
                 io.MatchType.Input("on_true", template=template, lazy=True),
@@ -151,7 +150,6 @@ class UC_SoftSwitchInverseNode(SoftSwitchNode):
             node_id="UC_SoftSwitchInverseNode",
             display_name="Soft Switch (Inverse)",
             category="logic",
-            is_experimental=True,
             inputs=[
                 io.Boolean.Input("switch"),
                 io.MatchType.Input("on_true", template=template, lazy=True, optional=True),

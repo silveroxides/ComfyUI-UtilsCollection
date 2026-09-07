@@ -73,7 +73,6 @@ class UC_MiniMaxH3SlaAttentionConfig(io.ComfyNode):
                 io.Boolean.Input("stabilize_routing", default=False, tooltip="Bias near-cutoff routing toward the prior sampling step to reduce unstable motion detail."),
             ],
             outputs=[MiniMaxH3SlaAttentionConfigType.Output("minimax_h3_sla_config", display_name="SLA Config", tooltip="Connect to Unified Attention Patcher when using Sparse / MiniMax H3 SLA.")],
-            is_experimental=True,
         )
 
     @classmethod
@@ -380,7 +379,6 @@ class UC_MiniMaxH3Cache(io.ComfyNode):
                 ),
             ],
             outputs=[io.Model.Output("model", display_name="model")],
-            is_experimental=True,
         )
 
     @classmethod
