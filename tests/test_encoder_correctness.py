@@ -2191,11 +2191,15 @@ def test_temporal_pre_node_uses_actual_preprocessed_encode_and_deepstack():
 
 
 def test_temporal_node_schemas_keep_standard_sockets_except_picture_fusion():
-    standard = encoder_nodes.UC_AdvancedMiniMaxH3ImageToVideo.define_schema()
+    standard = encoder_nodes.UC_AdvancedMiniMaxH3ImageToVideo.GET_SCHEMA()
+    assert not standard.is_experimental
+    assert not encoder_nodes.UC_AdvancedMiniMaxH3ImageToVideo.EXPERIMENTAL
+    assert not encoder_nodes.UC_AdvMiniMaxH3ImageToVideoTokenFusion.GET_SCHEMA().is_experimental
     expected = [value.id for value in standard.inputs if value.id != "fusion_images"] + ["text_blend_config"]
     for node in (encoder_nodes.UC_AdvMiniMaxH3ImageToVideoTemporalFusion, encoder_nodes.UC_AdvMiniMaxH3ImageToVideoTemporalTokenFusion):
-        schema = node.define_schema()
+        schema = node.GET_SCHEMA()
         assert schema.is_experimental
+        assert node.EXPERIMENTAL
         assert [value.id for value in schema.inputs] == expected
         assert [value.io_type for value in schema.outputs] == ["CONDITIONING", "LATENT"]
         assert "model" not in expected
@@ -2806,7 +2810,21 @@ def test_fusion_placeholder_accepts_image_one_alias_and_logs_fallback(caplog):
 
 def test_canonical_and_compatibility_schema_flags():
     assert UC_AttentionBiasTextEncode.define_schema().is_experimental
-    assert UC_AdvancedVisualConditioningEncode.define_schema().is_experimental
+    for name in (
+        "UC_AdvancedVisualConditioningEncode",
+        "UC_AdvancedVisualConditioningEncodeTokenFusion",
+        "UC_MiniMaxH3MediaConfig",
+        "UC_AdvancedVisConEncoder",
+        "UC_AdvancedVisConEncoderTokenFusion",
+        "UC_VisualConsensusConfiguration",
+        "UC_TextConsensusBlendConfig",
+        "UC_ConditioningConsensusBlend",
+    ):
+        node = getattr(encoder_nodes, name)
+        assert not node.GET_SCHEMA().is_experimental, name
+        assert not node.EXPERIMENTAL, name
+    assert encoder_nodes.UC_AdvancedConsensusConfiguration.GET_SCHEMA().is_experimental
+    assert encoder_nodes.UC_AdvancedConsensusConfiguration.EXPERIMENTAL
     assert not UC_AdvancedVisualConditioningEncode.define_schema().is_deprecated
     assert TextEncodeKrea2SystemEditScaledAdv.define_schema().is_deprecated
     assert UC_Krea2TokenAttentionWeight.define_schema().is_experimental

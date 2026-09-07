@@ -245,7 +245,6 @@ class UC_TextConsensusBlendConfig(io.ComfyNode):
             outputs=[
                 TextBlendConfig.Output("text_blend_config", display_name="Blend Config")
             ],
-            is_experimental=True,
         )
 
     @classmethod
@@ -354,6 +353,7 @@ class UC_VisualFusionConfig(io.ComfyNode):
 
 
 class UC_AdvancedConsensusConfiguration(UC_TextConsensusBlendConfig):
+    _EXPERIMENTAL = None
     # Core fills these together; this subclass has a different output socket.
     _RETURN_TYPES = None
     _RETURN_NAMES = None
@@ -364,6 +364,7 @@ class UC_AdvancedConsensusConfiguration(UC_TextConsensusBlendConfig):
     def define_schema(cls) -> io.Schema:
         schema = super().define_schema()
         schema.node_id = "UC_AdvancedConsensusConfiguration"
+        schema.is_experimental = True
         schema.display_name = "Advanced Consensus Configuration"
         schema.inputs.append(
             io.Int.Input(
@@ -456,7 +457,6 @@ class UC_VisualConsensusConfiguration(io.ComfyNode):
             outputs=[
                 VisualConsensusConfig.Output("visual_consensus_config", display_name="Visual Consensus Config"),
             ],
-            is_experimental=True,
         )
 
     @classmethod
@@ -492,7 +492,6 @@ class UC_ConditioningConsensusBlend(io.ComfyNode):
             outputs=[
                 io.Conditioning.Output("conditioning")
             ],
-            is_experimental=True,
         )
 
     @classmethod
@@ -1992,7 +1991,6 @@ class UC_AdvancedVisualConditioningEncode(io.ComfyNode):
             node_id="UC_AdvancedVisualConditioningEncode",
             display_name="Advanced Visual Conditioning Encode",
             category="advanced/conditioning",
-            is_experimental=True,
             inputs=[
                 # --- Primary Inputs ---
                 io.Clip.Input("clip", tooltip="CLIP/T5 dual text encoder reference."),
@@ -3329,7 +3327,7 @@ class UC_MiniMaxH3MediaConfig(io.ComfyNode):
     def define_schema(cls):
         return io.Schema(
             node_id="UC_MiniMaxH3MediaConfig", display_name="MiniMax H3 Media Configurator",
-            category="advanced/conditioning", is_input_list=True, is_experimental=True,
+            category="advanced/conditioning", is_input_list=True,
             description="Sets Picture timestamp syntax, Qwen Video sampling, and Video motion-guidance memory use for the Advanced MiniMax H3 nodes.",
             inputs=[
                 io.AnyType.Input("timestamps", optional=True, tooltip="Optional sequential timestamps for existing Picture slots. Leave disconnected to keep the default Core Picture presentation."),
@@ -3550,7 +3548,6 @@ class UC_AdvancedMiniMaxH3ImageToVideo(io.ComfyNode):
                 io.Conditioning.Output(display_name="positive"),
                 io.Latent.Output(),
             ],
-            is_experimental=True,
         )
 
     @classmethod
@@ -3661,7 +3658,6 @@ class UC_AdvancedVisConEncoder(io.ComfyNode):
                 ),
             ],
             outputs=[io.Conditioning.Output()],
-            is_experimental=True,
         )
 
     @classmethod
@@ -3777,7 +3773,6 @@ class _TokenFusionConditioningNode(io.ComfyNode):
         schema.node_id = cls.NODE_ID
         schema.display_name = cls.DISPLAY_NAME
         schema.is_deprecated = cls.DEPRECATED
-        schema.is_experimental = True
         return schema
 
     @classmethod
@@ -4010,12 +4005,14 @@ class UC_AdvMiniMaxH3ImageToVideoTokenFusion(UC_AdvancedMiniMaxH3ImageToVideo):
 
 
 class UC_AdvMiniMaxH3ImageToVideoTemporalFusion(UC_AdvancedMiniMaxH3ImageToVideo):
+    _EXPERIMENTAL = None
     TEMPORAL_TOKEN_FUSION = False
 
     @classmethod
     def define_schema(cls):
         schema = super().define_schema()
         schema.node_id = "UC_AdvMiniMaxH3ImageToVideoTemporalFusion"
+        schema.is_experimental = True
         schema.display_name = "Adv MiniMax H3 Image to Video (Temporal Fusion)"
         schema.description = "Experimentally fuses corresponding video visual blocks after separate Qwen encodes, preserving the ordinary video token budget."
         schema.inputs = [value for value in schema.inputs if value.id != "fusion_images"]
