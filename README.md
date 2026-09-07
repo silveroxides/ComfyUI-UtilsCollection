@@ -39,6 +39,8 @@ The list below uses the canonical node IDs. Deprecated compatibility aliases rem
 
 #### MiniMax H3 experiments
 
+The four H3 image-to-video encoders and VLM Guide expose `enable_caching`: `disabled`, `video_only`, `images_only`, or `all` (default). Every enabled mode caches post-Qwen encoded conditioning sections. Raw vision features, DeepStack, tokens, regular fusion, and pre-Qwen temporal-token fusion are never saved. Image/video modes select only their matching VAE outputs; `all` also includes audio VAE outputs. Entries use UnifiedEfficientLoader safetensors under ComfyUI's configured temp directory, which Core clears at startup and shutdown. Requested embedding exports still run on cache hits.
+
 The temporal encoders fuse offset video samples into the ordinary video token budget. Set temporal density and consensus/spatial method on `UC_MiniMaxH3MediaConfig`; density 1 preserves ordinary sampling. Consensus uses `UC_TextConsensusBlendConfig`, spatial fusion uses `UC_VisualFusionConfig`.
 
 `UC_MiniMaxH3VLMGuide` inserts an independently encoded timestamp/image block before the prompt in compatible H3 conditioning. Chained guides retain insertion order. This experiment does not re-encode the original prompt jointly with the guide.

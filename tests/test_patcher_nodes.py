@@ -1,3 +1,4 @@
+import copy
 import logging
 import pathlib
 import sys
@@ -16,6 +17,7 @@ package.__path__ = [str(CUSTOM_NODE_ROOT)]
 sys.modules.setdefault(PACKAGE_NAME, package)
 
 from utils_collection_patcher_test import patcher_helpers, patcher_nodes
+from utils_collection_patcher_test.minimax_h3_cache_helpers import H3EncoderCache, clip_description
 
 
 def test_unified_attention_schema_keeps_mode_settings_separate():
@@ -1245,7 +1247,7 @@ def test_minimax_h3_projected_tokenizer_uses_h3_key_and_video_blocks():
     assert all(entry["data"].shape[0] == 2 for entry in video_entries)
 
 
-def test_minimax_h3_projected_clip_is_clone_scoped_and_returns_tags(monkeypatch):
+def test_minimax_h3_projected_clip_is_clone_scoped_and_returns_tags(monkeypatch, tmp_path):
     class RawTokenizer:
         def tokenize_with_weights(self, text, **_kwargs):
             return [[(ord(character), 1.0) for character in text]]
@@ -1271,12 +1273,21 @@ def test_minimax_h3_projected_clip_is_clone_scoped_and_returns_tags(monkeypatch)
             self.qwen3vl_4b.transformer = Transformer()
 
     class FakePatcher:
-        def __init__(self):
+        def __init__(self, model):
+            self.model = model
             self.load_device = torch.device("cpu")
             self.object_patches = {}
 
         def add_object_patch(self, name, value):
             self.object_patches[name] = value
+
+        def get_model_object(self, name):
+            return self.object_patches.get(name, getattr(self.model.qwen3vl_4b.transformer, name.rsplit(".", 1)[-1]))
+
+        def clone(self):
+            cloned = copy.copy(self)
+            cloned.object_patches = self.object_patches.copy()
+            return cloned
 
     class FakeProjectionPatcher:
         load_device = torch.device("cpu")
@@ -1287,12 +1298,24 @@ def test_minimax_h3_projected_clip_is_clone_scoped_and_returns_tags(monkeypatch)
     class FakeClip:
         def __init__(self):
             self.cond_stage_model = Stage()
-            self.tokenizer = types.SimpleNamespace(qwen3vl_4b=RawTokenizer())
-            self.patcher = FakePatcher()
+            self.tokenizer = type("Tokenizers", (), {"qwen3vl_4b": RawTokenizer()})()
+            self.patcher = FakePatcher(self.cond_stage_model)
             self.layer_idx = None
+
+        def clone(self):
+            cloned = copy.copy(self)
+            cloned.patcher = self.patcher.clone()
+            return cloned
 
         def clip_layer(self, layer_idx):
             self.layer_idx = layer_idx
+
+        def add_hooks_to_dict(self, metadata):
+            pass
+
+        def encode_from_tokens_scheduled(self, tokens, **kwargs):
+            output = self.encode_from_tokens(tokens)
+            return [[output["cond"], {key: value for key, value in output.items() if key != "cond"}]]
 
         def encode_from_tokens(self, tokens, **_kwargs):
             assert list(tokens) == ["qwen3vl_4b"]
@@ -1332,6 +1355,19 @@ def test_minimax_h3_projected_clip_is_clone_scoped_and_returns_tags(monkeypatch)
     assert cloned.layer_idx == 7
     assert output["cond"].shape == (1, 3, 3)
     assert torch.equal(output["minimax_token_tags"], torch.tensor([0, 0, 0]))
+    identity = clip_description(projected)
+    assert identity == clip_description(projected.clone())
+    monkeypatch.setattr(patcher_helpers.folder_paths, "get_temp_directory", lambda: str(tmp_path))
+    for iteration in range(2):
+        with H3EncoderCache() as cache:
+            cached_clip = cache.prepare_clip(projected)
+            tokens = {"qwen3vl_32b": [[(1, 1.0)]]}
+            cached = cache.encode_scheduled(cached_clip, tokens, "grid-deepstack", lambda: cached_clip.encode_from_tokens_scheduled(tokens))
+            torch.testing.assert_close(cached[0][0], output["cond"], rtol=0, atol=0)
+            assert torch.equal(cached[0][1]["minimax_token_tags"], output["minimax_token_tags"])
+            assert cache.hits["qwen_scheduled"] == iteration
+    projected._projection_model.tap += 1
+    assert identity != clip_description(projected)
 
 
 def _ideogram4_directions():

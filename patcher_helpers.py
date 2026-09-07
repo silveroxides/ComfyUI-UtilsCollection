@@ -354,9 +354,10 @@ class MiniMaxH3ProjectedCLIP:
         owner_name = self._base.cond_stage_model.clip
         submodel = getattr(self._base.cond_stage_model, owner_name)
         transformer = submodel.transformer
+        prefix = f"{owner_name}.transformer"
         if original_methods is None:
-            original_preprocess = transformer.preprocess_embed
-            original_forward = transformer.forward
+            original_preprocess = self._base.patcher.get_model_object(f"{prefix}.preprocess_embed")
+            original_forward = self._base.patcher.get_model_object(f"{prefix}.forward")
         else:
             original_preprocess, original_forward = original_methods
         self._original_methods = (original_preprocess, original_forward)
@@ -380,15 +381,21 @@ class MiniMaxH3ProjectedCLIP:
                     )
             return original_forward(*args, **kwargs)
 
-        prefix = f"{owner_name}.transformer"
-        self._base.patcher.add_object_patch(
-            f"{prefix}.preprocess_embed",
-            types.MethodType(preprocess_embed, transformer),
-        )
-        self._base.patcher.add_object_patch(
-            f"{prefix}.forward",
-            types.MethodType(forward, transformer),
-        )
+        self._cache_owned_methods = {
+            f"{prefix}.preprocess_embed": types.MethodType(preprocess_embed, transformer),
+            f"{prefix}.forward": types.MethodType(forward, transformer),
+        }
+        for path, method in self._cache_owned_methods.items():
+            self._base.patcher.add_object_patch(path, method)
+
+    def h3_cache_identity(self):
+        return {
+            "base": self._base, "model": self._projection_model,
+            "patcher": self._projection_patcher, "name": self._projection_name,
+            "source": self._source_key, "tap": self._projection_model.tap,
+            "original_methods": self._original_methods,
+            "owned_methods": self._cache_owned_methods,
+        }
 
     def clone(self):
         return MiniMaxH3ProjectedCLIP(

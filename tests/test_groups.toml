@@ -1,3 +1,8 @@
+[groups.minimax_h3_cache]
+paths = ["minimax_h3_cache_helpers.py", "encoder_helpers.py", "encoder_nodes.py", "minimax_h3_temporal_helpers.py", "patcher_helpers.py"]
+python_tests = ["tests/test_minimax_h3_cache.py"]
+frontend_tests = []
+
 [groups.minimax_h3_guide]
 paths = ["minimax_h3_guide_helpers.py"]
 python_tests = ["tests/test_minimax_h3_guide.py"]

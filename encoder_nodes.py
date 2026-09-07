@@ -14,6 +14,7 @@ import folder_paths
 import node_helpers
 from comfy_api.latest import ComfyExtension, io
 from .helper_functions import get_token_count, get_token_count_scaled, resize_nchw
+from .minimax_h3_cache_helpers import H3_CACHE_MODES
 from .encoder_helpers import(
     encode_embedding_scaled_bias,
     is_image_token,
@@ -3390,13 +3391,14 @@ class UC_MiniMaxH3VLMGuide(io.ComfyNode):
                 io.Image.Input("image"),
                 io.Float.Input("timestamp", default=0.0, min=0.0, step=0.1, tooltip="Guide time in seconds."),
                 io.Int.Input("vlm_resolution", default=384, min=0, max=4096, step=32, tooltip="Equivalent-square Qwen target from 256 to 3584. Values outside that range preserve original resolution."),
+                io.Combo.Input("enable_caching", options=list(H3_CACHE_MODES), default="all", tooltip="Disk caching. Every enabled mode caches encoded conditioning sections. Images only/all cache image VAE outputs; video only leaves guide image VAE work uncached."),
             ],
             outputs=[io.Conditioning.Output()],
         )
 
     @classmethod
-    def execute(cls, conditioning, clip, image, timestamp, vlm_resolution=384):
-        return io.NodeOutput(execute_minimax_h3_vlm_guide(conditioning, clip, image, timestamp, vlm_resolution))
+    def execute(cls, conditioning, clip, image, timestamp, vlm_resolution=384, enable_caching="all"):
+        return io.NodeOutput(execute_minimax_h3_vlm_guide(conditioning, clip, image, timestamp, vlm_resolution, enable_caching=enable_caching))
 
 
 class UC_AdvancedMiniMaxH3ImageToVideo(io.ComfyNode):
@@ -3514,6 +3516,7 @@ class UC_AdvancedMiniMaxH3ImageToVideo(io.ComfyNode):
                         "Values outside 256 to 3584 preserve the input resolution."
                     ),
                 ),
+                io.Combo.Input("enable_caching", options=list(H3_CACHE_MODES), default="all", tooltip="Disk caching. Every enabled mode caches post-Qwen encoded conditioning sections. Images caches image VAE outputs; video caches video VAE outputs; all also caches audio VAE outputs. Raw vision, DeepStack, token, and pre-Qwen fusion data are never written. Disabled bypasses cache reads and writes."),
                 io.Autogrow.Input(
                     "reference_images",
                     template=reference_template,
@@ -3576,6 +3579,7 @@ class UC_AdvancedMiniMaxH3ImageToVideo(io.ComfyNode):
         video=None,
         audio=None,
         audio_vae=None,
+        enable_caching="all",
     ) -> io.NodeOutput:
         conditioning, latent = execute_advanced_minimax_h3_image_to_video(
             clip,
@@ -3597,6 +3601,7 @@ class UC_AdvancedMiniMaxH3ImageToVideo(io.ComfyNode):
             video=video,
             audio=audio,
             audio_vae=audio_vae,
+            enable_caching=enable_caching,
         )
         return io.NodeOutput(conditioning, latent)
 
@@ -3990,6 +3995,7 @@ class UC_AdvMiniMaxH3ImageToVideoTokenFusion(UC_AdvancedMiniMaxH3ImageToVideo):
         visual_fusion_config=None, multiplier=1.0, ref_image_size="match",
         vlm_resolution=384, vlm_video_resolution=384, media_config=None,
         video=None, audio=None, audio_vae=None,
+        enable_caching="all",
     ):
         conditioning, latent = execute_advanced_minimax_h3_image_to_video(
             clip, vae, prompt, width, height, length,
@@ -4000,6 +4006,7 @@ class UC_AdvMiniMaxH3ImageToVideoTokenFusion(UC_AdvancedMiniMaxH3ImageToVideo):
             vlm_video_resolution=vlm_video_resolution,
             media_config=media_config, video=video, audio=audio,
             audio_vae=audio_vae, token_fusion=True,
+            enable_caching=enable_caching,
         )
         return io.NodeOutput(conditioning, latent)
 
@@ -4026,6 +4033,7 @@ class UC_AdvMiniMaxH3ImageToVideoTemporalFusion(UC_AdvancedMiniMaxH3ImageToVideo
         visual_fusion_config=None, multiplier=1.0, ref_image_size="match",
         vlm_resolution=384, vlm_video_resolution=384, media_config=None,
         video=None, audio=None, audio_vae=None, text_blend_config=None,
+        enable_caching="all",
     ):
         conditioning, latent = execute_advanced_minimax_h3_image_to_video(
             clip, vae, prompt, width, height, length,
@@ -4036,6 +4044,7 @@ class UC_AdvMiniMaxH3ImageToVideoTemporalFusion(UC_AdvancedMiniMaxH3ImageToVideo
             video=video, audio=audio, audio_vae=audio_vae,
             temporal_fusion=True, temporal_token_fusion=cls.TEMPORAL_TOKEN_FUSION,
             text_blend_config=text_blend_config,
+            enable_caching=enable_caching,
         )
         return io.NodeOutput(conditioning, latent)
 

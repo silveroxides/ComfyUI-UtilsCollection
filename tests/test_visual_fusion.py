@@ -28,6 +28,20 @@ finally:
     cli_args.cpu = prior_cpu
 
 
+@pytest.mark.parametrize("method,invalid,message", [
+    ("spatial-checkerboard", {"seed": -1}, "seed"),
+    ("spatial-dither-random", {"visual_block_size": 0}, "block size"),
+])
+def test_cached_fusion_preserves_validation_of_inactive_parameters(monkeypatch, tmp_path, method, invalid, message):
+    monkeypatch.setattr(encoder_helpers.folder_paths, "get_temp_directory", lambda: str(tmp_path))
+    sources = [torch.zeros(4, 3), torch.ones(4, 3)]
+    config = {"visual_fusion_method": method}
+    with encoder_helpers.H3EncoderCache() as cache:
+        encoder_helpers.fuse_visual_token_sources(sources, config, "cpu", source_grids=[(2, 2)] * 2, cache=cache)
+        with pytest.raises(ValueError, match=message):
+            encoder_helpers.fuse_visual_token_sources(sources, {**config, **invalid}, "cpu", source_grids=[(2, 2)] * 2, cache=cache)
+
+
 def _config(method="spatial-dither-random", ratio=0.5, seed=0):
     return {
         "visual_fusion_method": method,

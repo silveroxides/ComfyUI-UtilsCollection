@@ -53,28 +53,30 @@ def test_changed_paths_select_only_dependent_groups_and_direct_tests():
         groups,
     )
 
-    assert selection.groups == {"composite", "encoder", "registration"}
+    assert selection.groups == {"composite", "encoder", "minimax_h3_cache", "registration"}
     assert "tests/test_composite_nodes.py" in selection.python_tests
     assert "tests/test_advanced_visual_consensus.py" in selection.python_tests
+    assert "tests/test_minimax_h3_cache.py" in selection.python_tests
     assert "tests/test_scheduler_migration.py" in selection.python_tests
     assert selection.frontend_tests == set()
 
 
 @pytest.mark.parametrize(
-    ("path", "group_name", "python_tests"),
+    ("path", "group_names", "python_tests"),
     (
         (
             "encoder_helpers.py",
-            "encoder",
+            {"encoder", "minimax_h3_cache"},
             {
                 "tests/test_advanced_visual_consensus.py",
                 "tests/test_encoder_correctness.py",
                 "tests/test_visual_fusion.py",
+                "tests/test_minimax_h3_cache.py",
             },
         ),
         (
             "vlm_presets.py",
-            "vlm",
+            {"vlm"},
             {
                 "tests/test_vlm_presets.py",
                 "tests/test_vlm_preset_authorities.py",
@@ -82,7 +84,7 @@ def test_changed_paths_select_only_dependent_groups_and_direct_tests():
         ),
         (
             "minimax_h3_vlm_presets.py",
-            "minimax_h3_vlm",
+            {"minimax_h3_vlm"},
             {
                 "tests/test_minimax_h3_vlm_presets.py",
                 "tests/test_vlm_preset_authorities.py",
@@ -90,7 +92,7 @@ def test_changed_paths_select_only_dependent_groups_and_direct_tests():
         ),
         (
             "presets_collection.py",
-            "presets",
+            {"presets"},
             {
                 "tests/test_photography_presets.py",
                 "tests/test_preset_parentheses.py",
@@ -99,10 +101,10 @@ def test_changed_paths_select_only_dependent_groups_and_direct_tests():
         ),
     ),
 )
-def test_subsystem_changes_select_only_relevant_tests(path, group_name, python_tests):
+def test_subsystem_changes_select_only_relevant_tests(path, group_names, python_tests):
     selection = runner.select_tests({path}, runner.load_groups())
 
-    assert selection.groups == {group_name}
+    assert selection.groups == group_names
     assert selection.python_tests == python_tests
     assert selection.frontend_tests == set()
 

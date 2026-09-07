@@ -1,4 +1,5 @@
 import inspect
+import copy
 import pathlib
 import sys
 import types
@@ -50,6 +51,11 @@ VAE_MULTIPLE_ENCODERS = (
     "TextEncodeKrea2SystemEditScaledAdv",
     "TextEncodeKrea2SysEditScaledAdvAttn",
 )
+
+
+@pytest.fixture(autouse=True)
+def isolated_h3_cache(monkeypatch, tmp_path):
+    monkeypatch.setattr(encoder_helpers.folder_paths, "get_temp_directory", lambda: str(tmp_path))
 
 
 def test_power_blend_preset_matches_declared_widget_values():
@@ -261,10 +267,52 @@ def test_inline_image_placeholders_honor_legacy_flat_encoder_path():
     assert transformer.build_image_inputs(None, None) == ("grid", "mask", "deepstack")
 
 
+class _MiniMaxH3TestNamespace:
+    def __init__(self, **values):
+        self.__dict__.update(values)
+
+
+class _MiniMaxH3TestPatcher:
+    forced_hooks = None
+    load_device = torch.device("cpu")
+
+    def __init__(self):
+        self.object_patches = {}
+
+    def clone(self):
+        cloned = copy.copy(self)
+        cloned.object_patches = self.object_patches.copy()
+        return cloned
+
+    def get_model_object(self, name):
+        return self.object_patches.get(name, self.preprocess_embed)
+
+    def add_object_patch(self, name, value):
+        self.object_patches[name] = value
+
+    @staticmethod
+    def preprocess_embed(embed, device):
+        return embed["data"], None
+
+
 class _MiniMaxH3TestClip:
+    clip_name = "qwen3vl_32b"
+    clip = clip_name
+
     def __init__(self):
         self.encoded_tokens = []
         self.tokenize_calls = []
+        self.cond_stage_model = self
+        self.tokenizer = self
+        self.patcher = _MiniMaxH3TestPatcher()
+
+    def clone(self):
+        cloned = copy.copy(self)
+        cloned.patcher = self.patcher.clone()
+        return cloned
+
+    def add_hooks_to_dict(self, metadata):
+        pass
 
     @staticmethod
     def _text_entries(text):
@@ -422,15 +470,16 @@ def test_advanced_minimax_h3_node_schema_separates_visual_roles():
         "length",
         "visual_fusion_config",
         "multiplier",
-        "ref_image_size",
-        "vlm_resolution",
-        "vlm_video_resolution",
-        "reference_images",
+            "ref_image_size",
+            "vlm_resolution",
+            "vlm_video_resolution",
+            "enable_caching",
+            "reference_images",
         "fusion_images",
         "media_config",
         "video",
         "audio",
-        "audio_vae",
+            "audio_vae",
     ]
     assert inputs["vae"].optional is True
     assert inputs["first_frame"].optional is True
@@ -1558,8 +1607,8 @@ def test_advanced_minimax_h3_reference_fusion_off_ignores_fusion_inputs():
 
 def test_advanced_minimax_h3_reference_save_exports_each_visual_span(monkeypatch):
     clip = _MiniMaxH3TestClip()
-    clip.cond_stage_model = types.SimpleNamespace(clip_name="qwen3vl_8b")
-    clip.tokenizer = types.SimpleNamespace(clip_name="qwen3vl_32b")
+    clip.cond_stage_model = _MiniMaxH3TestNamespace(clip_name="qwen3vl_8b", clip="qwen3vl_8b")
+    clip.tokenizer = _MiniMaxH3TestNamespace(clip_name="qwen3vl_32b")
     vae = _RecordingMiniMaxVAE()
     exported = []
     monkeypatch.setattr(
@@ -1588,7 +1637,7 @@ def test_advanced_minimax_h3_reference_save_exports_each_visual_span(monkeypatch
     )
 
     assert len(exported) == 1
-    _, tokens, _config, key, _device, visual_indices = exported[0]
+    _, tokens, _config, key, _device, visual_indices, _cache = exported[0]
     assert key == "qwen3vl_8b"
     assert visual_indices == [0, 1]
     assert sum(encoder_helpers.is_image_token(entry) for entry in tokens["qwen3vl_32b"][0]) == 2
@@ -2164,10 +2213,10 @@ def test_temporal_pre_node_uses_actual_preprocessed_encode_and_deepstack():
             return tensor, torch.ones(1, len(vectors)), [len(vectors)], info
 
     clip = _MiniMaxH3TestClip()
-    clip.cond_stage_model = types.SimpleNamespace(clip_name="qwen3vl_32b", clip_model=Model(), reset_clip_options=lambda: None, set_clip_options=lambda _: None)
+    clip.cond_stage_model = _MiniMaxH3TestNamespace(clip_name="qwen3vl_32b", clip="clip_model", clip_model=Model(), reset_clip_options=lambda: None, set_clip_options=lambda _: None)
     clip.layer_idx = None
     clip.load_model = lambda _: None
-    clip.patcher = types.SimpleNamespace(load_device=torch.device("cpu"), forced_hooks=None)
+    clip.patcher = _MiniMaxH3TestPatcher()
     clip.add_hooks_to_dict = lambda _: None
     video = torch.arange(5, dtype=torch.float32)[:, None, None, None].expand(5, 64, 64, 3) / 5
     config = encoder_helpers.build_minimax_h3_media_config(None, video_latent_mode="off", temporal_density=2)
