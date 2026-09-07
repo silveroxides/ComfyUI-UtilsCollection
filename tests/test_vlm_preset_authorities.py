@@ -1,3 +1,4 @@
+import ast
 import json
 from pathlib import Path
 import runpy
@@ -47,6 +48,36 @@ def assert_crlf_only(label, value):
     remainder = value.replace("\r\n", "")
     assert "\n" not in remainder, f"{label} contains LF-only newlines"
     assert "\r" not in remainder, f"{label} contains lone CR newlines"
+
+
+def test_readable_presets_are_independent_literals():
+    for _runtime, authority_name, _dictionaries, _scalars in CONFIG:
+        source = ast.parse((ROOT / authority_name).read_text(encoding="utf-8"))
+        assignments = set()
+        for node in source.body:
+            if isinstance(node, ast.Expr) and isinstance(node.value, ast.Constant):
+                continue  # Module docstring.
+            if isinstance(node, ast.FunctionDef):
+                assert node.name == "_crlf", f"{authority_name}: preset construction helpers are forbidden"
+                continue
+            assert isinstance(node, ast.Assign), f"{authority_name}:{node.lineno}: computed preset statement"
+            assert len(node.targets) == 1 and isinstance(node.targets[0], ast.Name)
+            name = node.targets[0].id
+            assert name not in assignments, f"{authority_name}: preset {name} is reassigned"
+            assignments.add(name)
+            if name in ("RUNTIME_DICTIONARIES", "RUNTIME_VALUES"):
+                assert isinstance(node.value, ast.Dict)
+                continue
+            value = node.value
+            assert (
+                isinstance(value, ast.Call)
+                and isinstance(value.func, ast.Name)
+                and value.func.id == "_crlf"
+                and len(value.args) == 1
+                and not value.keywords
+                and isinstance(value.args[0], ast.Constant)
+                and isinstance(value.args[0].value, str)
+            ), f"{authority_name}: {name} must be one independent literal, not a replacement or derived preset"
 
 
 def test_nonlegacy_vlm_authorities_match_runtime_and_use_crlf():
