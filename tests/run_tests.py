@@ -1,4 +1,4 @@
-"""Select repository tests from changed paths or named subsystem groups."""
+"""Run exact tests or explicit groups; review changed-file coverage suggestions."""
 
 # ruff: noqa: T201 - This module is an intentionally user-facing CLI.
 
@@ -174,7 +174,8 @@ def tracked_final_tests() -> tuple[set[str], set[str]]:
     )
 
 
-def print_selection(selection: Selection) -> None:
+def print_selection(selection: Selection, *, advisory: bool = False) -> None:
+    print("Candidate coverage (suggestions only; no tests run):" if advisory else "Explicit execution selection:")
     for group in sorted(selection.groups):
         reasons = ", ".join(sorted(selection.reasons.get(group, ())))
         print(f"group {group}: {reasons}")
@@ -189,7 +190,16 @@ def print_selection(selection: Selection) -> None:
 
 
 def _resolved_tests(paths: set[str]) -> list[str]:
-    return [str((REPOSITORY_ROOT / path).resolve()) for path in sorted(paths)]
+    resolved = []
+    for target in sorted(paths):
+        filename, separator, node_id = target.partition("::")
+        path = (REPOSITORY_ROOT / filename).resolve()
+        if not path.is_relative_to((REPOSITORY_ROOT / "tests").resolve()) or not path.is_file():
+            raise ValueError(f"Test target must be an existing file under tests/: {target}")
+        if path.suffix not in (".py", ".mjs") or (separator and (path.suffix != ".py" or not node_id)):
+            raise ValueError(f"Unsupported test target: {target}")
+        resolved.append(str(path) + separator + node_id)
+    return resolved
 
 
 def run_selection(selection: Selection) -> int:
@@ -236,22 +246,39 @@ def parser() -> argparse.ArgumentParser:
     mode = result.add_mutually_exclusive_group()
     mode.add_argument("--final", action="store_true", help="run every tracked test")
     mode.add_argument("--list-groups", action="store_true", help="list configured groups")
-    result.add_argument("--changed", action="store_true", help="select changed paths (default)")
+    mode.add_argument("--changed", action="store_true", help="suggest coverage for changed paths without running tests")
+    mode.add_argument("--test", action="append", default=[], help="run only this test file or Python node ID; repeatable")
+    mode.add_argument("--group", action="append", default=[], help="run an explicit group; repeatable")
     result.add_argument("--base", help="include committed changes since BASE")
-    result.add_argument("--group", action="append", default=[], help="add a named group")
     result.add_argument("--dry-run", action="store_true", help="explain without executing")
     return result
 
 
 def main(argv: list[str] | None = None) -> int:
-    args = parser().parse_args(argv)
-    groups = load_groups()
+    cli = parser()
+    args = cli.parse_args(argv)
+    if args.base and (args.test or args.group or args.final or args.list_groups):
+        cli.error("--base is only supported for changed-file coverage suggestions")
+    if not (args.test or args.group or args.final or args.list_groups or args.changed or args.base or args.dry_run):
+        cli.print_help()
+        return 0
+    groups = load_groups() if args.list_groups or args.group or not (args.test or args.final) else {}
     if args.list_groups:
         for name in sorted(groups):
             print(name)
         return 0
 
-    if args.final:
+    advisory = not (args.test or args.group or args.final)
+    if args.test:
+        try:
+            targets = _resolved_tests(set(args.test))
+        except ValueError as error:
+            cli.error(str(error))
+        selection = Selection(
+            python_tests={target for target in targets if target.partition("::")[0].endswith(".py")},
+            frontend_tests={target for target in targets if target.partition("::")[0].endswith(".mjs")},
+        )
+    elif args.final:
         python_tests, frontend_tests = tracked_final_tests()
         selection = Selection(
             groups={"final"},
@@ -260,27 +287,28 @@ def main(argv: list[str] | None = None) -> int:
             reasons={"final": {"every tracked test"}},
         )
     else:
-        paths = changed_paths(args.base) if args.changed or args.base or not args.group else set()
+        paths = changed_paths(args.base) if advisory else set()
         historical_groups = ()
         if paths:
             revisions = ["HEAD"]
             if args.base:
                 revisions.append(args.base)
             historical_groups = tuple(load_groups_from_revision(revision) for revision in revisions)
-        selection = select_tests(paths, groups, tuple(args.group), historical_groups)
+        try:
+            selection = select_tests(paths, groups, tuple(args.group), historical_groups)
+        except ValueError as error:
+            cli.error(str(error))
 
     if selection.unmapped:
-        print("Unmapped production source files:", file=sys.stderr)
+        print("No mapped coverage recommendation for:")
         for path in sorted(selection.unmapped):
-            print(f"  {path}", file=sys.stderr)
-        print("Update tests/test_groups.toml or deliberately use --final.", file=sys.stderr)
-        return 2
+            print(f"  {path}")
 
-    print_selection(selection)
+    print_selection(selection, advisory=advisory)
     if not selection.python_tests and not selection.frontend_tests:
         print("No tests selected.")
         return 0
-    return 0 if args.dry_run else run_selection(selection)
+    return 0 if advisory or args.dry_run else run_selection(selection)
 
 
 if __name__ == "__main__":

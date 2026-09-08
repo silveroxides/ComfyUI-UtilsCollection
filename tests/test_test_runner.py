@@ -53,7 +53,7 @@ def test_changed_paths_select_only_dependent_groups_and_direct_tests():
         groups,
     )
 
-    assert selection.groups == {"composite", "encoder", "minimax_h3_cache", "registration"}
+    assert selection.groups == {"composite", "encoder", "minimax_h3_cache"}
     assert "tests/test_composite_nodes.py" in selection.python_tests
     assert "tests/test_advanced_visual_consensus.py" in selection.python_tests
     assert "tests/test_minimax_h3_cache.py" in selection.python_tests
@@ -148,12 +148,19 @@ def test_frontend_source_selects_frontend_and_parity_coverage():
     assert "tests/test_staged_editor_layout.mjs" in selection.frontend_tests
 
 
-def test_unknown_production_source_fails_closed(monkeypatch, tmp_path):
+def test_unknown_production_source_is_an_advisory_gap(monkeypatch, tmp_path, capsys):
     (tmp_path / "new_domain.py").touch()
     monkeypatch.setattr(runner, "REPOSITORY_ROOT", tmp_path)
     selection = runner.select_tests({"new_domain.py"}, runner.load_groups())
 
     assert selection.unmapped == {"new_domain.py"}
+    monkeypatch.setattr(runner, "changed_paths", lambda base: {"new_domain.py"})
+    monkeypatch.setattr(runner, "load_groups_from_revision", lambda revision: {})
+    monkeypatch.setattr(runner, "run_selection", lambda selection: pytest.fail("Advisory mode ran tests"))
+    assert runner.main(["--changed"]) == 0
+    output = capsys.readouterr().out
+    assert "new_domain.py" in output and "no tests run" in output
+    assert "--final" not in output
 
 
 def test_deleted_source_uses_historical_group_without_deleted_test(monkeypatch, tmp_path):
@@ -248,3 +255,59 @@ def test_run_selection_uses_configured_interpreter_and_cleans_temp(monkeypatch, 
     assert calls[0][1]["cwd"] == runner.COMFYUI_ROOT
     assert calls[1][0][:2] == ["node", "--test"]
     assert not runner.TEMP_ROOT.exists()
+
+
+def test_exact_targets_preserve_node_ids_without_expansion_and_propagate_exit(monkeypatch, tmp_path):
+    calls = []
+    monkeypatch.setattr(runner, "TEMP_ROOT", tmp_path / "pytest-temp")
+    monkeypatch.setattr(runner, "changed_paths", lambda base: pytest.fail("Exact selection inspected changes"))
+    monkeypatch.setattr(runner, "load_groups", lambda: pytest.fail("Exact selection expanded groups"))
+    monkeypatch.setattr(runner.subprocess, "run", lambda command, **kwargs:
+                        calls.append(command) or subprocess.CompletedProcess(command, 5))
+    targets = ["tests/test_test_runner.py::TestClass::test_behavior[case::value.mjs]",
+               "tests/test_test_runner.py::test_other"]
+    assert runner.main(["--test", targets[0], "--test", targets[1]]) == 5
+    assert len(calls) == 1
+    expected = [str(Path(__file__).resolve()) + "::" + value.partition("::")[2] for value in targets]
+    assert calls[0][-2:] == expected
+    assert not runner.TEMP_ROOT.exists()
+
+
+def test_help_and_advisory_modes_never_run_tests(monkeypatch, capsys):
+    monkeypatch.setattr(runner, "run_selection", lambda selection: pytest.fail("Unexpected execution"))
+    monkeypatch.setattr(runner, "changed_paths", lambda base: pytest.fail("No-argument invocation inspected changes"))
+    assert runner.main([]) == 0
+    assert "--test" in capsys.readouterr().out
+    monkeypatch.setattr(runner, "changed_paths", lambda base: {"encoder_helpers.py"})
+    monkeypatch.setattr(runner, "load_groups_from_revision", lambda revision: {})
+    for args in (["--changed"], ["--dry-run"], ["--base", "HEAD"]):
+        assert runner.main(args) == 0
+        assert "Candidate coverage (suggestions only; no tests run)" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("args", [
+    ["--test", "tests/missing_test.py"], ["--test", "tests"],
+    ["--test", "tests/test_groups.toml"], ["--test", "tests/test_load_image_alpha.mjs::case"],
+    ["--test", "tests/test_test_runner.py", "--changed"],
+    ["--group", "encoder", "--base", "HEAD"], ["--group", "unknown-group"],
+])
+def test_invalid_explicit_selection_never_runs_a_fallback(args, monkeypatch):
+    monkeypatch.setattr(runner, "run_selection", lambda selection: pytest.fail("Unexpected execution"))
+    with pytest.raises(SystemExit) as error:
+        runner.main(args)
+    assert error.value.code == 2
+
+
+def test_explicit_groups_final_and_dry_run_keep_requested_scope(monkeypatch):
+    calls = []
+    monkeypatch.setattr(runner, "changed_paths", lambda base: pytest.fail("Explicit selection inspected changes"))
+    monkeypatch.setattr(runner, "run_selection", lambda selection: calls.append(selection) or 0)
+    monkeypatch.setattr(runner, "tracked_final_tests", lambda: ({"tests/test_test_runner.py"}, set()))
+    assert runner.main(["--group", "minimax_h3_cache", "--group", "minimax_h3_guide"]) == 0
+    assert calls[-1].groups == {"minimax_h3_cache", "minimax_h3_guide"}
+    assert runner.main(["--final"]) == 0
+    assert calls[-1].groups == {"final"}
+    for args in (["--final", "--dry-run"], ["--group", "encoder", "--dry-run"],
+                 ["--test", "tests/test_test_runner.py", "--dry-run"]):
+        assert runner.main(args) == 0
+    assert len(calls) == 2
