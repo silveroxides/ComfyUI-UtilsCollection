@@ -3340,13 +3340,15 @@ def _encode_minimax_h3_section(clip, tokens, visual_path, cache, *, section_kind
     )
 
 
-def _minimax_h3_fused_section(clip, tokens, images, config, visual_path, cache):
+def _minimax_h3_fused_section(clip, tokens, images, config, visual_path, cache, *, token_fusion=False):
     """Cache a final spatially fused Picture, excluding prompt and other Pictures."""
     source_tokens = [tokens]
     source_tokens.extend({"qwen3vl_32b": [_minimax_h3_visual_token_entries(clip, image)]} for image in images)
     fusion_config = {key: value for key, value in config.items() if key not in ("save_blended_embeds", "save_path")}
 
     def compute():
+        if token_fusion:
+            return encode_token_fused_visual_slots(clip, tokens, [(0, source_tokens[1:])], fusion_config, visual_path)
         encoded = [_encode_scheduled_with_visual_path(clip, source, visual_path) for source in source_tokens]
         if any(len(value) != len(encoded[0]) for value in encoded):
             raise ValueError("MiniMax H3 fusion sources have different schedule counts.")
@@ -3371,7 +3373,7 @@ def _minimax_h3_fused_section(clip, tokens, images, config, visual_path, cache):
         return result
 
     result = cache.encode_scheduled(
-        clip, tokens, visual_path, compute, section_kind="regular_fusion", section_id="picture",
+        clip, tokens, visual_path, compute, section_kind="token_fusion" if token_fusion else "regular_fusion", section_id="picture",
         section_inputs={"sources": source_tokens, "settings": spatial_cache_settings(fusion_config)},
     )
     if config.get("save_blended_embeds", False):
@@ -3397,6 +3399,7 @@ def _minimax_h3_fused_section(clip, tokens, images, config, visual_path, cache):
 
 def _minimax_h3_decoupled_conditioning(
     clip, tokens, prompt_entries, prompt_text, cache, *, image_encode=None, video_encode=None,
+    apply_prompt_weights=True,
 ):
     """Encode presentation prefix sections independently from the prompt suffix."""
     entries = _token_entries(tokens, "qwen3vl_32b")
@@ -3441,7 +3444,7 @@ def _minimax_h3_decoupled_conditioning(
             lambda: encode_embedding_classical_scaled_bias(
                 clip, prompt_text,
                 tokenize_callback=lambda value: {"qwen3vl_32b": [_minimax_h3_text_entries(clip, value)]},
-            ),
+            ) if apply_prompt_weights else _encode_scheduled_with_visual_path(clip, {"qwen3vl_32b": [prompt]}, "grid-deepstack"),
             section_kind="text", section_id="prompt", section_inputs={"weighted_prompt": prompt_text},
         )
     if not sections and prompt_conditioning is None:
@@ -3761,6 +3764,17 @@ def execute_advanced_minimax_h3_image_to_video(
                     video_frames[list(pair)], vlm_video_resolution,
                 ) for pair in pairs]
                 def compute():
+                    if temporal_token_fusion:
+                        return encode_temporal_conditioning(
+                            clip, tokens, [pairs], lambda pair: prepared_pairs[pairs.index(pair)],
+                            token_fusion=True, fusion_callback=fuse_video_block,
+                            encode_tokens_callback=lambda value: _encode_scheduled_with_visual_path(clip, value, "grid-deepstack"),
+                            active_clip_model_callback=_active_clip_model,
+                            encode_preprocessed_callback=_encode_preprocessed_clip_model,
+                            visual_context_callback=lambda: qwen3vl_visual_encoder_path(clip, "grid-deepstack"),
+                            video_grid_callback=lambda data, size: visual_fusion_grid(data, size, False),
+                            token_spans_callback=build_token_to_conditioning_map,
+                        )
                     return encode_temporal_section(
                         tokens, prepared_pairs,
                         fusion_callback=lambda sources, grids, deepstack: fuse_temporal_block(
@@ -3774,12 +3788,12 @@ def execute_advanced_minimax_h3_image_to_video(
                     )
                 return cache.encode_scheduled(
                     clip, tokens, "grid-deepstack", compute,
-                    section_kind="regular_temporal", section_id="video",
+                    section_kind="temporal_token_fusion" if temporal_token_fusion else "regular_temporal", section_id="video",
                     section_inputs={"pairs": prepared_pairs, "method": method,
                                     "settings": temporal_cache_settings(method, settings, config)},
                 )
 
-    decoupled = cache.enable_caching != "disabled" and not token_fusion and not temporal_token_fusion
+    decoupled = cache.enable_caching != "disabled"
     if decoupled:
         fusion_targets = {}
         presentation_images = list(base_vlm_images)
@@ -3802,7 +3816,7 @@ def execute_advanced_minimax_h3_image_to_video(
 
         def image_section_encode(tokens, ordinal):
             if ordinal in fusion_targets:
-                return _minimax_h3_fused_section(clip, tokens, fusion_targets[ordinal], config, visual_encoder_path, cache)
+                return _minimax_h3_fused_section(clip, tokens, fusion_targets[ordinal], config, visual_encoder_path, cache, token_fusion=token_fusion)
             result = _encode_minimax_h3_section(
                 clip, tokens, "grid-deepstack", cache=cache, section_kind="image", section_id="picture",
             )
@@ -3814,6 +3828,7 @@ def execute_advanced_minimax_h3_image_to_video(
         conditioning = _minimax_h3_decoupled_conditioning(
             clip, tokenize_presentation(actual_prompt, presentation_images), prompt_entries, prompt, cache,
             image_encode=image_section_encode, video_encode=temporal_section_encode,
+            apply_prompt_weights=not (token_fusion and fusion_active),
         )
     elif fusion_active and (keyframe_mode or native_reference_mode):
         if keyframe_mode:

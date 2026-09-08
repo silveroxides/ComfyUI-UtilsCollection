@@ -116,6 +116,8 @@ def test_preprocessed_qwen_result_is_not_persisted():
         ("images_only", "video", False), ("images_only", "regular_fusion", True),
         ("video_only", "regular_temporal", True), ("video_only", "guide", False),
         ("images_only", "guide", True), ("all", "video", True), ("all", "joint", False),
+        ("all", "token_fusion", True), ("images_only", "token_fusion", True), ("video_only", "token_fusion", False),
+        ("all", "temporal_token_fusion", True), ("video_only", "temporal_token_fusion", True), ("images_only", "temporal_token_fusion", False),
     ],
 )
 def test_encoded_section_selection_follows_mode(mode, kind, cached):

@@ -363,11 +363,11 @@ class H3EncoderCache:
             return True
         if self.enable_caching == "all":
             return section_kind in {
-                "image", "video", "regular_fusion", "regular_temporal", "guide",
+                "image", "video", "regular_fusion", "regular_temporal", "guide", "token_fusion", "temporal_token_fusion",
             }
         if self.enable_caching == "images_only":
-            return section_kind in {"image", "regular_fusion", "guide"}
-        return section_kind in {"video", "regular_temporal"}
+            return section_kind in {"image", "regular_fusion", "guide", "token_fusion"}
+        return section_kind in {"video", "regular_temporal", "temporal_token_fusion"}
 
     def _allows_stage(self, stage, dependencies):
         if self.enable_caching == "disabled":

@@ -3988,7 +3988,7 @@ class UC_AdvMiniMaxH3ImageToVideoTokenFusion(UC_AdvancedMiniMaxH3ImageToVideo):
         schema.display_name = "Adv MiniMax H3 Image to Video (TokenFusion)"
         for value in schema.inputs:
             if value.id == "enable_caching":
-                value.tooltip = "TokenFusion does not cache H3 conditioning or pre-Qwen tokens. Image/video modes cache their matching VAE outputs; all also caches audio VAE outputs. Disabled bypasses disk caching."
+                value.tooltip = "Images only/all cache final post-Qwen TokenFusion sections. Video only/all cache encoded video sections. Every enabled mode caches independent text. Pre-Qwen tokens and DeepStack are never saved. Disabled keeps joint encoding. VAE caching follows the selected media mode."
         return schema
 
     @classmethod
@@ -4062,7 +4062,7 @@ class UC_AdvMiniMaxH3ImageToVideoTemporalTokenFusion(UC_AdvMiniMaxH3ImageToVideo
         schema.display_name = "Adv MiniMax H3 Image to Video (Temporal TokenFusion)"
         for value in schema.inputs:
             if value.id == "enable_caching":
-                value.tooltip = "Temporal TokenFusion does not cache H3 conditioning or pre-Qwen tokens. Image/video modes cache their matching VAE outputs; all also caches audio VAE outputs. Disabled bypasses disk caching."
+                value.tooltip = "Video only/all cache final post-Qwen Temporal TokenFusion sections. Images only/all cache encoded images. Every enabled mode caches independent text. Pre-Qwen tokens and DeepStack are never saved. Disabled keeps joint encoding. VAE caching follows the selected media mode."
         schema.description = "Experimentally fuses corresponding video features and DeepStack before one Qwen encode per schedule, preserving the ordinary video token budget."
         return schema
 
