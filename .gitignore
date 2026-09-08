@@ -222,3 +222,16 @@ AGENTS-LOCAL.md
 
 # Machine-local archived Codex session histories
 /old_sessions/
+
+# local untracked directories
+reference/
+plans/
+old_files/
+audit/
+local/
+
+# local untracked files
+/*.jsonl
+
+# codex directories
+.agents/
