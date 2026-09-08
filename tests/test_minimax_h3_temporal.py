@@ -17,7 +17,6 @@ sys.modules.setdefault(PACKAGE_NAME, package)
 from utils_collection_test.minimax_h3_temporal_helpers import (
     fuse_temporal_block,
     encode_temporal_conditioning,
-    encode_temporal_section,
     minimax_h3_temporal_frame_pairs,
 )
 
@@ -329,20 +328,6 @@ def _test_token_spans(row, tensor):
     return spans
 
 
-def test_cached_temporal_section_fuses_only_local_interior():
-    tokens, _ = _lane_fixture()
-    local = {"qwen3vl_32b": [tokens["qwen3vl_32b"][0][5:8]]}
-    def encode(value):
-        processed, tags, _ = _fake_process(value["qwen3vl_32b"][0])
-        return [[processed[0], {"minimax_token_tags": tags, "clip_start_percent": 0.25}]]
-    result = encode_temporal_section(
-        local, [_prepare_test_pair((4, 6)), _prepare_test_pair((1, 2)), _prepare_test_pair((2, 3))],
-        encode_tokens_callback=encode, fusion_callback=_mean_fusion,
-        video_grid_callback=lambda data, length: (1, length), token_spans_callback=_test_token_spans,
-    )[0]
-    torch.testing.assert_close(result[0][0, :, 0], torch.tensor([151652., 6., 6., 151653.]))
-    assert result[1]["clip_start_percent"] == 0.25
-    assert result[1]["minimax_token_tags"].tolist() == [0, 0, 0, 0]
 
 
 def test_post_lane_encoding_preserves_metadata_and_all_nonvideo_slices():

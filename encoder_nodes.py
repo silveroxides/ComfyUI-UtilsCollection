@@ -3516,7 +3516,7 @@ class UC_AdvancedMiniMaxH3ImageToVideo(io.ComfyNode):
                         "Values outside 256 to 3584 preserve the input resolution."
                     ),
                 ),
-                io.Combo.Input("enable_caching", options=list(H3_CACHE_MODES), default="all", tooltip="Disk caching uses independently encoded final sections. Images only caches prompt text plus image/final regular-fusion sections; video only caches prompt text plus video/final regular-temporal sections; all caches both. Raw vision, DeepStack, tokens, and pre-Qwen fusion data are never written. Disabled keeps joint Qwen encoding."),
+                io.Combo.Input("enable_caching", options=list(H3_CACHE_MODES), default="all", tooltip='All modes preserve joint Qwen encoding. Enabled modes cache the complete encoded presentation; prompt or media changes invalidate it. Images/video modes select matching VAE outputs; all includes audio VAE outputs. Raw tokens and DeepStack are never saved.'),
                 io.Autogrow.Input(
                     "reference_images",
                     template=reference_template,
@@ -3988,7 +3988,7 @@ class UC_AdvMiniMaxH3ImageToVideoTokenFusion(UC_AdvancedMiniMaxH3ImageToVideo):
         schema.display_name = "Adv MiniMax H3 Image to Video (TokenFusion)"
         for value in schema.inputs:
             if value.id == "enable_caching":
-                value.tooltip = "Images only/all cache final post-Qwen TokenFusion sections. Video only/all cache encoded video sections. Every enabled mode caches independent text. Pre-Qwen tokens and DeepStack are never saved. Disabled keeps joint encoding. VAE caching follows the selected media mode."
+                value.tooltip = 'Preserves joint Qwen encoding and caches the complete post-Qwen result. Prompt or media changes invalidate it. Pre-Qwen tokens and DeepStack are never saved. VAE caching follows the selected media mode.'
         return schema
 
     @classmethod
@@ -4062,7 +4062,7 @@ class UC_AdvMiniMaxH3ImageToVideoTemporalTokenFusion(UC_AdvMiniMaxH3ImageToVideo
         schema.display_name = "Adv MiniMax H3 Image to Video (Temporal TokenFusion)"
         for value in schema.inputs:
             if value.id == "enable_caching":
-                value.tooltip = "Video only/all cache final post-Qwen Temporal TokenFusion sections. Images only/all cache encoded images. Every enabled mode caches independent text. Pre-Qwen tokens and DeepStack are never saved. Disabled keeps joint encoding. VAE caching follows the selected media mode."
+                value.tooltip = 'Preserves joint Qwen encoding and caches the complete post-Qwen result. Prompt or media changes invalidate it. Pre-Qwen tokens and DeepStack are never saved. VAE caching follows the selected media mode.'
         schema.description = "Experimentally fuses corresponding video features and DeepStack before one Qwen encode per schedule, preserving the ordinary video token budget."
         return schema
 

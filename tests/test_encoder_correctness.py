@@ -387,104 +387,33 @@ class _RecordingMiniMaxVAE:
         return torch.full((1, 4, 1, 1), float(image.mean()))
 
 
-@pytest.mark.parametrize("mode", ["all", "images_only", "video_only"])
-def test_h3_decoupled_prompt_and_media_have_independent_cache_keys(mode):
-    clip = _MiniMaxH3TestClip()
-    images = {"reference_image_1": torch.full((1, 32, 32, 3), 0.25)}
-    video = torch.arange(48, dtype=torch.float32).reshape(48, 1, 1, 1).expand(-1, 32, 32, 3).clone() / 48
 
+
+
+
+
+
+
+
+@pytest.mark.parametrize("mode", ["disabled", "all", "images_only", "video_only"])
+def test_h3_cache_modes_preserve_joint_presentation(mode):
+    clip = _MiniMaxH3TestClip()
+    image = torch.ones(1, 64, 64, 3)
     def execute(prompt):
         return encoder_helpers.execute_advanced_minimax_h3_image_to_video(
-            clip, None, prompt, 64, 32, 56, reference_images=images, video=video,
-            ref_image_size="none", vlm_resolution=0, vlm_video_resolution=0, enable_caching=mode,
+            clip, None, prompt, 64, 64, 5, first_frame=image, ref_image_size="none",
+            vlm_resolution=0, enable_caching=mode,
         )[0]
-
-    first = execute("first")
-    initial_calls = len(clip.encoded_tokens)
-    second = execute("second")
-    new_calls = clip.encoded_tokens[initial_calls:]
-    visuals = [entry[0] for tokens in new_calls for entry in tokens["qwen3vl_32b"][0] if encoder_helpers.is_image_token(entry)]
-    assert len(visuals) == {"all": 0, "images_only": 2, "video_only": 1}[mode]
-    for tokens in clip.encoded_tokens:
-        row = tokens["qwen3vl_32b"][0]
-        if any(encoder_helpers.is_image_token(entry) for entry in row):
-            assert not any(isinstance(entry[0], str) for entry in row)
-    boundary = second[0][1][encoder_helpers.LAYOUT_KEY]["prompt_start"]
-    torch.testing.assert_close(first[0][0][:, :boundary], second[0][0][:, :boundary])
-    if mode == "all":
-        initial_calls = len(clip.encoded_tokens)
-        images["reference_image_1"].add_(0.1)
-        execute("second")
-        assert len(clip.encoded_tokens) == initial_calls + 1
-        assert not clip.encoded_tokens[-1]["qwen3vl_32b"][0][1][0].get("minimax_video_block", False)
-        initial_calls = len(clip.encoded_tokens)
-        video[0].add_(0.1)
-        execute("second")
-        assert len(clip.encoded_tokens) == initial_calls + 1
-        assert clip.encoded_tokens[-1]["qwen3vl_32b"][0][1][0]["minimax_video_block"]
-
-
-@pytest.mark.parametrize("temporal", [False, True])
-def test_h3_decoupled_fusion_caches_final_output_before_encoding_sources(temporal, monkeypatch):
-    def unexpected_joint_temporal(*args, **kwargs):
-        pytest.fail("Cached temporal execution entered the joint temporal pipeline")
-    monkeypatch.setattr(encoder_helpers, "encode_temporal_conditioning", unexpected_joint_temporal)
-    clip = _MiniMaxH3TestClip()
-    source = torch.full((25 if temporal else 1, 32, 32, 3), 0.25)
-    fusion_image = torch.full((1, 32, 32, 3), 0.75)
-    kwargs = dict(ref_image_size="none", vlm_resolution=0, vlm_video_resolution=0, enable_caching="all")
-    if temporal:
-        kwargs.update(video=source, temporal_fusion=True, media_config=encoder_helpers.build_minimax_h3_media_config(
-            None, video_latent_mode="off", temporal_density=3,
-        ))
-    else:
-        kwargs.update(reference_images={"reference_image_1": source}, fusion_images={"fusion_image_1": fusion_image},
-                      visual_fusion_config={"visual_fusion_method": "spatial-checkerboard", "visual_block_size": 2})
-    def execute(prompt):
-        return encoder_helpers.execute_advanced_minimax_h3_image_to_video(clip, None, prompt, 64, 32, 39, **kwargs)
-    execute("first")
-    count = len(clip.encoded_tokens)
-    execute("second")
-    assert len(clip.encoded_tokens) == count + 1
-    count = len(clip.encoded_tokens)
-    (source if temporal else fusion_image)[0].add_(0.05)
-    execute("second")
-    assert len(clip.encoded_tokens) > count
-
-
-def test_h3_disabled_path_bypasses_section_pipeline_and_disk(monkeypatch, tmp_path):
-    monkeypatch.setattr(encoder_helpers, "_minimax_h3_decoupled_conditioning",
-                        lambda *args, **kwargs: pytest.fail("Joint execution entered decoupled pipeline"))
-    encoder_helpers.execute_advanced_minimax_h3_image_to_video(
-        _MiniMaxH3TestClip(), None, "subject", 64, 32, 5,
-        first_frame=torch.ones(1, 32, 32, 3), ref_image_size="none", vlm_resolution=0,
-        enable_caching="disabled",
-    )
-    assert not list(tmp_path.rglob("*.safetensors"))
-
-
-def test_h3_cached_fusion_export_runs_on_hits_without_qwen(monkeypatch):
-    exported = []
-    def raw_blocks(clip, tokens, device, cache=None):
-        assert cache is not None  # Export helper loads the model even on cache hits.
-        image = tokens["qwen3vl_32b"][0][1][0]["data"]
-        height, width = encoder_helpers.qwen3vl_visual_grid(image)
-        block = torch.zeros(1, height * width + 2, 4)
-        block[:, 1:-1] = image.mean()
-        return [{"block": block, "interior": block[:, 1:-1]}]
-    monkeypatch.setattr(encoder_helpers, "_visual_token_embedding_blocks", raw_blocks)
-    monkeypatch.setattr(encoder_helpers, "save_blended_visual_embeddings", lambda *args: exported.append(args))
-    clip = _MiniMaxH3TestClip()
-    config = {"visual_fusion_method": "spatial-checkerboard", "save_blended_embeds": True, "save_path": "first"}
-    kwargs = dict(reference_images={"reference_image_1": torch.ones(1, 32, 32, 3)},
-                  fusion_images={"fusion_image_1": torch.zeros(1, 32, 32, 3)},
-                  ref_image_size="none", vlm_resolution=0, enable_caching="all", visual_fusion_config=config)
-    encoder_helpers.execute_advanced_minimax_h3_image_to_video(clip, None, "subject", 64, 32, 5, **kwargs)
-    count = len(clip.encoded_tokens)
-    config["save_path"] = "second"
-    encoder_helpers.execute_advanced_minimax_h3_image_to_video(clip, None, "subject", 64, 32, 5, **kwargs)
-    assert len(clip.encoded_tokens) == count
-    assert len(exported) == 2
+    first = execute("subject")
+    assert len(clip.encoded_tokens) == 1
+    row = clip.encoded_tokens[0]["qwen3vl_32b"][0]
+    assert any(encoder_helpers.is_image_token(entry) for entry in row)
+    assert row[-1][0] == "subject"
+    second = execute("subject")
+    assert len(clip.encoded_tokens) == (2 if mode == "disabled" else 1)
+    torch.testing.assert_close(first[0][0], second[0][0])
+    execute("changed")
+    assert len(clip.encoded_tokens) == (3 if mode == "disabled" else 2)
 
 
 def test_minimax_h3_prompt_tokens_preserve_inline_order_and_raw_syntax():
@@ -2339,7 +2268,7 @@ def test_temporal_pre_node_uses_actual_preprocessed_encode_and_deepstack(variant
                                            "deepstack": [torch.full((4, 2), pixel * 10)]}})
                     vectors.extend([[pixel] * 4] * 4)
                 else:
-                    vectors.append([1.] * 4)
+                    vectors.append([2. if value == "first" else 3. if value == "second" else 1.] * 4)
             tensor = torch.tensor([vectors])
             return tensor, torch.ones(1, len(vectors)), [len(vectors)], info
 
@@ -2366,12 +2295,14 @@ def test_temporal_pre_node_uses_actual_preprocessed_encode_and_deepstack(variant
         execute("first")
         counts = (len(process_calls), len(qwen_calls))
         assert counts[0] >= 2 and counts[1] == 1
+        execute("first")
+        assert len(qwen_calls) == counts[1]
         execute("second")
-        assert (len(process_calls), len(qwen_calls)) == counts
+        assert len(qwen_calls) == counts[1] + 1
         assert list(tmp_path.glob("utilscollection_h3_encoder_cache/v2/encoded_section/*.safetensors"))
         (alternative if variant == "token" else video)[0].add_(.1)
         execute("second")
-        assert len(qwen_calls) == counts[1] + 1
+        assert len(qwen_calls) == counts[1] + 2
         return
     conditioning, _ = encoder_nodes.UC_AdvMiniMaxH3ImageToVideoTemporalTokenFusion.execute(
         clip, None, "(subject:2)", 64, 64, 5, video=video, media_config=config,

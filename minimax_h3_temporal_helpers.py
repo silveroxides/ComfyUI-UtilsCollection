@@ -290,45 +290,6 @@ def _temporal_processed_sources(processed, videos, image_count):
     return blocks
 
 
-def encode_temporal_section(
-    canonical_tokens, prepared_pairs, *, encode_tokens_callback, fusion_callback,
-    video_grid_callback, token_spans_callback,
-):
-    """Encode/fuse one independent video block for the H3 caching pipeline."""
-    row, positions, videos = _temporal_token_layout(canonical_tokens, [[(0, 1)]])
-    if len(positions) != 1:
-        raise ValueError("Cached temporal fusion requires exactly one video block.")
-    canonical = encode_tokens_callback(canonical_tokens)
-    spans = [_temporal_tag_spans(tensor, metadata, row, positions, token_spans_callback)[0]
-             for tensor, metadata in canonical]
-    sources = [[tensor[:, start:end].clone()] for (tensor, _), (start, end) in zip(canonical, spans)]
-    position = videos[0][1]
-    for pair in prepared_pairs[1:]:
-        alternate_row = list(row)
-        entry = row[position]
-        alternate_row[position] = ({**entry[0], "data": pair}, *entry[1:])
-        alternate = encode_tokens_callback({"qwen3vl_32b": [alternate_row]})
-        if len(alternate) != len(canonical):
-            raise ValueError("Cached temporal candidates have different schedule counts.")
-        for index, ((base, base_meta), (tensor, metadata)) in enumerate(zip(canonical, alternate)):
-            span = _temporal_tag_spans(tensor, metadata, alternate_row, positions, token_spans_callback)[0]
-            if tensor.shape != base.shape or span != spans[index]:
-                raise ValueError("Cached temporal candidates have different visual layouts.")
-            if any(base_meta.get(key) != metadata.get(key) for key in ("clip_start_percent", "clip_end_percent")):
-                raise ValueError("Cached temporal candidates have different schedule boundaries.")
-            sources[index].append(tensor[:, span[0]:span[1]].clone())
-        del alternate
-    result = []
-    for (tensor, metadata), (start, end), candidates in zip(canonical, spans, sources):
-        fused = tensor.clone()
-        grid = video_grid_callback(row[position][0]["data"], end - start)
-        for batch in range(tensor.shape[0]):
-            merged, _ = fusion_callback([source[batch] for source in candidates], [grid] * len(candidates), None)
-            if merged.shape != fused[batch, start:end].shape:
-                raise ValueError("Cached temporal fusion changed its visual span shape.")
-            fused[batch, start:end] = merged
-        result.append([fused, metadata.copy()])
-    return result
 
 
 def encode_temporal_conditioning(

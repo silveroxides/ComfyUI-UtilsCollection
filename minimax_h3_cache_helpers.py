@@ -368,9 +368,9 @@ class H3EncoderCache:
         ) or (self.enable_caching == "images_only" and media == "image")
 
     def allows_encoded_section(self, section_kind):
-        if self.enable_caching == "disabled" or section_kind == "joint":
+        if self.enable_caching == "disabled":
             return False
-        if section_kind == "text":
+        if section_kind in {"text", "joint"}:
             return True
         if self.enable_caching == "all":
             return section_kind in {

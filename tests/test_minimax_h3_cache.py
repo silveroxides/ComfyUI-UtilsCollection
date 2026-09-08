@@ -85,7 +85,7 @@ def test_each_scheduled_qwen_result_has_its_own_cache_file():
         torch.testing.assert_close(first[1][0], second[1][0])
 
 
-def test_preprocessed_qwen_result_is_not_persisted():
+def test_preprocessed_joint_qwen_result_is_persisted():
     embeds = torch.arange(12, dtype=torch.float32).reshape(1, 3, 4)
     info = [{"type": "image", "index": 0, "size": 2, "extra": {"deepstack": [torch.ones(2, 4)]}}]
     model = types.SimpleNamespace(layer="last", layer_idx=None, enable_attention_masks=False,
@@ -102,9 +102,9 @@ def test_preprocessed_qwen_result_is_not_persisted():
             model, embeds, torch.ones((1, 3), dtype=torch.long), [3], info, "grid-deepstack", None,
             lambda: (calls.append(True) or (embeds, {"minimax_token_tags": torch.zeros(3, dtype=torch.long)})),
         )
-        assert len(calls) == 2
+        assert len(calls) == 1
         torch.testing.assert_close(first[0], second[0])
-        assert not (cache.root / "encoded_section").exists()
+        assert len(list((cache.root / "encoded_section").glob("*.safetensors"))) == 1
 
 
 @pytest.mark.parametrize(
@@ -115,7 +115,7 @@ def test_preprocessed_qwen_result_is_not_persisted():
         ("video_only", "image", False), ("video_only", "video", True),
         ("images_only", "video", False), ("images_only", "regular_fusion", True),
         ("video_only", "regular_temporal", True), ("video_only", "guide", False),
-        ("images_only", "guide", True), ("all", "video", True), ("all", "joint", False),
+        ("images_only", "guide", True), ("all", "video", True), ("all", "joint", True),
         ("all", "token_fusion", True), ("images_only", "token_fusion", True), ("video_only", "token_fusion", False),
         ("all", "temporal_token_fusion", True), ("video_only", "temporal_token_fusion", True), ("images_only", "temporal_token_fusion", False),
     ],
