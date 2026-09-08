@@ -36,6 +36,17 @@ _STAGES = frozenset(("encoded_section", "vae_encode"))
 _STORAGE_ERRORS = (OSError, ValueError, TypeError, KeyError, UnicodeError, SafetensorError, StructError, OverflowError, MemoryError, RuntimeError)
 
 
+def _filter_h3_cache_write_log(record):
+    if record.levelno != logging.INFO:
+        return True
+    message = record.getMessage().replace("\\", "/")
+    return not (message.startswith("Finalized '") and "/utilscollection_h3_encoder_cache/" in message)
+
+
+# UEL has no per-writer quiet option; retain all non-cache output and errors.
+logging.getLogger("unifiedefficientloader").addFilter(_filter_h3_cache_write_log)
+
+
 def lifetime_identity(value):
     """Never retain a model, nor serialize a recyclable Python address as its key."""
     address = id(value)
