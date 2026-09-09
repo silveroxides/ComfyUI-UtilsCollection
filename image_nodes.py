@@ -734,7 +734,7 @@ class UC_SampleVideoFramesAsImages(io.ComfyNode):
                 io.Float.Output(
                     "video_runtime",
                     display_name="video runtime",
-                    tooltip="Full active VIDEO duration in seconds, including the active trim.",
+                    tooltip="Generation duration in seconds, rounded up to H3's supported length at 24 fps. Use this duration for captioning and generation; sampled frames keep their source timestamps.",
                 ),
                 io.String.Output(
                     "structured_timeline_text",
@@ -805,7 +805,7 @@ class UC_ImagesToVideoTimeline(io.ComfyNode):
             inputs=[
                 io.Float.Input(
                     "duration", default=5.0, min=0.01, step=0.01,
-                    tooltip="Length of the video in seconds.",
+                    tooltip="Requested video duration in seconds. Rounds up to H3's supported length at 24 fps before placing image timestamps.",
                 ),
                 io.Int.Input(
                     "focus_areas", default=0, min=0, max=3, step=1,
@@ -830,7 +830,7 @@ class UC_ImagesToVideoTimeline(io.ComfyNode):
                 io.Image.Output("image_batch", display_name="image batch", tooltip="All images in one batch. Black when Resize Images is off."),
                 io.String.Output("timestamps_text", display_name="timestamps text", tooltip="All timestamps in one line."),
                 io.String.Output("timeline_text", display_name="timeline text", tooltip="Timeline text ready for a prompt."),
-                io.Float.Output("video_runtime", display_name="video runtime", tooltip="Length of the video in seconds."),
+                io.Float.Output("video_runtime", display_name="video runtime", tooltip="Actual H3 generation duration in seconds at 24 fps. The image timeline and duration text use this same rounded value."),
                 io.String.Output("structured_timeline_text", display_name="structured timeline text", tooltip="Text with video length and Picture timestamps."),
             ],
         )
@@ -856,7 +856,7 @@ class UC_VideoTimelineText(io.ComfyNode):
             category="image/video",
             description="Builds text-only video timeline guidance from a manual duration or connected video.",
             inputs=[
-                io.Float.Input("duration", default=5.0, min=0.01, step=0.01, optional=True, tooltip="Length of the video in seconds. Ignored when video is connected."),
+                io.Float.Input("duration", default=5.0, min=0.01, step=0.01, optional=True, tooltip="Requested video duration in seconds. Rounds up to H3's supported length at 24 fps. A connected video supplies the starting duration instead."),
                 io.Int.Input("segment_count", default=5, min=1, step=1, tooltip="Number of timestamped timeline entries."),
                 io.Int.Input("focus_areas", default=0, min=0, max=3, step=1, tooltip="How many parts to split the timeline into. 0 spaces entries evenly."),
                 io.Float.Input("focus_one", default=0.50, min=0.00, max=1.00, step=0.01, tooltip="Where entries group in the first part. 0 is early, 0.5 is balanced, 1 is late."),
@@ -865,12 +865,12 @@ class UC_VideoTimelineText(io.ComfyNode):
                 io.Combo.Input("timestamp_format", options=list(VIDEO_FRAME_TIMESTAMP_FORMATS), default="00.000s", tooltip="Formatting reused verbatim by every text output."),
                 io.String.Input("timeline_text_structure", multiline=True, dynamic_prompts=False, default=VIDEO_TEXT_TIMELINE_TEXT_STRUCTURE, tooltip="One structure repeated for every timeline entry. Use <<shot>> and <<time>> or <<timestamp>>."),
                 io.String.Input("structured_timeline_text_structure", multiline=True, dynamic_prompts=False, default=VIDEO_TEXT_STRUCTURED_TIMELINE_TEXT_STRUCTURE, tooltip="One whole-timeline structure. <<duration>> and <<segments>> are scalars; <<timestamps>> is comma-and-space-separated; one <<shot>> … <<timestamp>> section repeats comma-and-space-separated for every timeline entry."),
-                io.Video.Input("video", optional=True, tooltip="Optional video whose native duration overrides the duration widget."),
+                io.Video.Input("video", optional=True, tooltip="Optional video whose duration replaces the duration widget, then rounds up to the supported H3 generation length."),
             ],
             outputs=[
                 io.String.Output("timestamps_text", display_name="timestamps text", tooltip="All formatted timestamps in one line."),
                 io.String.Output("timeline_text", display_name="timeline text", tooltip="Timeline text ready for a prompt."),
-                io.Float.Output("video_runtime", display_name="video runtime", tooltip="Length of the video in seconds."),
+                io.Float.Output("video_runtime", display_name="video runtime", tooltip="Actual H3 generation duration in seconds at 24 fps. Timeline timestamps and duration text use this same rounded value."),
                 io.String.Output("structured_timeline_text", display_name="structured timeline text", tooltip="Text with video length and Picture timestamps."),
             ],
         )

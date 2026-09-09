@@ -16,7 +16,7 @@ import torchaudio
 from nodes import MAX_RESOLUTION
 
 from .helper_functions import ASPECT_RATIOS, resize_nchw
-from .parameter_helpers import select_video_resolution
+from .parameter_helpers import h3_video_length_from_seconds, select_video_resolution
 
 
 def prepare_h3_reference_video_components(video, megapixels: float, duration_seconds: float = 0.0):
@@ -36,8 +36,7 @@ def prepare_h3_reference_video_components(video, megapixels: float, duration_sec
     selected_seconds = source_count / source_rate
     if duration_seconds > 0:
         selected_seconds = min(selected_seconds, duration_seconds)
-    requested_frames = max(5, round(selected_seconds * 24))
-    frame_count = requested_frames + (5 - requested_frames % 17) % 17
+    frame_count = h3_video_length_from_seconds(selected_seconds)
     frame_indices = [min(round(index * source_rate / 24), source_count - 1) for index in range(frame_count)]
     prepared_frames = source_frames[frame_indices]
 
@@ -1425,6 +1424,7 @@ def focused_timeline_timestamps(count: int, duration: float, focus_areas: int, f
 
 def images_to_video_timeline(image_inputs, duration: float, focus_areas: int, focus_one: float, focus_two: float, focus_three: float, last_image_is_final: bool, resize_images: bool, timestamp_format: str, timeline_style: str, timeline_text_structure: str, structured_timeline_text_structure: str, index_offset: int = 0) -> SampledVideoFrames:
     """Normalize supplied images and assign their manual video timeline timestamps."""
+    duration = h3_video_length_from_seconds(duration) / 24
     image_batch, image_list = _timeline_image_outputs(image_inputs, resize_images)
     raw_timestamps = focused_timeline_timestamps(len(image_list), duration, focus_areas, focus_one, focus_two, focus_three, anchor_end=last_image_is_final)
     timestamps = [format_video_timestamp(timestamp, timestamp_format) for timestamp in raw_timestamps]
@@ -1456,7 +1456,7 @@ def sample_video_frames_as_images(
     focus_two: float = 0.5,
     focus_three: float = 0.5,
 ) -> SampledVideoFrames:
-    video_runtime = float(video.get_duration())
+    video_runtime = h3_video_length_from_seconds(float(video.get_duration())) / 24
     source_factory = _video_source_factory(video)
     records = scan_video_frame_records(video, source_factory)
     selected, output_timestamps = _select_video_frame_records_and_timestamps(
@@ -1506,6 +1506,7 @@ def video_timeline_text(
     timeline_text_structure: str,
     structured_timeline_text_structure: str,
 ) -> tuple[str, str, float, str]:
+    duration = h3_video_length_from_seconds(duration) / 24
     raw_timestamps = focused_timeline_timestamps(
         segment_count, duration, focus_areas, focus_one, focus_two, focus_three
     )
