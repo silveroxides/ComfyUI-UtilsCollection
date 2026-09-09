@@ -3461,7 +3461,7 @@ def execute_advanced_minimax_h3_image_to_video(
     if video is not None:
         resolved_video_latent_mode = video_latent_mode
         if resolved_video_latent_mode is None:
-            resolved_video_latent_mode = "full video" if frame_vae_enabled else "off"
+            resolved_video_latent_mode = "off"
         if (
             resolved_video_latent_mode == "even keyframes"
             and frame_vae_enabled
