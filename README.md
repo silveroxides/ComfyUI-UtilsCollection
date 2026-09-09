@@ -21,6 +21,11 @@ The list below uses the canonical node IDs. Deprecated compatibility aliases rem
 - `UC_AdvMiniMaxH3ImageToVideoTemporalTokenFusion`
 - `UC_MiniMaxH3VLMGuide`
 - `UC_MiniMaxH3MediaConfig`
+- `UC_MiniMaxH3RefExtract`
+- `UC_MiniMaxH3AudioRefExtract`
+- `UC_MiniMaxH3RefLoad`
+- `UC_MiniMaxH3RefSave`
+- `UC_MiniMaxH3RefApply`
 - `UC_AdvancedVisConEncoder`
 - `UC_AdvancedVisConEncoderTokenFusion`
 - `UC_VisualConsensusConfiguration`
@@ -46,6 +51,18 @@ The temporal encoders fuse offset video samples into the ordinary video token bu
 `UC_MiniMaxH3VLMGuide` inserts an independently encoded timestamp/image block before the prompt in compatible H3 conditioning. Chained guides retain insertion order. This experiment does not re-encode the original prompt jointly with the guide.
 
 `UC_MiniMaxH3FirstFrameReferences`, `UC_AdvancedMiniMaxH3ImageToVideoCombined`, and `UC_AdvMiniMaxH3ImageToVideoCombinedTokenFusion` were removed. Workflows using these IDs report missing nodes; no aliases or migration are provided.
+
+#### MiniMax H3 Ref
+
+**MiniMax H3 Ref Extract** encodes each image in an `IMAGE` batch as a separate native H3 reference. Select `video` only when the ordered batch is one 24 fps clip; the clip needs at least five frames. **MiniMax H3 Audio Ref Extract** creates an independent audio reference with a matching H3 audio VAE. Compression can reduce token cost but loses detail; refined compression optimizes only the compressed latent and does not train a model.
+
+Use **MiniMax H3 Ref Save** to write individual `.safetensors` artifacts under `ComfyUI/models/minimax_h3_refs`, then select an artifact with **MiniMax H3 Ref Load**. **MiniMax H3 Ref Apply** appends saved or newly extracted refs to existing MiniMax H3 conditioning. It uses ordinary native conditioning only—no model patcher or sampler wrapper—and does not add prompt labels, learned trigger words, or voice-cloning guarantees.
+
+Ref Save is an output node, so extraction can run without a sampler. Save uses the original `refmod_meta` file header. Load accepts original-format references and earlier files saved here with `ref_meta`; the shorter node names do not change file compatibility. Saved descriptions and settings are retained as metadata, not automatically applied as controls.
+
+Refs are applied independently in socket order. `retention` controls detail retained in newly supplied refs; it is not attention strength or a denoising curve. `max_ref_tokens` rejects excess total reference tokens instead of silently resizing or dropping refs.
+
+Custom merging, time-varying reference curves, synchronized audio/video identity binding, and library or preview UI are future work. Use the original reference-node package if you need its package-specific behavior.
 
 #### MiniMax H3 CLIP projection models
 

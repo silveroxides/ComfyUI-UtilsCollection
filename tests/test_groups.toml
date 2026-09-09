@@ -54,6 +54,11 @@ python_tests = [
 ]
 frontend_tests = []
 
+[groups.minimax_h3_refs]
+paths = ["model_helpers.py", "model_nodes.py"]
+python_tests = ["tests/test_minimax_h3_refs.py"]
+frontend_tests = []
+
 [groups.embedding_analysis]
 paths = ["embedding_helpers.py", "embedding_nodes.py"]
 python_tests = ["tests/test_embedding_analysis.py"]
