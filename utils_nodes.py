@@ -34,15 +34,15 @@ class UC_MiniMaxH3RefVid(io.ComfyNode):
                 io.Int.Output("width", tooltip="Matching generation width in pixels."),
                 io.Int.Output("height", tooltip="Matching generation height in pixels."),
                 io.Int.Output("length", tooltip="Matching generation length in frames at 24 fps, including the H3 length adjustment."),
-                io.Video.Output("video", tooltip="The prepared frames and matching audio combined into one 24 fps video. Connect to nodes that accept VIDEO."),
+                io.Video.Output("video", tooltip="Length-adjusted 24 fps video with matching audio, preserving the source resolution and framing. The megapixels setting affects only the separate frames output."),
             ],
         )
 
     @classmethod
     def execute(cls, video, megapixels=0.258, duration_seconds=0.0):
-        frames, audio, width, height, length = prepare_h3_reference_video_components(video, megapixels, duration_seconds)
+        frames, audio, width, height, length, video_frames = prepare_h3_reference_video_components(video, megapixels, duration_seconds)
         prepared_video = InputImpl.VideoFromComponents(
-            Types.VideoComponents(images=frames, audio=audio, frame_rate=Fraction(24)),
+            Types.VideoComponents(images=video_frames, audio=audio, frame_rate=Fraction(24)),
         )
         return io.NodeOutput(frames, audio, width, height, length, prepared_video)
 

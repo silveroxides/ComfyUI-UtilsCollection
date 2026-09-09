@@ -38,7 +38,8 @@ def prepare_h3_reference_video_components(video, megapixels: float, duration_sec
         selected_seconds = min(selected_seconds, duration_seconds)
     frame_count = h3_video_length_from_seconds(selected_seconds)
     frame_indices = [min(round(index * source_rate / 24), source_count - 1) for index in range(frame_count)]
-    prepared_frames = source_frames[frame_indices]
+    video_frames = source_frames[frame_indices]
+    prepared_frames = video_frames
 
     source_height, source_width = source_frames.shape[1:3]
     source_aspect = source_width / source_height
@@ -70,7 +71,7 @@ def prepare_h3_reference_video_components(video, megapixels: float, duration_sec
     else:
         audio_samples = torch.zeros(1, 2, aligned_samples)
     prepared_audio = {"waveform": audio_samples, "sample_rate": 32000}
-    return prepared_frames, prepared_audio, output_width, output_height, frame_count
+    return prepared_frames, prepared_audio, output_width, output_height, frame_count, video_frames
 
 
 def _robust_channel_stats(values: np.ndarray) -> tuple[np.ndarray, np.ndarray]:

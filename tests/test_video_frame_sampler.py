@@ -719,7 +719,8 @@ def test_h3_reference_components_round_seconds_and_preserve_audio_start():
     schema = utils_nodes.UC_MiniMaxH3RefVid.GET_SCHEMA()
     assert [output.id for output in schema.outputs] == ["frames", "audio", "width", "height", "length", "video"]
     combined = combined_video.get_components()
-    assert combined.images is prepared
+    assert combined.images.shape == (226, 8, 16, 3)
+    torch.testing.assert_close(combined.images[24], frames[10])
     assert combined.audio is audio
     assert combined.frame_rate == 24
 

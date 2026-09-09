@@ -241,7 +241,7 @@ the base-resolution conditioning fusion.
 - `UC_LoadImageDirectory`
 - `UC_LoadImageWithAlpha`
 - `UC_SampleVideoFramesAsImages`
-- `UC_MiniMaxH3RefVid` — **H3 Reference Video Components** prepares 24 fps reference frames, H3-ready audio, width, height, and frame count. Its final `video` output combines the same prepared frames and audio for nodes that accept VIDEO. Set the duration in seconds (`0` uses the whole clip); the selected duration rounds up to H3's supported frame count. The video is matched to the nearest standard aspect ratio from Video Resolution Selector, then center-cropped to its selected resolution. Audio is resampled to 32 kHz and padded only at the end to an 800-sample boundary, avoiding Core's H3 audio input-cropping issue; missing audio is filled with silence.
+- `UC_MiniMaxH3RefVid` — **H3 Reference Video Components** prepares 24 fps reference frames, H3-ready audio, width, height, and frame count. Its final `video` output preserves the source resolution and framing, adjusting only timing and audio for nodes that accept VIDEO. Set the duration in seconds (`0` uses the whole clip); the selected duration rounds up to H3's supported frame count. Only the separate `frames` output is matched to the nearest standard aspect ratio from Video Resolution Selector and center-cropped to its selected resolution. Audio is resampled to 32 kHz and padded only at the end to an 800-sample boundary, avoiding Core's H3 audio input-cropping issue; missing audio is filled with silence.
 - `UC_ImagesToVideoTimeline`
 - `UC_VideoTimelineText`
 - `UC_LoraLoaderCLIPOnly`
