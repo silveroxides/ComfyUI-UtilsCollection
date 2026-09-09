@@ -7,9 +7,38 @@ import torch
 from comfy_api.latest import io
 from comfy_extras.nodes_logic import SwitchNode, SoftSwitchNode
 from .helper_functions import to_video_prompt
+from .image_helpers import prepare_h3_reference_video_components
 
 _MAX_SEED = 0xFFFFFFFFFFFFFFFF
 SeedClusterType = io.Custom("UC_SEED_CLUSTER")
+
+
+class UC_MiniMaxH3RefVid(io.ComfyNode):
+    @classmethod
+    def define_schema(cls):
+        return io.Schema(
+            node_id="UC_MiniMaxH3RefVid",
+            display_name="H3 Reference Video Components",
+            category="advanced/video",
+            description="Prepares video frames, audio, and matching generation dimensions for MiniMax H3 reference video workflows.",
+            search_aliases=["minimax", "h3", "reference", "video", "components", "24 fps"],
+            inputs=[
+                io.Video.Input("video", tooltip="Reference clip. Its original frame rate is used to preserve playback speed when preparing 24 fps frames."),
+                io.Float.Input("megapixels", default=0.258, min=0.01, max=4.0, step=0.001, tooltip="Target frame size. Matches the video to the nearest standard aspect ratio from Video Resolution Selector, chooses its preferred resolution, and center-crops to fit. Edges may be trimmed; the picture is not stretched."),
+                io.Float.Input("duration_seconds", default=0.0, min=0.0, step=0.1, tooltip="Maximum reference duration in seconds. 0 uses the whole clip. The selected duration rounds up to a supported H3 frame count at 24 fps, so it may run slightly longer and repeat the final frame."),
+            ],
+            outputs=[
+                io.Image.Output("frames", tooltip="Prepared 24 fps frames. Connect to H3 Reference to Video's reference-video input."),
+                io.Audio.Output("audio", tooltip="Soundtrack matched to the prepared video and adjusted for H3. Missing audio at the end is filled with silence; a tiny silent tail may be added to prevent Core from cutting the start. Leave disconnected if no audio reference is wanted."),
+                io.Int.Output("width", tooltip="Matching generation width in pixels."),
+                io.Int.Output("height", tooltip="Matching generation height in pixels."),
+                io.Int.Output("length", tooltip="Matching generation length in frames at 24 fps, including the H3 length adjustment."),
+            ],
+        )
+
+    @classmethod
+    def execute(cls, video, megapixels=0.258, duration_seconds=0.0):
+        return io.NodeOutput(*prepare_h3_reference_video_components(video, megapixels, duration_seconds))
 
 
 class UC_SeedCluster(io.ComfyNode):

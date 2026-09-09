@@ -15,7 +15,7 @@ package = types.ModuleType(PACKAGE_NAME)
 package.__path__ = [str(CUSTOM_NODE_ROOT)]
 sys.modules.setdefault(PACKAGE_NAME, package)
 
-from utils_collection_video_frame_sampler_test import image_helpers
+from utils_collection_video_frame_sampler_test import image_helpers, utils_nodes
 from utils_collection_video_frame_sampler_test.image_helpers import (
     VIDEO_STRUCTURED_TIMELINE_TEXT_STRUCTURE,
     VIDEO_TEXT_STRUCTURED_TIMELINE_TEXT_STRUCTURE,
@@ -698,6 +698,34 @@ def test_sampler_rejects_timestamp_shift_between_selection_and_decode(monkeypatc
             timeline_text_structure="<<time>>",
             structured_timeline_text_structure=VIDEO_STRUCTURED_TIMELINE_TEXT_STRUCTURE,
         )
+
+
+def test_h3_reference_components_round_seconds_and_preserve_audio_start():
+    frames = torch.linspace(0, 1, 100).view(100, 1, 1, 1).expand(100, 8, 16, 3)
+    waveform = torch.zeros(1, 2, 441000)
+    waveform[..., 0] = 1.0
+    components = types.SimpleNamespace(images=frames, frame_rate=10, audio={"waveform": waveform, "sample_rate": 44100})
+    video = types.SimpleNamespace(get_components=lambda: components)
+    result = utils_nodes.UC_MiniMaxH3RefVid.execute(video, megapixels=0.01, duration_seconds=9.3112024)
+    prepared, audio, width, height, length = result.result
+    assert (width, height, length) == (160, 64, 226)
+    assert tuple(prepared.shape) == (226, 64, 160, 3)
+    assert float(prepared[24].mean()) == pytest.approx(10 / 99, abs=1e-6)
+    assert float(prepared[-1].mean()) == pytest.approx(94 / 99, abs=1e-6)
+    assert audio["sample_rate"] == 32000
+    assert audio["waveform"].shape == (1, 2, 301600)
+    assert torch.all(audio["waveform"][..., 0] > 0.5)
+    assert torch.count_nonzero(audio["waveform"][..., 301333:]) == 0
+    schema = utils_nodes.UC_MiniMaxH3RefVid.GET_SCHEMA()
+    assert [output.id for output in schema.outputs] == ["frames", "audio", "width", "height", "length"]
+
+    components.audio = None
+    components.images = frames[:5]
+    components.frame_rate = 24
+    short = utils_nodes.UC_MiniMaxH3RefVid.execute(video, megapixels=0.01)
+    assert short.result[-1] == 5
+    assert short.result[1]["waveform"].shape[-1] == 7200
+    assert torch.count_nonzero(short.result[1]["waveform"]) == 0
 
 
 def test_missing_pts_is_rejected_instead_of_estimated(monkeypatch):

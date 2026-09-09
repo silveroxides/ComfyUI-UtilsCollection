@@ -12,8 +12,66 @@ import av
 import cv2
 import numpy as np
 import torch
+import torchaudio
+from nodes import MAX_RESOLUTION
 
-from .helper_functions import resize_nchw
+from .helper_functions import ASPECT_RATIOS, resize_nchw
+from .parameter_helpers import select_video_resolution
+
+
+def prepare_h3_reference_video_components(video, megapixels: float, duration_seconds: float = 0.0):
+    components = video.get_components()
+    source_frames = components.images
+    source_rate = float(components.frame_rate)
+    if source_frames.ndim != 4 or min(source_frames.shape[:3]) < 1:
+        raise ValueError("Reference video must contain non-empty frames.")
+    if not math.isfinite(source_rate) or source_rate <= 0:
+        raise ValueError("Reference video must have a positive frame rate.")
+    if not math.isfinite(megapixels) or megapixels <= 0:
+        raise ValueError("Megapixels must be positive.")
+    if not math.isfinite(duration_seconds) or duration_seconds < 0:
+        raise ValueError("Duration must be zero or a positive number of seconds.")
+
+    source_count = source_frames.shape[0]
+    selected_seconds = source_count / source_rate
+    if duration_seconds > 0:
+        selected_seconds = min(selected_seconds, duration_seconds)
+    requested_frames = max(5, round(selected_seconds * 24))
+    frame_count = requested_frames + (5 - requested_frames % 17) % 17
+    frame_indices = [min(round(index * source_rate / 24), source_count - 1) for index in range(frame_count)]
+    prepared_frames = source_frames[frame_indices]
+
+    source_height, source_width = source_frames.shape[1:3]
+    source_aspect = source_width / source_height
+    ratio_width, ratio_height = min(
+        ASPECT_RATIOS.values(), key=lambda ratio: abs(source_aspect - ratio[0] / ratio[1]),
+    )
+    output_width, output_height = select_video_resolution(
+        ratio_width, ratio_height, megapixels, 32, 32, MAX_RESOLUTION,
+    )
+    if (output_height, output_width) != (source_height, source_width):
+        prepared_frames = resize_nchw(
+            prepared_frames.movedim(-1, 1), output_width, output_height, "bicubic", "center",
+        ).clamp(0.0, 1.0).movedim(1, -1).contiguous()
+
+    soundtrack = components.audio
+    audio_window = round(frame_count / 24 * 32000)
+    aligned_samples = ((audio_window + 799) // 800) * 800
+    if soundtrack is not None and soundtrack.get("waveform") is not None and soundtrack["waveform"].numel() > 0:
+        sample_rate = int(soundtrack["sample_rate"])
+        if sample_rate <= 0:
+            raise ValueError("Reference audio must have a positive sample rate.")
+        sample_count = round(frame_count / 24 * sample_rate)
+        audio_samples = soundtrack["waveform"][..., :sample_count]
+        if sample_rate != 32000:
+            audio_samples = torchaudio.functional.resample(audio_samples, sample_rate, 32000)
+        audio_samples = audio_samples[..., :audio_window]
+        # Align before Core's generic VAE crop; preserve the start of the audio.
+        audio_samples = torch.nn.functional.pad(audio_samples, (0, aligned_samples - audio_samples.shape[-1]))
+    else:
+        audio_samples = torch.zeros(1, 2, aligned_samples)
+    prepared_audio = {"waveform": audio_samples, "sample_rate": 32000}
+    return prepared_frames, prepared_audio, output_width, output_height, frame_count
 
 
 def _robust_channel_stats(values: np.ndarray) -> tuple[np.ndarray, np.ndarray]:

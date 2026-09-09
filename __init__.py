@@ -120,6 +120,7 @@ class SamplingUtils(ComfyExtension):
             UC_LoadImagePath,
             UC_LoadImageDirectory,
             UC_SampleVideoFramesAsImages,
+            UC_MiniMaxH3RefVid,
             UC_ImagesToVideoTimeline,
             UC_VideoTimelineText,
             UC_HighResolutionTileSplit,
