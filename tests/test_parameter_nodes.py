@@ -85,9 +85,10 @@ def test_video_resolution_selector_returns_resolution_preview():
         megapixels=0.4,
         multiple=32,
         minimum=256,
+        duration_seconds=9.3112024,
     )
 
-    assert output.result == (864, 480)
+    assert output.result == (864, 480, 226)
     assert output.ui == {"resolution": ("864×480",)}
 
 

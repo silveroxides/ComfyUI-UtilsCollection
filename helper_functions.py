@@ -1014,12 +1014,14 @@ class AspectRatio(str, Enum):
     STANDARD_H = "4:3 (Standard Format)"
     CANVAS_H = "5:4 (Canvas Format)"
     WIDESCREEN_H = "16:9 (Widescreen)"
+    EXTENDED_WIDESCREEN_H = "18:9 (Extended Widescreen)"
     ULTRAWIDE_H = "21:9 (Ultrawide)"
     PANORAMA_H = "3:1 (Panorama)"
     PHOTO_V = "2:3 (Medium Portrait)"
     STANDARD_V = "3:4 (Standard Portrait)"
     CANVAS_V = "4:5 (Canvas Portrait)"
     WIDESCREEN_V = "9:16 (Tall Portrait)"
+    EXTENDED_WIDESCREEN_V = "9:18 (Extended Portrait)"
     PANORAMA_V = "1:3 (Tall Panorama)"
 
 
@@ -1029,12 +1031,14 @@ ASPECT_RATIOS: dict[AspectRatio, tuple[int, int]] = {
     AspectRatio.STANDARD_H: (4, 3),
     AspectRatio.CANVAS_H: (5, 4),
     AspectRatio.WIDESCREEN_H: (16, 9),
+    AspectRatio.EXTENDED_WIDESCREEN_H: (18, 9),
     AspectRatio.ULTRAWIDE_H: (21, 9),
     AspectRatio.PANORAMA_H: (3, 1),
     AspectRatio.PHOTO_V: (2, 3),
     AspectRatio.STANDARD_V: (3, 4),
     AspectRatio.CANVAS_V: (4, 5),
     AspectRatio.WIDESCREEN_V: (9, 16),
+    AspectRatio.EXTENDED_WIDESCREEN_V: (9, 18),
     AspectRatio.PANORAMA_V: (1, 3),
 }
 

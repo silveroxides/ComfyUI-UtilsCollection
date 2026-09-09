@@ -4,11 +4,18 @@ import math
 VIDEO_MIDDLE_BAND_MIN_MEGAPIXELS = 0.3
 VIDEO_MIDDLE_BAND_MAX_MEGAPIXELS = 0.8
 VIDEO_MIDDLE_BAND_RESOLUTIONS = {
-    (21, 9): ((896, 384), (1120, 480)),
+    (7, 3): ((896, 384), (1120, 480), (1280, 544)),
     (16, 9): ((768, 416), (864, 480), (1024, 576), (1152, 672)),
     (16, 10): ((768, 480), (1024, 640)),
-    (4, 3): ((640, 480), (768, 576), (1024, 768)),
+    (4, 3): ((640, 480), (768, 576), (864, 672), (1024, 768)),
 }
+
+
+def h3_video_length_from_seconds(seconds: float) -> int:
+    if not math.isfinite(seconds) or seconds < 0:
+        raise ValueError("Duration must be zero or a positive number of seconds.")
+    frames = max(5, round(seconds * 24))
+    return frames + (5 - frames % 17) % 17
 
 
 def _middle_band_resolution(

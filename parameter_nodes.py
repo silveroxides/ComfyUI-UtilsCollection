@@ -7,7 +7,7 @@ import comfy.model_management as mm
 import nodes
 
 from .helper_functions import round_to_nearest, AspectRatio, ASPECT_RATIOS, resize_nchw
-from .parameter_helpers import select_video_resolution
+from .parameter_helpers import h3_video_length_from_seconds, select_video_resolution
 
 
 class UC_AdjustedResolutionParameters(io.ComfyNode):
@@ -164,10 +164,18 @@ class UC_VideoResolutionSelector(io.ComfyNode):
                     step=4,
                     tooltip="Required pixel multiple for both output dimensions.",
                 ),
+                io.Float.Input(
+                    "duration_seconds",
+                    default=5.0,
+                    min=0.0,
+                    step=0.1,
+                    tooltip="Video duration in seconds at 24 fps. Rounds up to a supported H3 length; 5 seconds gives 124 frames. The minimum is 5 frames.",
+                ),
             ],
             outputs=[
                 io.Int.Output("width", tooltip="Selected video width in pixels."),
                 io.Int.Output("height", tooltip="Selected video height in pixels."),
+                io.Int.Output("length", tooltip="H3 generation length in frames at 24 fps, calculated from duration_seconds."),
             ],
         )
 
@@ -178,6 +186,7 @@ class UC_VideoResolutionSelector(io.ComfyNode):
         megapixels: float,
         multiple: int,
         minimum: int = 256,
+        duration_seconds: float = 5.0,
     ) -> io.NodeOutput:
         ratio_width, ratio_height = ASPECT_RATIOS[aspect_ratio]
         width, height = select_video_resolution(
@@ -188,7 +197,8 @@ class UC_VideoResolutionSelector(io.ComfyNode):
             minimum,
             nodes.MAX_RESOLUTION,
         )
-        return io.NodeOutput(width, height, ui={"resolution": (f"{width}×{height}",)})
+        length = h3_video_length_from_seconds(duration_seconds)
+        return io.NodeOutput(width, height, length, ui={"resolution": (f"{width}×{height}",)})
 
 
 class UC_ImageScaleAndResolutionPicker(io.ComfyNode):
