@@ -51,7 +51,7 @@ def prepare_h3_reference_video_components(video, megapixels: float, duration_sec
     )
     if (output_height, output_width) != (source_height, source_width):
         prepared_frames = resize_nchw(
-            prepared_frames.movedim(-1, 1), output_width, output_height, "bicubic", "center",
+            prepared_frames.movedim(-1, 1), output_width, output_height, "lanczos", "center",
         ).clamp(0.0, 1.0).movedim(1, -1).contiguous()
 
     soundtrack = components.audio
