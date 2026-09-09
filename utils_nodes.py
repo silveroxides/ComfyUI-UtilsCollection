@@ -1,10 +1,11 @@
 import sys
 import random
+from fractions import Fraction
 from typing import Union
 import json
 import os
 import torch
-from comfy_api.latest import io
+from comfy_api.latest import InputImpl, Types, io
 from comfy_extras.nodes_logic import SwitchNode, SoftSwitchNode
 from .helper_functions import to_video_prompt
 from .image_helpers import prepare_h3_reference_video_components
@@ -33,12 +34,17 @@ class UC_MiniMaxH3RefVid(io.ComfyNode):
                 io.Int.Output("width", tooltip="Matching generation width in pixels."),
                 io.Int.Output("height", tooltip="Matching generation height in pixels."),
                 io.Int.Output("length", tooltip="Matching generation length in frames at 24 fps, including the H3 length adjustment."),
+                io.Video.Output("video", tooltip="The prepared frames and matching audio combined into one 24 fps video. Connect to nodes that accept VIDEO."),
             ],
         )
 
     @classmethod
     def execute(cls, video, megapixels=0.258, duration_seconds=0.0):
-        return io.NodeOutput(*prepare_h3_reference_video_components(video, megapixels, duration_seconds))
+        frames, audio, width, height, length = prepare_h3_reference_video_components(video, megapixels, duration_seconds)
+        prepared_video = InputImpl.VideoFromComponents(
+            Types.VideoComponents(images=frames, audio=audio, frame_rate=Fraction(24)),
+        )
+        return io.NodeOutput(frames, audio, width, height, length, prepared_video)
 
 
 class UC_SeedCluster(io.ComfyNode):
