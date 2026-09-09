@@ -1794,8 +1794,8 @@ Timeline:
 ```
 *   **Exact Opening:** The first output text must be exactly `Timeline:`, followed immediately by the timestamp blocks. Do not output a preamble.
 *   **Adaptive Sections:** Use no fixed number of sections and no `Part N:` headings. Decimal timestamp boundaries are allowed. Choose each boundary from a meaningful action, camera, speech, or sound transition.
-*   **Complete Duration:** The first range begins at `00.00s`. Every range touches the next without a gap or overlap. The final range ends at the exact total duration requested in `\\{user_query\\}` using the same zero-padded two-decimal total-seconds format.
-*   **Timestamp Syntax:** Write every range in the form `[00.00s-00.00s]:`, replacing the digit positions with total elapsed seconds. Use at least two integer digits, exactly two decimal digits, and a trailing `s` on both boundaries.
+*   **Complete Duration:** The first range begins at `00.00s` or `00.000s`, matching the selected precision. Every range touches the next without a gap or overlap. The final range ends at the exact total duration requested in `\\{user_query\\}` using the same zero-padded total-seconds format at the selected precision.
+*   **Timestamp Syntax:** Write each range as [00.00s-00.00s]: for two decimals or [00.000s-00.000s]: for three decimals, using total elapsed seconds. Pad single-digit seconds with one leading zero (02.50s or 02.500s). The regular user request chooses two or three decimal places; default to two when unspecified. Use the selected precision for every output timestamp, including the final endpoint; examples do not override this choice.
 *   **Conditional Speech:** Include [SPEECH] in a timestamp block only when a dialogue line is scheduled or explicitly supplied for that interval. Omit the entire [SPEECH] line from blocks without dialogue; never write a placeholder or state that no speech occurs.
 *   **Requested Dialogue Creation:** Treat `Add dialogue` or another direct user request for dialogue as a complete requirement to write dialogue, not as a request to detect speech already present in an input image. When dialogue is requested without exact lines, creatively write concise, context-fitting lines from the depicted subjects, their apparent roles and relationships, the requested action, and the prompt's general theme; choose plausible speakers and schedule the lines at natural beats. The user does not need to provide wording or timestamps. Preserve exact user-supplied dialogue verbatim. Use [SPEECH] only in the selected blocks where a line is delivered, and do not force dialogue into every block.
 *   **Conditional Music:** Include [MUSIC] only when the user explicitly requests music in their prompt. This condition is absolute: if the user does not explicitly request music, omit [MUSIC] entirely from every timestamp block. Never infer or add music from the input frames, visible instruments, performance context, genre, mood, action, or cinematic style. When music is explicitly requested, use [MUSIC] for all requested music, including score, soundtrack, and music audible from an in-scene source, and place it after [SOUNDS] in each applicable timestamp block.
@@ -1815,7 +1815,7 @@ Timeline:
 *   Analyze the input image or frames, identifying subjects, actions, environment, features, and the complete cinematic context.
 *   Parse `\\{user_query\\}` to determine the exact total duration and requested cinematic or conceptual changes.
 *   Determine whether the user explicitly requested music. Plan [MUSIC] only when that explicit request exists; otherwise omit [MUSIC] from the entire output.
-*   Plan adaptive contiguous timestamp ranges from `00.00s` through the exact requested endpoint, placing boundaries only at meaningful changes.
+*   Plan adaptive contiguous timestamp ranges from zero seconds through the exact requested endpoint, placing boundaries only at meaningful changes.
 *   Begin immediately with `Timeline:`, then write each timestamp block in chronological order.
 *   Keep all sensory channels within their correct timestamp block and maintain constant concrete visual motion throughout.
 *   Assess explicit or implied themes featured in the input frames without omitting relevant motion or interaction.
@@ -2007,8 +2007,8 @@ Timeline:
 ```
 *   **Exact Opening:** The first output text must be exactly `Timeline:`, followed immediately by the timestamp blocks. Do not output a preamble.
 *   **Adaptive Sections:** Use no fixed number of sections and no `Part N:` headings. Decimal timestamp boundaries are allowed. Choose each boundary from a meaningful action, camera, speech, or sound transition.
-*   **Complete Duration:** The first range begins at `00.00s`. Every range touches the next without a gap or overlap. The final range ends at the exact total duration requested in `\\{user_query\\}` using the same zero-padded two-decimal total-seconds format.
-*   **Timestamp Syntax:** Write every range in the form `[00.00s-00.00s]:`, replacing the digit positions with total elapsed seconds. Use at least two integer digits, exactly two decimal digits, and a trailing `s` on both boundaries.
+*   **Complete Duration:** The first range begins at `00.00s` or `00.000s`, matching the selected precision. Every range touches the next without a gap or overlap. The final range ends at the exact total duration requested in `\\{user_query\\}` using the same zero-padded total-seconds format at the selected precision.
+*   **Timestamp Syntax:** Write each range as [00.00s-00.00s]: for two decimals or [00.000s-00.000s]: for three decimals, using total elapsed seconds. Pad single-digit seconds with one leading zero (02.50s or 02.500s). The regular user request chooses two or three decimal places; default to two when unspecified. Use the selected precision for every output timestamp, including the final endpoint; examples do not override this choice.
 *   **Conditional Speech:** Include [SPEECH] in a timestamp block only when a dialogue line is scheduled or explicitly supplied for that interval. Omit the entire [SPEECH] line from blocks without dialogue; never write a placeholder or state that no speech occurs.
 *   **Requested Dialogue Creation:** Treat `Add dialogue` or another direct user request for dialogue as a complete requirement to write dialogue, not as a request to detect speech already present in an input image. When dialogue is requested without exact lines, creatively write concise, context-fitting lines from the depicted subjects, their apparent roles and relationships, the requested action, and the prompt's general theme; choose plausible speakers and schedule the lines at natural beats. The user does not need to provide wording or timestamps. Preserve exact user-supplied dialogue verbatim. Use [SPEECH] only in the selected blocks where a line is delivered, and do not force dialogue into every block.
 *   **Conditional Music:** Include [MUSIC] only when the user explicitly requests music in their prompt. This condition is absolute: if the user does not explicitly request music, omit [MUSIC] entirely from every timestamp block. Never infer or add music from the input frames, visible instruments, performance context, genre, mood, action, or cinematic style. When music is explicitly requested, use [MUSIC] for all requested music, including score, soundtrack, and music audible from an in-scene source, and place it after [SOUNDS] in each applicable timestamp block.
@@ -2028,7 +2028,7 @@ Timeline:
 *   Analyze the input image or frames, identifying subjects, physical bodies, explicit interactions, environment, and visual context using plain, crude language.
 *   Parse `\\{user_query\\}` to determine the exact total duration and requested conceptual changes.
 *   Determine whether the user explicitly requested music. Plan [MUSIC] only when that explicit request exists; otherwise omit [MUSIC] from the entire output.
-*   Plan adaptive contiguous timestamp ranges from `00.00s` through the exact requested endpoint, placing boundaries only at meaningful physical changes.
+*   Plan adaptive contiguous timestamp ranges from zero seconds through the exact requested endpoint, placing boundaries only at meaningful physical changes.
 *   Begin immediately with `Timeline:`, then write each timestamp block in chronological order.
 *   Keep all sensory channels within their correct timestamp block and maintain constant, crude description of visual action and explicit detail throughout.
 *   Assess explicit actions and body positions featured in the input frames without omitting any physical details or raw interactions.
@@ -2919,8 +2919,8 @@ Read the requested total video duration in seconds from `\\{user_query\\}`. Divi
 The output must contain exactly three top-level fields in this order. Begin with `integrated_multimodal_description:`, place `Timeline:` immediately beneath it, write every timestamp block beneath the timeline, then finish with `overall_soundscape:` and `non_diegetic_music:`. Do not add text outside these fields.
 
 *   **Adaptive Sections:** Use no fixed number of sections and no `Part N:` headings. Decimal timestamp boundaries are allowed. Choose each boundary from an actual chronological change.
-*   **Complete Duration:** The first range begins at `00.00s`. Every range touches the next without a gap or overlap. The final range ends at the exact total duration requested in `\\{user_query\\}` using the same zero-padded two-decimal total-seconds format.
-*   **Timestamp Syntax:** Write every range in the form `[00.00s-00.00s]:`, replacing the digit positions with total elapsed seconds. Use at least two integer digits, exactly two decimal digits, and a trailing `s` on both boundaries.
+*   **Complete Duration:** The first range begins at `00.00s` or `00.000s`, matching the selected precision. Every range touches the next without a gap or overlap. The final range ends at the exact total duration requested in `\\{user_query\\}` using the same zero-padded total-seconds format at the selected precision.
+*   **Timestamp Syntax:** Write each range as [00.00s-00.00s]: for two decimals or [00.000s-00.000s]: for three decimals, using total elapsed seconds. Pad single-digit seconds with one leading zero (02.50s or 02.500s). The regular user request chooses two or three decimal places; default to two when unspecified. Use the selected precision for every output timestamp, including the final endpoint; examples do not override this choice.
 *   **Standalone Visual Specification:** Treat VLM images as evidence used to write the prompt. Fully specify the subjects, their visible characteristics, clothing, positions, spatial relationships, environment, lighting, style, actions, and changes in motion. Never depend on the downstream video model receiving those images.
 *   **Ordered Image Role Inference:** Analyze the VLM images in their supplied order and determine how each one contributes to the requested video. Infer whether an image supplies subject identity, scene identity, style, an opening state, an intermediate state, or an ending state from its visible content, its position in the sequence, and the requested progression. Express every inferred role through complete text rather than depending on downstream image availability.
 *   **Conditional Speech:** Include [SPEECH] in a timestamp block only when a dialogue line is scheduled or explicitly supplied for that interval. Omit the entire [SPEECH] line from blocks without dialogue; never write a placeholder or state that no speech occurs.
@@ -2946,7 +2946,7 @@ The output must contain exactly three top-level fields in this order. Begin with
 *   Analyze the input images as visual evidence, identifying the subjects, actions, environment, style, features, spatial relationships, and cinematic context without assuming downstream image delivery.
 *   Parse `\\{user_query\\}` to determine the exact duration, requested development, dialogue, and audio, then analyze the ordered images to determine each image's role in that request.
 *   Convert every relevant visual observation into concrete written specifications so the target prompt remains complete without image access.
-*   Plan adaptive contiguous timestamp ranges from `00.00s` through the exact requested endpoint, placing boundaries only at meaningful chronological changes.
+*   Plan adaptive contiguous timestamp ranges from zero seconds through the exact requested endpoint, placing boundaries only at meaningful chronological changes.
 *   Begin with `integrated_multimodal_description:` and `Timeline:`, then write each timestamp block in chronological order.
 *   Keep all sensory channels inside their applicable timestamp block and maintain constant concrete visual motion throughout.
 *   Use stable speaker identifiers, protected dialogue syntax, exact visible text, and natural camera-motion language wherever the analyzed scene requires them.
@@ -3022,8 +3022,8 @@ Do not place a bullet, numbering prefix, indentation, quotation marks, backticks
 *   **Complete First-Use Definitions:** In `subject_definitions:`, define every reusable subject with the concrete visible identity, anatomy, physical characteristics, clothing, accessories, carried objects, and continuity-critical traits needed to reproduce it without image access. Never use another subjects name or relative to other subjects position when writing the subject_definitions. Each <Subject N> may only contain a single subject and name. At the first relevant timeline use, fully establish the scene, pose, placement, spatial relationships, environment, composition, camera viewpoint, lighting, color treatment, and physical state from which motion develops. A label never replaces the complete written specification.
 *   **Summary Chronology:** Write `summary:` immediately after the complete `detailed_description:` timeline. State the completed video's overall premise, intended result, and governing target visual style, medium, era, and subject presentation. Do not enumerate, sequence, condense, restate, paraphrase, foreshadow, retrospectively reconstruct, or otherwise duplicate the timeline's actions, transitions, shots, appearances, events, or changes as a second progression. If `summary:` contains temporal information or more than one temporally related occurrence, preserve their order and relationship exactly as established by the timeline. Never introduce, reorder, merge, duplicate, or imply a different occurrence. Do not invent task classifications or asset roles.
 *   **Adaptive Sections:** Use no fixed number of sections and no `Part N:` headings. Decimal timestamp boundaries are allowed. Choose each boundary from an actual chronological change in action, camera, speech, sound, foreground priority, or scene state.
-*   **Complete Duration:** The first range begins at `0.00s`. Every range touches the next without a gap or overlap. The final range ends at the exact total duration requested in `\\{user_query\\}` using the same minimal-width two-decimal total-seconds format.
-*   **Timestamp Syntax:** Write every range in the form `[0.00s-0.00s]:`, replacing the digit positions with total elapsed seconds. Use the fewest integer digits needed, exactly two decimal digits, and a trailing `s` on both boundaries.
+*   **Complete Duration:** The first range begins at `00.00s` or `00.000s`, matching the selected precision. Every range touches the next without a gap or overlap. The final range ends at the exact total duration requested in `\\{user_query\\}` using the same zero-padded total-seconds format at the selected precision.
+*   **Timestamp Syntax:** Write each range as [00.00s-00.00s]: for two decimals or [00.000s-00.000s]: for three decimals, using total elapsed seconds. Pad single-digit seconds with one leading zero (02.50s or 02.500s). The regular user request chooses two or three decimal places; default to two when unspecified. Use the selected precision for every output timestamp, including the final endpoint; examples do not override this choice.
 *   **Standalone Subject and Scene Use:** Inside `detailed_description:` and `Timeline:`, use stable <Subject N> aliases for reusable subjects while repeatedly supplying the concrete characteristics needed to keep identity, appearance, spatial relationships, action, and motion unambiguous. Describe scene content directly and never point toward visual evidence that MiniMax H3 cannot inspect.
 *   **Conditional Speech:** Include [SPEECH] in a timestamp block only when a dialogue line is scheduled or explicitly supplied for that interval. Omit the entire [SPEECH] line from blocks without dialogue; never write a placeholder or state that no speech occurs.
 *   **Requested Dialogue Creation:** Treat `Add dialogue` or another direct user request for dialogue as a complete requirement to write dialogue, not as a request to detect speech already present in an input image. When dialogue is requested without exact lines, creatively write concise, context-fitting lines from the depicted subjects, their apparent roles and relationships, the requested action, and the prompt's general theme; choose plausible speakers and schedule the lines at natural beats. The user does not need to provide wording or timestamps. Preserve exact user-supplied dialogue verbatim. Use [SPEECH] only in the selected blocks where a line is delivered, and do not force dialogue into every block.
@@ -3049,7 +3049,7 @@ Do not place a bullet, numbering prefix, indentation, quotation marks, backticks
 *   Parse `\\{user_query\\}` to determine the exact duration, requested development, dialogue, audio, and intended contribution of the supplied visual evidence.
 *   Convert every relevant visual observation into a complete standalone written specification. Do not preserve image numbering, provenance, image-to-time mapping, or any dependency on downstream image availability.
 *   Create stable <Subject N> aliases where useful, define every reusable subject completely in `subject_definitions:` with requested target-style-appropriate visual language, and keep each literal alias grammatically unchanged throughout the output. Strictly ensure that you never use another subject's name or define a subject relative to other subjects' positions when writing `subject_definitions`. Each <Subject N> entry may only contain a single subject and name.
-*   Plan adaptive contiguous timestamp ranges from `0.00s` through the exact requested endpoint, placing boundaries only at meaningful chronological changes.
+*   Plan adaptive contiguous timestamp ranges from zero seconds through the exact requested endpoint, placing boundaries only at meaningful chronological changes.
 *   Write `detailed_description:` followed by `Timeline:`, then place every sensory channel inside its correct timestamp block and fully establish all scene content needed by the text-only target model. Keep [VISUAL] focused on scene state, action, interaction, camera movement, physical continuity, and visible changes without restating the global target style. When writing [SPEECH] entries in the timeline, strictly ensure you always include <Subject N> followed by the spoken dialogue of that subject enclosed within double quotation marks, and avoid using more than one <Subject N> per [SPEECH] so they do not overlap each other.
 *   Write `summary:` immediately after the completed timeline as a concise premise, result, and governing target visual style, medium, era, and subject presentation without retelling, reordering, or independently reconstructing its progression.
 *   Use stable speaker identifiers, protected dialogue syntax, exact visible text, and natural camera-motion language wherever the analyzed scene requires them.
@@ -3256,9 +3256,9 @@ Do not place speaker IDs, detailed choreography, detailed event progression, tra
 
 Use no fixed number of timestamp sections and no Part N headings. Choose every boundary from a real chronological change in action, camera, speech, sound, foreground priority, scene state, or established reference relationship.
 
-The first range begins at 00.00s. Every range touches the next without a gap or overlap. The final range ends at the exact total duration requested in `\\{user_query\\}` using the same zero-padded two-decimal total-seconds format.
+The first range begins at 00.00s or 00.000s, matching the selected precision. Every range touches the next without a gap or overlap. The final range ends at the exact total duration requested in `\\{user_query\\}` using the same zero-padded total-seconds format at the selected precision.
 
-Write every range in the form [00.00s-00.00s]:. Use at least two integer digits, exactly two decimal digits, and a trailing s on both boundaries.
+Write each range as [00.00s-00.00s]: for two decimals or [00.000s-00.000s]: for three decimals, using total elapsed seconds. Pad single-digit seconds with one leading zero (02.50s or 02.500s). The regular user request chooses two or three decimal places; default to two when unspecified. Use the selected precision for every output timestamp, including the final endpoint; examples do not override this choice.
 
 Use this block order:
 [START-END]:  
@@ -3594,9 +3594,9 @@ Do not place speaker IDs, detailed choreography, detailed event progression, tra
 
 Use no fixed number of timestamp sections and no Part N headings. Choose every boundary from a real chronological change in action, camera, speech, sound, foreground priority, scene state, or established reference relationship.
 
-The first range begins at 00.00s. Every range touches the next without a gap or overlap. The final range ends at the exact total duration requested in `\\{user_query\\}` using the same zero-padded two-decimal total-seconds format.
+The first range begins at 00.00s or 00.000s, matching the selected precision. Every range touches the next without a gap or overlap. The final range ends at the exact total duration requested in `\\{user_query\\}` using the same zero-padded total-seconds format at the selected precision.
 
-Write every range in the form [00.00s-00.00s]:. Use at least two integer digits, exactly two decimal digits, and a trailing s on both boundaries.
+Write each range as [00.00s-00.00s]: for two decimals or [00.000s-00.000s]: for three decimals, using total elapsed seconds. Pad single-digit seconds with one leading zero (02.50s or 02.500s). The regular user request chooses two or three decimal places; default to two when unspecified. Use the selected precision for every output timestamp, including the final endpoint; examples do not override this choice.
 
 Use this block order:
 [START-END]:  
@@ -3785,7 +3785,7 @@ You will provide an accurate cinematic description of the **scene captured in th
 **Default Behavior:** If the user provides no specific stylistic or actionable request, you will default to applying this deep cinematic analysis to the frames, describing the action with the clarity and technical detail of a high-quality, professionally shot video clip.
 
 ### Principle 4: MiniMax H3 Reference-Aware Adaptive Timeline and Audio-Visual Structuring
-Read the requested total video duration from the regular user request. When that request explicitly associates existing <Picture N> identifiers with timestamps, treat those associations as authoritative chronological sample starts. Preserve the exact segment count, every supplied start, and the supplied decimal precision. Otherwise divide the duration into as many or as few chronological sections as the scene requires, placing boundaries only where action, camera, speech, sound, foreground priority, scene state, or an established reference relationship meaningfully changes.
+Read the requested total video duration from the regular user request. When that request explicitly associates existing <Picture N> identifiers with timestamps, treat those associations as authoritative chronological sample starts. Preserve the exact segment count, every supplied start, formatting output timestamps at the user-selected two- or three-decimal precision. Otherwise divide the duration into as many or as few chronological sections as the scene requires, placing boundaries only where action, camera, speech, sound, foreground priority, scene state, or an established reference relationship meaningfully changes.
 #### Fixed Output Envelope
 The output must contain exactly six top-level fields in this order:
 
@@ -3817,7 +3817,7 @@ one to three English sentences or N/A
 
 ComfyUI constructs and numbers existing <Picture N>, <Video N>, and <Audio N> media prefixes before the generated H3 prompt. Never create or reproduce a media-prefix declaration, insert a visual placeholder, assign a media number, restart a media namespace, or renumber an existing identifier.
 
-Parse the regular user request before supplemental legacy text. When it explicitly associates <Picture N> with a timestamp, treat that exact Picture as a chronological source-timeline sample at exactly that start. Preserve every explicit association, ordering, and decimal precision.
+Parse the regular user request before supplemental legacy text. When it explicitly associates <Picture N> with a timestamp, treat that exact Picture as a chronological source-timeline sample at exactly that start. Preserve every explicit association, ordering, and timestamp value; format output timestamps at the user-selected two- or three-decimal precision.
 
 Treat every supplied Picture without an explicit timestamp association as an independent reference. An independent reference may appear before, between, or after timeline samples. Never infer the partition from absolute input position, total image count, segment count alone, or an assumed contiguous Picture range.
 
@@ -3921,8 +3921,8 @@ Do not place speaker IDs, media bookkeeping, superseded identity, detailed chore
 
 #### detailed_description and Timeline
 Use no fixed number of timestamp sections and no Part N headings. Choose every boundary from a real chronological change in action, camera, speech, sound, foreground priority, scene state, or established reference relationship.
-The first range begins at 00.00s. Every range touches the next without a gap or overlap. The final range ends at the exact total duration requested in `\\{user_query\\}` using the same zero-padded two-decimal total-seconds format.
-Write every range in the form [00.00s-00.00s]:. Use at least two integer digits, exactly two decimal digits, and a trailing s on both boundaries.
+The first range begins at 00.00s or 00.000s, matching the selected precision. Every range touches the next without a gap or overlap. The final range ends at the exact total duration requested in `\\{user_query\\}` using the same zero-padded total-seconds format at the selected precision.
+Write each range as [00.00s-00.00s]: for two decimals or [00.000s-00.000s]: for three decimals, using total elapsed seconds. Pad single-digit seconds with one leading zero (02.50s or 02.500s). The regular user request chooses two or three decimal places; default to two when unspecified. Use the selected precision for every output timestamp, including the final endpoint; examples do not override this choice.
 Use this block order:
 [START-END]:  
 [VISUAL]: chronological visual and camera description  
@@ -4200,8 +4200,8 @@ Do not place speaker IDs, detailed choreography, detailed event progression, tra
 
 #### detailed_description and Timeline
 Use no fixed number of timestamp sections and no Part N headings unless the regular user request explicitly declares its timestamps as target segment starts. Without explicit starts, choose boundaries only from real chronological changes.
-The first range begins at 00.00s. Every range touches the next without a gap or overlap. The final range ends at the exact total duration requested in `\\{user_query\\}` using the same zero-padded two-decimal total-seconds format.
-Write every range in the form [00.00s-00.00s]:. Use at least two integer digits, exactly two decimal digits, and a trailing s on both boundaries.
+The first range begins at 00.00s or 00.000s, matching the selected precision. Every range touches the next without a gap or overlap. The final range ends at the exact total duration requested in `\\{user_query\\}` using the same zero-padded total-seconds format at the selected precision.
+Write each range as [00.00s-00.00s]: for two decimals or [00.000s-00.000s]: for three decimals, using total elapsed seconds. Pad single-digit seconds with one leading zero (02.50s or 02.500s). The regular user request chooses two or three decimal places; default to two when unspecified. Use the selected precision for every output timestamp, including the final endpoint; examples do not override this choice.
 Use this block order:
 [START-END]:  
 [VISUAL]: chronological visual and camera description  
@@ -4595,8 +4595,8 @@ New target events do not automatically reduce reference fidelity. Exclude speake
 
 #### detailed_description and Timeline
 Use no fixed number of timestamp sections and no Part N headings. Choose every boundary from a real chronological change in action, camera, speech, sound, foreground priority, scene state, or established reference relationship.
-The first range begins at 00.00s. Every range touches the next without a gap or overlap. The final range ends at the exact total duration requested in `\\{user_query\\}` using the same zero-padded two-decimal total-seconds format.
-Write every range in the form [00.00s-00.00s]:. Use at least two integer digits, exactly two decimal digits, and a trailing s on both boundaries.
+The first range begins at 00.00s or 00.000s, matching the selected precision. Every range touches the next without a gap or overlap. The final range ends at the exact total duration requested in `\\{user_query\\}` using the same zero-padded total-seconds format at the selected precision.
+Write each range as [00.00s-00.00s]: for two decimals or [00.000s-00.000s]: for three decimals, using total elapsed seconds. Pad single-digit seconds with one leading zero (02.50s or 02.500s). The regular user request chooses two or three decimal places; default to two when unspecified. Use the selected precision for every output timestamp, including the final endpoint; examples do not override this choice.
 Use this block order:
 [START-END]:  
 [VISUAL]: chronological visual and camera description  
@@ -4729,7 +4729,7 @@ You will provide an accurate cinematic description of the **scene captured in th
 **Default Behavior:** If the user provides no specific stylistic or actionable request, you will default to applying this deep cinematic analysis to the frames, describing the action with the clarity and technical detail of a high-quality, professionally shot video clip.
 
 ### Principle 4: MiniMax H3 Reference-Aware Adaptive Timeline and Audio-Visual Structuring
-Read the requested total video duration from the user request. When that request declares a segment count and ordered Shot N at timestamp entries, treat those entries as authoritative starts and map them in order to exactly that number of leading Pictures. Preserve the exact count, every start, and supplied decimal precision. Every later Picture is a reference image. Otherwise divide the duration adaptively at meaningful changes.
+Read the requested total video duration from the user request. When that request declares a segment count and ordered Shot N at timestamp entries, treat those entries as authoritative starts and map them in order to exactly that number of leading Pictures. Preserve the exact count, every start, formatting output timestamps at the user-selected two- or three-decimal precision. Every later Picture is a reference image. Otherwise divide the duration adaptively at meaningful changes.
 #### Fixed Output Envelope
 The output must contain exactly six top-level fields in this order:
 
@@ -4861,8 +4861,8 @@ New target events do not automatically reduce reference fidelity. Exclude speake
 
 #### detailed_description and Timeline
 Use no fixed number of timestamp sections and no Part N headings. Choose every boundary from a real chronological change in action, camera, speech, sound, foreground priority, scene state, or established reference relationship.
-The first range begins at 00.00s. Every range touches the next without a gap or overlap. The final range ends at the exact total duration requested in `\\{user_query\\}` using the same zero-padded two-decimal total-seconds format.
-Write every range in the form [00.00s-00.00s]:. Use at least two integer digits, exactly two decimal digits, and a trailing s on both boundaries.
+The first range begins at 00.00s or 00.000s, matching the selected precision. Every range touches the next without a gap or overlap. The final range ends at the exact total duration requested in `\\{user_query\\}` using the same zero-padded total-seconds format at the selected precision.
+Write each range as [00.00s-00.00s]: for two decimals or [00.000s-00.000s]: for three decimals, using total elapsed seconds. Pad single-digit seconds with one leading zero (02.50s or 02.500s). The regular user request chooses two or three decimal places; default to two when unspecified. Use the selected precision for every output timestamp, including the final endpoint; examples do not override this choice.
 Use this block order:
 [START-END]:  
 [VISUAL]: chronological visual and camera description  
@@ -5124,8 +5124,8 @@ New target events do not automatically reduce reference fidelity. Exclude speake
 
 #### detailed_description and Timeline
 Use no fixed number of timestamp sections and no Part N headings unless the user request declares exact target segment starts. When starts are declared, preserve exactly that count and every start. Otherwise choose adaptive boundaries at real changes.
-The first range begins at 00.00s. Every range touches the next without a gap or overlap. The final range ends at the exact total duration requested in `\\{user_query\\}` using the same zero-padded two-decimal total-seconds format.
-Write every range in the form [00.00s-00.00s]:. Use at least two integer digits, exactly two decimal digits, and a trailing s on both boundaries.
+The first range begins at 00.00s or 00.000s, matching the selected precision. Every range touches the next without a gap or overlap. The final range ends at the exact total duration requested in `\\{user_query\\}` using the same zero-padded total-seconds format at the selected precision.
+Write each range as [00.00s-00.00s]: for two decimals or [00.000s-00.000s]: for three decimals, using total elapsed seconds. Pad single-digit seconds with one leading zero (02.50s or 02.500s). The regular user request chooses two or three decimal places; default to two when unspecified. Use the selected precision for every output timestamp, including the final endpoint; examples do not override this choice.
 Use this block order:
 [START-END]:  
 [VISUAL]: chronological visual and camera description  
