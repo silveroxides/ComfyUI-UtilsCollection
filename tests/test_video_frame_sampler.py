@@ -724,6 +724,22 @@ def test_h3_reference_components_round_seconds_and_preserve_audio_start():
     assert combined.audio is audio
     assert combined.frame_rate == 24
 
+    # Positive start offsets use H3 rounding and move video and audio together.
+    waveform[..., 71662] = 1.0  # round((39 / 24) * 44100)
+    shifted = utils_nodes.UC_MiniMaxH3RefVid.execute(video, megapixels=0.01, duration_seconds=2.0, start_at_timestamp=1.0)
+    shifted_frames, shifted_audio, _, _, shifted_length, shifted_video = shifted.result
+    assert shifted_length == 56
+    torch.testing.assert_close(shifted_video.get_components().images[0], frames[16])
+    torch.testing.assert_close(shifted_video.get_components().images[-1], frames[39])
+    assert float(shifted_frames[0].mean()) == pytest.approx(16 / 99, abs=1e-6)
+    assert torch.all(shifted_audio["waveform"][..., 0] > 0.5)
+    assert shifted.ui == {"h3_reference_range": [{"start_frame": 39, "length": 56, "source_seconds": 10.0}]}
+    remaining = utils_nodes.UC_MiniMaxH3RefVid.execute(video, megapixels=0.01, start_at_timestamp=1.0)
+    assert remaining.result[4] == 209
+    torch.testing.assert_close(remaining.result[5].get_components().images[-1], frames[-1])
+    with pytest.raises(ValueError, match="past the end"):
+        utils_nodes.UC_MiniMaxH3RefVid.execute(video, start_at_timestamp=10.0)
+
     components.audio = None
     components.images = frames[:5]
     components.frame_rate = 24

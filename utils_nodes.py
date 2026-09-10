@@ -26,7 +26,8 @@ class UC_MiniMaxH3RefVid(io.ComfyNode):
             inputs=[
                 io.Video.Input("video", tooltip="Reference clip. Its original frame rate is used to preserve playback speed when preparing 24 fps frames."),
                 io.Float.Input("megapixels", default=0.258, min=0.01, max=4.0, step=0.001, tooltip="Target frame size. Matches the video to the nearest standard aspect ratio from Video Resolution Selector, chooses its preferred resolution, and center-crops to fit. Edges may be trimmed; the picture is not stretched."),
-                io.Float.Input("duration_seconds", default=0.0, min=0.0, step=0.1, tooltip="Maximum reference duration in seconds. 0 uses the whole clip. The selected duration rounds up to a supported H3 frame count at 24 fps, so it may run slightly longer and repeat the final frame."),
+                io.Float.Input("duration_seconds", default=0.0, min=0.0, step=0.1, tooltip="Maximum reference duration after the start offset. 0 uses the remaining clip. The selected duration rounds up to a supported H3 frame count at 24 fps, so it may run slightly longer and repeat the final frame."),
+                io.Float.Input("start_at_timestamp", default=0.0, min=0.0, step=0.1, tooltip="Seconds to skip at the start, for both video and audio. 0 skips nothing; positive values use the same H3 frame-count rounding as duration. Preview frame numbers are zero-based and the end frame is inclusive."),
             ],
             outputs=[
                 io.Image.Output("frames", tooltip="Prepared 24 fps frames. Connect to H3 Reference to Video's reference-video input."),
@@ -39,12 +40,12 @@ class UC_MiniMaxH3RefVid(io.ComfyNode):
         )
 
     @classmethod
-    def execute(cls, video, megapixels=0.258, duration_seconds=0.0):
-        frames, audio, width, height, length, video_frames = prepare_h3_reference_video_components(video, megapixels, duration_seconds)
+    def execute(cls, video, megapixels=0.258, duration_seconds=0.0, start_at_timestamp=0.0):
+        frames, audio, width, height, length, video_frames, preview = prepare_h3_reference_video_components(video, megapixels, duration_seconds, start_at_timestamp)
         prepared_video = InputImpl.VideoFromComponents(
             Types.VideoComponents(images=video_frames, audio=audio, frame_rate=Fraction(24)),
         )
-        return io.NodeOutput(frames, audio, width, height, length, prepared_video)
+        return io.NodeOutput(frames, audio, width, height, length, prepared_video, ui={"h3_reference_range": [preview]})
 
 
 class UC_SeedCluster(io.ComfyNode):

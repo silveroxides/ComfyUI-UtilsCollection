@@ -1,4 +1,5 @@
 import { app } from "../../scripts/app.js";
+import { h3VideoLengthFromSeconds, h3ReferenceFrameRange } from "./h3_video_length.js";
 import {
   clampResolutionPreviewSize,
   resolutionPreviewMinimumSize,
@@ -31,19 +32,6 @@ function widgetValue(node, name) {
 
 function widgetIsLinked(node, name) {
   return node.inputs?.some((input) => input.widget?.name === name && input.link != null) ?? false;
-}
-
-// Python's round() resolves exact halves to the even neighbour; Math.round always rounds up.
-function roundHalfEven(value) {
-  const rounded = Math.round(value);
-  return Math.abs(value % 1) === 0.5 && rounded % 2 !== 0 ? rounded - 1 : rounded;
-}
-
-// Mirrors h3_video_length_from_seconds in parameter_helpers.py.
-function h3VideoLengthFromSeconds(seconds) {
-  if (!Number.isFinite(seconds) || seconds < 0) return null;
-  const frames = Math.max(5, roundHalfEven(seconds * 24));
-  return frames + ((((5 - (frames % 17)) % 17) + 17) % 17);
 }
 
 function compareKeys(left, right) {
@@ -127,6 +115,16 @@ function videoResolution(ratioWidth, ratioHeight, megapixels, multiple, minimum)
 }
 
 function updatePreview(node, backendValue) {
+  if (node.__ucH3ReferenceVideo) {
+    const range = backendValue ?? h3ReferenceFrameRange(
+      widgetIsLinked(node, "start_at_timestamp") ? null : Number(widgetValue(node, "start_at_timestamp")),
+      widgetIsLinked(node, "duration_seconds") ? null : Number(widgetValue(node, "duration_seconds")),
+      node.__ucH3SourceSeconds ?? null,
+    );
+    node.__ucResolutionPreview = `start frame ${range.start ?? "…"} · end frame ${range.end ?? "…"} · ${range.length ?? "…"} frames`;
+    node.setDirtyCanvas(true, true);
+    return;
+  }
   if (backendValue !== undefined) {
     node.__ucResolutionPreview = String(Array.isArray(backendValue) ? backendValue[0] : backendValue);
   } else {
@@ -151,12 +149,14 @@ function updatePreview(node, backendValue) {
 app.registerExtension({
   name: "ComfyUI.UtilsCollection.ResolutionPreview",
   async beforeRegisterNodeDef(nodeType, nodeData) {
-    if (!["UC_ResolutionSelectorExtended", "UC_VideoResolutionSelector"].includes(nodeData.name)) return;
+    if (!["UC_ResolutionSelectorExtended", "UC_VideoResolutionSelector", "UC_MiniMaxH3RefVid"].includes(nodeData.name)) return;
 
     const computeSize = nodeType.prototype.computeSize;
     nodeType.prototype.computeSize = function (out) {
       const baseSize = computeSize?.call(this, out ? [...out] : undefined) || [...(out || this.size || [0, 0])];
-      return resolutionPreviewMinimumSize(baseSize);
+      const size = resolutionPreviewMinimumSize(baseSize);
+      if (nodeData.name === "UC_MiniMaxH3RefVid") size[0] = Math.max(size[0], 380);
+      return size;
     };
 
     const onResize = nodeType.prototype.onResize;
@@ -169,6 +169,7 @@ app.registerExtension({
     nodeType.prototype.onNodeCreated = function () {
       const result = onNodeCreated?.apply(this, arguments);
       this.__ucVideoResolutionSelector = nodeData.name === "UC_VideoResolutionSelector";
+      this.__ucH3ReferenceVideo = nodeData.name === "UC_MiniMaxH3RefVid";
       this.__ucResolutionPreview = "";
       const minimum = this.computeSize();
       this.setSize([
@@ -194,14 +195,40 @@ app.registerExtension({
     const onWidgetChanged = nodeType.prototype.onWidgetChanged;
     nodeType.prototype.onWidgetChanged = function (name) {
       const result = onWidgetChanged?.apply(this, arguments);
-      if (["aspect_ratio", "megapixels", "multiple", "minimum", "duration_seconds"].includes(name)) updatePreview(this);
+      if (["aspect_ratio", "megapixels", "multiple", "minimum", "duration_seconds", "start_at_timestamp"].includes(name)) updatePreview(this);
       return result;
     };
 
     const onExecuted = nodeType.prototype.onExecuted;
     nodeType.prototype.onExecuted = function (message) {
       onExecuted?.apply(this, arguments);
+      if (this.__ucH3ReferenceVideo) {
+        const range = message?.h3_reference_range?.[0];
+        if (range) {
+          this.__ucH3SourceSeconds = range.source_seconds;
+          updatePreview(this, { start: range.start_frame, end: range.start_frame + range.length - 1, length: range.length });
+        }
+        return;
+      }
       updatePreview(this, message?.resolution);
     };
+
+    if (nodeData.name === "UC_MiniMaxH3RefVid") {
+      const onConnectionsChange = nodeType.prototype.onConnectionsChange;
+      nodeType.prototype.onConnectionsChange = function (type, slot) {
+        const result = onConnectionsChange?.apply(this, arguments);
+        if (type === 1) {
+          if (this.inputs?.[slot]?.name === "video") this.__ucH3SourceSeconds = null;
+          updatePreview(this);
+        }
+        return result;
+      };
+      const onConfigure = nodeType.prototype.onConfigure;
+      nodeType.prototype.onConfigure = function () {
+        const result = onConfigure?.apply(this, arguments);
+        updatePreview(this);
+        return result;
+      };
+    }
   },
 });

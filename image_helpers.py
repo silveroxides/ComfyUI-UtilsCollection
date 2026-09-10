@@ -691,7 +691,7 @@ def run_densepose_batch(images, resolution=0, batch_size=2, cmap="viridis", *, l
     return output
 
 
-def prepare_h3_reference_video_components(video, megapixels: float, duration_seconds: float = 0.0):
+def prepare_h3_reference_video_components(video, megapixels: float, duration_seconds: float = 0.0, start_at_timestamp: float = 0.0):
     components = video.get_components()
     source_frames = components.images
     source_rate = float(components.frame_rate)
@@ -703,13 +703,20 @@ def prepare_h3_reference_video_components(video, megapixels: float, duration_sec
         raise ValueError("Megapixels must be positive.")
     if not math.isfinite(duration_seconds) or duration_seconds < 0:
         raise ValueError("Duration must be zero or a positive number of seconds.")
+    if not math.isfinite(start_at_timestamp) or start_at_timestamp < 0:
+        raise ValueError("Start timestamp must be zero or a positive number of seconds.")
 
     source_count = source_frames.shape[0]
-    selected_seconds = source_count / source_rate
+    source_seconds = source_count / source_rate
+    start_frame = h3_video_length_from_seconds(start_at_timestamp) if start_at_timestamp > 0 else 0
+    start_seconds = start_frame / 24
+    if start_seconds >= source_seconds:
+        raise ValueError("Start timestamp rounds past the end of the reference video.")
+    selected_seconds = source_seconds - start_seconds
     if duration_seconds > 0:
         selected_seconds = min(selected_seconds, duration_seconds)
     frame_count = h3_video_length_from_seconds(selected_seconds)
-    frame_indices = [min(round(index * source_rate / 24), source_count - 1) for index in range(frame_count)]
+    frame_indices = [min(round((start_frame + index) * source_rate / 24), source_count - 1) for index in range(frame_count)]
     video_frames = source_frames[frame_indices]
     prepared_frames = video_frames
 
@@ -734,8 +741,9 @@ def prepare_h3_reference_video_components(video, megapixels: float, duration_sec
         if sample_rate <= 0:
             raise ValueError("Reference audio must have a positive sample rate.")
         sample_count = round(frame_count / 24 * sample_rate)
-        audio_samples = soundtrack["waveform"][..., :sample_count]
-        if sample_rate != 32000:
+        start_sample = round(start_seconds * sample_rate)
+        audio_samples = soundtrack["waveform"][..., start_sample:start_sample + sample_count]
+        if sample_rate != 32000 and audio_samples.numel():
             audio_samples = torchaudio.functional.resample(audio_samples, sample_rate, 32000)
         audio_samples = audio_samples[..., :audio_window]
         # Align before Core's generic VAE crop; preserve the start of the audio.
@@ -743,7 +751,8 @@ def prepare_h3_reference_video_components(video, megapixels: float, duration_sec
     else:
         audio_samples = torch.zeros(1, 2, aligned_samples)
     prepared_audio = {"waveform": audio_samples, "sample_rate": 32000}
-    return prepared_frames, prepared_audio, output_width, output_height, frame_count, video_frames
+    preview = {"start_frame": start_frame, "length": frame_count, "source_seconds": source_seconds}
+    return prepared_frames, prepared_audio, output_width, output_height, frame_count, video_frames, preview
 
 
 def _robust_channel_stats(values: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
