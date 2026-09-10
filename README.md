@@ -6,6 +6,15 @@ A collection of ComfyUI nodes for modern text and multimodal conditioning, image
 
 The list below uses the canonical node IDs. Deprecated compatibility aliases remain registered for existing workflows but are not duplicated here.
 
+### Whisper audio transcription
+
+Whisper transcription requires `tiktoken` (included in `requirements.txt`). Without it, the collection still loads and non-Whisper nodes remain available; attempting transcription gives an installation error. Install it in ComfyUI's Python environment and restart ComfyUI to enable Whisper.
+
+- `UC_WhisperLoader` loads tiny, base (default), small, medium, large-v2, or large-v3 safetensors from the registered `whisper` model directories. If missing, executing the loader downloads only the selected model from `silveroxides/ComfyUI-UtilsCollection-Models/audio/whisper` into `models/whisper`. Existing configured directories retain priority; invalid checkpoints raise an error rather than being replaced.
+- `UC_WhisperTranscribe` takes the loaded model and ComfyUI `AUDIO`. Choose transcription (default) or translation to English, with automatic spoken-language detection or a language code. Stereo/multichannel audio is downmixed to mono and resampled to 16 kHz. Full recordings are processed in timestamp-aware windows.
+- Outputs are aligned ComfyUI lists: transcript text, a JSON array of `{start, end, text}` segments, and a spoken-language code per recording. Times are seconds from the start of each recording, not each processing window. With an explicit language, the language output reports that selection. Translation text is English, not the selected source language.
+- Native inference uses ComfyUI model management and attention, UEL safetensors loading, and `tiktoken`; it does not import `openai-whisper` or the local reference checkout. Segment timestamps are approximate. Word alignment, diarization, SRT/VTT formatting, and advanced decoding widgets are not included. A language unavailable in a checkpoint is rejected explicitly.
+
 ### Text encoding and conditioning
 
 - `UC_TextEncodeSystemPrompt`

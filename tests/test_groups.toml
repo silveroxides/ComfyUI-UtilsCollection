@@ -248,3 +248,8 @@ frontend_tests = []
 paths = ["models/__init__.py", "models/lama.py", "lama_helpers.py", "lama_nodes.py"]
 python_tests = ["tests/test_lama.py", "tests/test_lama_conversion.py"]
 frontend_tests = []
+
+[groups.whisper]
+paths = ["model_nodes.py", "model_helpers.py", "models/whisper.py", "models/whisper_assets/*"]
+python_tests = ["tests/test_whisper.py"]
+frontend_tests = []

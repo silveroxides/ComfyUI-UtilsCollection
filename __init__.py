@@ -174,6 +174,8 @@ class SamplingUtils(ComfyExtension):
             UC_SAM3Detect,
             UC_LoadImageWithAlpha,
             UC_LoadLaMaModel,
+            UC_WhisperLoader,
+            UC_WhisperTranscribe,
             UC_LaMaInpaint,
             UC_BatchedOpenPose,
             UC_DWPoseEstimator,

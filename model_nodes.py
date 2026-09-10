@@ -1,6 +1,6 @@
 from comfy_api.latest import io
-
 from .model_helpers import (
+    WHISPER_MODELS, WHISPER_LANGUAGES, load_whisper_model, register_whisper_paths, run_whisper,
     apply_minimax_h3_refs_to_conditioning,
     create_minimax_h3_audio_ref,
     create_minimax_h3_image_refs,
@@ -14,6 +14,43 @@ from .model_helpers import (
     minimax_h3_ref_resolution_grid,
     save_minimax_h3_ref_collection,
 )
+
+WhisperModel = io.Custom("WHISPER_MODEL")
+register_whisper_paths()
+
+
+class UC_WhisperLoader(io.ComfyNode):
+    @classmethod
+    def define_schema(cls):
+        return io.Schema(
+            node_id="UC_WhisperLoader", display_name="Whisper Loader", category="utils/audio",
+            description="Loads native Whisper safetensors through UEL and ComfyUI model management.",
+            inputs=[io.Combo.Input("model_name", options=list(WHISPER_MODELS), default="base", tooltip="Uses models/whisper. Executing downloads only the selected model if missing.")],
+            outputs=[WhisperModel.Output("whisper_model")],
+        )
+
+    @classmethod
+    def execute(cls, model_name="base"):
+        return io.NodeOutput(load_whisper_model(model_name))
+
+
+class UC_WhisperTranscribe(io.ComfyNode):
+    @classmethod
+    def define_schema(cls):
+        return io.Schema(
+            node_id="UC_WhisperTranscribe", display_name="Whisper Transcribe", category="utils/audio",
+            description="Transcribes full recordings or translates speech to English; one aligned result per audio batch item.",
+            inputs=[WhisperModel.Input("whisper_model"), io.Audio.Input("audio"),
+                    io.Combo.Input("task", options=["transcribe", "translate"], default="transcribe"),
+                    io.Combo.Input("language", options=["auto", *WHISPER_LANGUAGES], default="auto", tooltip="Spoken language code, or automatic detection. Translation outputs English.")],
+            outputs=[io.String.Output("text", is_output_list=True),
+                     io.String.Output("segments", is_output_list=True, tooltip="JSON array of start/end seconds and text for this recording."),
+                     io.String.Output("language", is_output_list=True)],
+        )
+
+    @classmethod
+    def execute(cls, whisper_model, audio, task="transcribe", language="auto"):
+        return io.NodeOutput(*run_whisper(whisper_model, audio, task, language))
 
 
 MiniMaxH3Ref = io.Custom("MINIMAX_H3_REF")
