@@ -80,6 +80,7 @@ paths = [
   "composite_helpers.py",
   "composite_nodes.py",
   "staged_compositor_helpers.py",
+  "foreground_content_helpers.py",
   "staged_face_helpers.py",
 ]
 python_tests = ["tests/test_composite_nodes.py", "tests/test_composite_guide.py"]
@@ -200,12 +201,18 @@ frontend_tests = [
 
 [groups.paint_frontend]
 paths = [
+  "web/foreground_content.js",
+  "web/foreground_content_editor.js",
+  "web/staged_editor_controls.js",
   "web/paint_brush.js",
   "web/paint_color_picker.js",
   "web/paint_persistence.js",
 ]
 python_tests = ["tests/test_composite_nodes.py"]
 frontend_tests = [
+  "tests/test_foreground_content.mjs",
+  "tests/test_foreground_content_editor.mjs",
+  "tests/test_staged_editor_controls.mjs",
   "tests/test_paint_brush.mjs",
   "tests/test_paint_color_picker.mjs",
   "tests/test_paint_persistence.mjs",

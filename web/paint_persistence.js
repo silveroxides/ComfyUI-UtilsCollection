@@ -53,3 +53,20 @@ export async function uploadPaintCanvas(api, canvas, paint, nodeId) {
     revision: Math.max(0, Number(paint.revision) || 0) + 1,
   };
 }
+
+// Every foreground save is immutable: queued prompts and workflow copies retain
+// their original pixels even when the same editor keeps drawing.
+export async function uploadForegroundCanvas(api, canvas) {
+  const filename = `uc-foreground-${newAssetId()}.png`;
+  const blob = await canvasToPngBlob(canvas);
+  const form = new FormData();
+  form.append("image", blob, filename);
+  form.append("type", "input");
+  form.append("subfolder", "clipspace");
+  form.append("overwrite", "false");
+  const response = await api.fetchApi("/upload/image", { method: "POST", body: form });
+  if (!response.ok) throw new Error(`Foreground content upload failed (${response.status}).`);
+  const uploaded = await response.json();
+  if (!uploaded?.name) throw new Error("Foreground content upload returned no filename.");
+  return { filename: uploaded.name, subfolder: uploaded.subfolder ?? "clipspace", type: "input" };
+}

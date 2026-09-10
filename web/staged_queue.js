@@ -42,12 +42,19 @@ export function buildEditorPromptInputs(placementData, staged) {
 export function updatePromptNodeInputs(prompt, updates) {
   if (!prompt?.output || !updates?.length) return prompt;
   const output = { ...prompt.output };
+  let workflow = prompt.workflow;
   let changed = false;
-  for (const { nodeId, inputs } of updates) {
+  for (const { nodeId, inputs, serializedNode } of updates) {
     const id = String(nodeId);
     if (!output[id]) continue;
     output[id] = { ...output[id], inputs: { ...(output[id].inputs || {}), ...inputs } };
     changed = true;
+    if (serializedNode && workflow?.nodes) {
+      workflow = { ...workflow, nodes: workflow.nodes.map((node) => String(node.id) === id
+        ? { ...node, widgets_values: serializedNode.widgets_values,
+          ...(serializedNode.widgets_values_named ? { widgets_values_named: serializedNode.widgets_values_named } : {}) }
+        : node) };
+    }
   }
-  return changed ? { ...prompt, output } : prompt;
+  return changed ? { ...prompt, output, ...(workflow ? { workflow } : {}) } : prompt;
 }

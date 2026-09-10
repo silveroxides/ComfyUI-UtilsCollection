@@ -12,6 +12,12 @@ import torch.nn.functional as F
 from PIL import Image
 from comfy_api.latest import io
 
+from .foreground_content_helpers import (
+    composite_foreground_content,
+    load_foreground_rgba,
+    parse_foreground_content,
+)
+
 from .composite_helpers import (
     _DEFAULT_LAYER_PLACEMENT,
     _DEFAULT_LAYER_PLACEMENT_V2,
@@ -649,7 +655,11 @@ def _ordered_staged_layers(staged_foregrounds, placement_data):
     placements = _parse_layer_placements(placement_data)
     placement_version, _, _, workspace_padding = _parse_layer_payload(placement_data)
     paint = _parse_paint_layer(placement_data) if _PAINT_LAYER_ENABLED else None
-    layers_by_socket = {layer["socket"]: layer for layer in layers}
+    content = parse_foreground_content(placement_data)
+    layers_by_socket = {
+        layer["socket"]: {**layer, "foreground_content": content.get(layer["socket"], {})}
+        for layer in layers
+    }
     if paint is not None:
         layers_by_socket[_PAINT_LAYER_KEY] = {
             "socket": _PAINT_LAYER_KEY,
@@ -737,6 +747,33 @@ def _prepare_staged_layer(
         or not placed_feather
         else _feather_mask(resized_mask, -placed_feather)
     )
+    # Annotations are canonical/unflipped, unlike retained crops. Transform them
+    # to the same placed frame, then combine after the original matte is feathered.
+    for kind in ("object_erase", "brush", "text"):
+        part = layer.get("foreground_content", {}).get(kind, {})
+        visible = (
+            layer.get("foreground_content", {}).get("brush", {}).get("visible", True)
+            if kind == "object_erase" else part.get("visible", True)
+        )
+        if visible and part.get("asset"):
+            overlay = load_foreground_rgba(part["asset"], reference)
+            overlay = resize_paint_rgba(
+                overlay, max(1, round(crop_width * scale)), max(1, round(crop_height * scale))
+            )
+            if placement.get("flip_horizontal", False):
+                overlay = torch.flip(overlay, dims=(2,))
+            if placement.get("flip_vertical", False):
+                overlay = torch.flip(overlay, dims=(1,))
+            if placement_version == 3:
+                overlay_rgb, overlay_alpha = projective_warp(
+                    overlay[..., :3], overlay[..., 3],
+                    placement.get("corners", _DEFAULT_CORNERS), placement.get("rotation", 0.0),
+                )
+                overlay = torch.cat((overlay_rgb, overlay_alpha[..., None]), dim=-1)
+            if kind == "object_erase":
+                alpha = alpha * (1 - overlay[0, ..., 3].clamp(0, 1))
+            else:
+                resized_foreground, alpha = composite_foreground_content(resized_foreground, alpha, overlay)
     offset_x, offset_y = _placement_offsets(
         background_width,
         background_height,

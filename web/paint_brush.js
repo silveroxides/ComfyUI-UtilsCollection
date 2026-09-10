@@ -2,8 +2,8 @@ const clamp = (value, minimum, maximum) => Math.min(maximum, Math.max(minimum, N
 
 export const DEFAULT_BRUSH_SETTINGS = Object.freeze({
   shape: "circle",
-  color: "#ff0000",
-  size: 10,
+  color: "#000000",
+  size: 5,
   opacity: 1,
   hardness: 1,
   erasing: false,
@@ -29,8 +29,8 @@ export function brushTextureKey(settings) {
   return [value.shape, value.color, value.size, value.opacity, value.hardness].join(":");
 }
 
-export function interpolatedPoints(start, end, spacing) {
-  const distance = Math.hypot(end.x - start.x, end.y - start.y);
+export function interpolatedPoints(start, end, spacing, scale = { x: 1, y: 1 }) {
+  const distance = Math.hypot((end.x - start.x) / scale.x, (end.y - start.y) / scale.y);
   if (!distance) return [{ ...end }];
   const count = Math.max(1, Math.ceil(distance / Math.max(1e-6, spacing)));
   return Array.from({ length: count }, (_, index) => {
@@ -42,11 +42,11 @@ export function interpolatedPoints(start, end, spacing) {
   });
 }
 
-function unionRect(rect, x, y, radius, width, height) {
-  const left = Math.max(0, Math.floor(x - radius - 2));
-  const top = Math.max(0, Math.floor(y - radius - 2));
-  const right = Math.min(width, Math.ceil(x + radius + 2));
-  const bottom = Math.min(height, Math.ceil(y + radius + 2));
+function unionRect(rect, x, y, radiusX, radiusY, width, height) {
+  const left = Math.max(0, Math.floor(x - radiusX - 2));
+  const top = Math.max(0, Math.floor(y - radiusY - 2));
+  const right = Math.min(width, Math.ceil(x + radiusX + 2));
+  const bottom = Math.min(height, Math.ceil(y + radiusY + 2));
   if (right <= left || bottom <= top) return rect;
   if (!rect) return { left, top, right, bottom };
   return {
@@ -55,6 +55,21 @@ function unionRect(rect, x, y, radius, width, height) {
     right: Math.max(rect.right, right),
     bottom: Math.max(rect.bottom, bottom),
   };
+}
+
+export function clipBrushSegment(start, end, width, height, radius) {
+  const dx = end.x - start.x, dy = end.y - start.y;
+  let near = 0, far = 1;
+  for (const [p, q] of [
+    [-dx, start.x + radius], [dx, width + radius - start.x],
+    [-dy, start.y + radius], [dy, height + radius - start.y],
+  ]) {
+    if (p === 0) { if (q < 0) return null; else continue; }
+    const t = q / p;
+    if (p < 0) near = Math.max(near, t); else far = Math.min(far, t);
+    if (near > far) return null;
+  }
+  return [{ x: start.x + dx * near, y: start.y + dy * near }, { x: start.x + dx * far, y: start.y + dy * far }];
 }
 
 export function imageDataAlphaBounds(imageData) {
@@ -124,7 +139,7 @@ export class PaintLayerCanvas {
     const prior = this.createCanvas();
     prior.width = this.canvas.width;
     prior.height = this.canvas.height;
-    prior.getContext("2d").drawImage(this.canvas, 0, 0);
+    if (this.canvas.width && this.canvas.height) prior.getContext("2d").drawImage(this.canvas, 0, 0);
     this.canvas.width = this.strokeCanvas.width = width;
     this.canvas.height = this.strokeCanvas.height = height;
     this.context = this.canvas.getContext("2d", { willReadFrequently: true });
@@ -185,20 +200,23 @@ export class PaintLayerCanvas {
 
   stamp(point) {
     const texture = this.texture(this.stroke.settings);
-    const x = point.x - texture.width / 2;
-    const y = point.y - texture.height / 2;
-    this.strokeContext.drawImage(texture, x, y);
+    const width = texture.width * this.stroke.scale.x;
+    const height = texture.height * this.stroke.scale.y;
+    const x = point.x - width / 2;
+    const y = point.y - height / 2;
+    this.strokeContext.drawImage(texture, x, y, width, height);
     this.stroke.dirty = unionRect(
-      this.stroke.dirty, point.x, point.y, this.stroke.settings.size,
+      this.stroke.dirty, point.x, point.y,
+      this.stroke.settings.size * this.stroke.scale.x, this.stroke.settings.size * this.stroke.scale.y,
       this.canvas.width, this.canvas.height,
     );
   }
 
-  begin(point, settings) {
+  begin(point, settings, scale = { x: 1, y: 1 }) {
     if (!this.canvas.width || !this.canvas.height) return false;
     const normalized = normalizeBrushSettings(settings);
     this.strokeContext.clearRect(0, 0, this.strokeCanvas.width, this.strokeCanvas.height);
-    this.stroke = { settings: normalized, last: point, dirty: null };
+    this.stroke = { settings: normalized, scale, last: point, dirty: null };
     this.stamp(point);
     return true;
   }
@@ -207,7 +225,11 @@ export class PaintLayerCanvas {
     if (!this.stroke) return false;
     const spacing = Math.max(1, this.stroke.settings.size * 2 * 0.1);
     for (const point of points) {
-      for (const interpolated of interpolatedPoints(this.stroke.last, point, spacing)) this.stamp(interpolated);
+      // Inverse perspective can map an off-canvas pointer extremely far away.
+      // Only interpolate the portion whose brush can touch this canvas.
+      const radius = this.stroke.settings.size * Math.max(this.stroke.scale.x, this.stroke.scale.y) + 2;
+      const segment = clipBrushSegment(this.stroke.last, point, this.canvas.width, this.canvas.height, radius);
+      if (segment) for (const interpolated of interpolatedPoints(...segment, spacing, this.stroke.scale)) this.stamp(interpolated);
       this.stroke.last = point;
     }
     return true;

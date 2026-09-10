@@ -1,3 +1,5 @@
+import { normalizeForegroundContent } from "./foreground_content.js";
+
 export const DEFAULT_PLACEMENT = Object.freeze({
   scale: 0.9,
   center_x: 0.5,
@@ -231,6 +233,7 @@ export function parsePlacementData(value) {
       workspace_padding: normalizeWorkspacePadding(data.workspace_padding),
       layer_order,
       layers,
+      ...(data.foreground_content ? { foreground_content: normalizeForegroundContent(data.foreground_content) } : {}),
       ...(data.paint_layer && typeof data.paint_layer === "object"
         ? { paint_layer: normalizePaintLayer(data.paint_layer) }
         : {}),
@@ -258,6 +261,8 @@ export function serializePlacementData(data) {
       ? [...new Set(data.layer_order.filter((key) => typeof key === "string"))]
       : [],
     layers,
+    ...(data.foreground_content && Object.keys(data.foreground_content).length
+      ? { foreground_content: normalizeForegroundContent(data.foreground_content) } : {}),
     ...(paintLayer.asset || paintLayer.asset_id ? { paint_layer: paintLayer } : {}),
   });
 }

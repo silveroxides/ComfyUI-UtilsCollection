@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { foregroundBrushScale } from "../web/foreground_content.js";
 
 import {
   brushTextureKey,
@@ -18,7 +19,10 @@ function mockCanvas() {
     globalCompositeOperation: "source-over",
     save: () => calls.push(["save"]), restore: () => calls.push(["restore"]),
     clearRect: (...args) => calls.push(["clearRect", ...args]),
-    drawImage: (...args) => calls.push(["drawImage", ...args]),
+    drawImage: (...args) => {
+      if (!args[0].width || !args[0].height) throw new Error("Cannot draw a zero-sized source canvas");
+      calls.push(["drawImage", ...args]);
+    },
     getImageData: (_x, _y, width, height) => ({ width, height, data: new Uint8ClampedArray(width * height * 4) }),
     putImageData: (...args) => calls.push(["putImageData", ...args]),
     createRadialGradient: () => gradient,
@@ -93,4 +97,16 @@ test("paint canvas allocates, previews, commits, and traverses history", () => {
   assert.equal(paint.history.canUndo, true);
   assert.equal(paint.undo(), true);
   assert.equal(paint.redo(), true);
+});
+
+test("brush stamps keep equal displayed axes on rectangular foregrounds and after aspect changes", () => {
+  for (const shape of ["circle", "square"]) for (const [width, height, placedWidth, placedHeight] of [
+    [300, 300, 600, 200], [300, 300, 200, 600], [300, 100, 600, 200], [100, 300, 200, 600],
+  ]) {
+    const paint = new PaintLayerCanvas(mockCanvas);
+    paint.resize(width, height);
+    paint.begin({ x: width / 2, y: height / 2 }, { shape, size: 5 }, foregroundBrushScale(width, height, placedWidth, placedHeight));
+    const [, , , , stampWidth, stampHeight] = paint.strokeContext.calls.find(([name]) => name === "drawImage");
+    assert.ok(Math.abs(stampWidth * placedWidth / width - stampHeight * placedHeight / height) < 1e-9);
+  }
 });

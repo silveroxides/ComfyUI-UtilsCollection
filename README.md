@@ -180,6 +180,14 @@ the base-resolution conditioning fusion.
 
 `UC_LoadLaMaModel` loads Big LaMa `.safetensors` files from `ComfyUI/models/lama` through Unified Efficient Loader. Connect its `LAMA_MODEL` output to `UC_LaMaInpaint`. Device choices include ComfyUI's default device, CPU, and every visible GPU. Models are never downloaded automatically. Download [Big LaMa](https://huggingface.co/silveroxides/ComfyUI-UtilsCollection-Models/blob/main/big-lama/big-lama.safetensors) or [Anime/Manga Big LaMa](https://huggingface.co/silveroxides/ComfyUI-UtilsCollection-Models/blob/main/big-lama/anime-manga-big-lama.safetensors), then place the selected file in `ComfyUI/models/lama`.
 
+Each staged foreground (including detected faces) supports **Brush** and **Text** in its right-click menu after staging. Additions use the foreground's rectangular canvas, including transparent pixels, and follow its transforms. Brush erasing leaves the original foreground and text untouched. Text is one editable multiline block; click the foreground in Text mode to position it. **Show Brush/Text** controls preview and output visibility independently of editing. **Reset Brush/Text** clears only that content; placement Reset preserves both. Additions stay attached to the same foreground socket when its source changes.
+
+Brush/text PNGs save automatically to ComfyUI input storage; queueing waits for saves. Keep those PNGs when moving workflows. Text stays editable in workflow data, while its saved PNG preserves appearance during backend execution. Tool-local Undo/Redo history lasts for the current editor session.
+
+The Brush panel's **Object Eraser** removes original foreground pixels without altering text. Brush opacity and hardness control erasure strength and edges. Undo/Redo covers painting and object erasures in order; **Reset Brush** restores the original foreground and clears painted content. **Show Brush** also controls whether object erasures apply.
+
+The left sidebar stays visible and shows the selected foreground's context actions when no drawing tool is active. Brush and text share an HSL color picker below their controls. Hold numeric or layer-order arrows to repeat changes; releasing stops the repeat.
+
 ### Staged compositor example
 
 [Workflow JSON](workflows/CompositorExampleWorkflow.json) | [Workflow overview](workflows/CompositorExampleWorkflow.jpg) | [Source assets](workflow_assets/)

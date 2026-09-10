@@ -31,6 +31,8 @@ import {
 } from "./paint_brush.js";
 import { PaintColorPicker, rgbToHex } from "./paint_color_picker.js";
 import { uploadPaintCanvas } from "./paint_persistence.js";
+import { ForegroundContentEditor } from "./foreground_content_editor.js";
+import { bindHoldRepeat, createStagedAction, createStagedNumericControl } from "./staged_editor_controls.js";
 import {
   BACKGROUND_PREVIEW_ALPHA,
   editorWidgetHeight,
@@ -75,10 +77,13 @@ api.queuePrompt = async function(index, prompt, ...args) {
   const relevantEditors = prompt?.output
     ? [...editors].filter((editor) => prompt.output[String(editor.node.id)])
     : [...editors];
-  await Promise.all(relevantEditors.map((editor) => editor.flushPaint()));
+  do {
+    await Promise.all(relevantEditors.map((editor) => editor.flushPaint()));
+  } while (relevantEditors.some((editor) => editor.foregroundContent?.hasPending()));
   const currentPrompt = updatePromptNodeInputs(prompt, relevantEditors.map((editor) => ({
     nodeId: editor.node.id,
     inputs: buildEditorPromptInputs(editor.placementWidget.value, editor.isStagedComposite()),
+    serializedNode: editor.node.serialize(),
   })));
   const queuedPrompt = activeStagingQueue
     ? buildStagingPrompt(currentPrompt, activeStagingQueue.nodeId)
@@ -162,6 +167,7 @@ class LayeredPlacementEditor {
     this.paintCursor = null;
     this.layoutFrame = 0;
     this.layoutMinWidth = 0;
+    this.layoutPanelWidth = 0;
     this.layoutMinHeight = 0;
     this.manualNodeSize = [...(node.size || [0, 0])];
     this.applyingLayoutSize = false;
@@ -339,8 +345,10 @@ class LayeredPlacementEditor {
     this.layerListGroup.append(layerCaption, this.layerList);
     this.rowControls = new Map();
     this.paintToolbar = this.paintLayer ? this.createPaintToolbar() : null;
+    this.foregroundContent = this.isStagedComposite() ? new ForegroundContentEditor(this, api) : null;
     this.root.append(this.previewRow);
     if (this.paintToolbar) this.root.append(this.paintToolbar);
+    if (this.foregroundContent) this.previewRow.prepend(this.foregroundContent.root);
     this.root.append(this.layerListGroup);
 
     this.paddingSlider.addEventListener("pointerdown", () => this.beginPaddingEdit());
@@ -361,6 +369,13 @@ class LayeredPlacementEditor {
     this.canvas.addEventListener("pointermove", (event) => this.pointerMove(event));
     this.canvas.addEventListener("pointerup", (event) => this.pointerEnd(event, false));
     this.canvas.addEventListener("pointercancel", (event) => this.pointerEnd(event, true));
+    this.canvas.addEventListener("lostpointercapture", (event) => this.foregroundContent?.end(true, event));
+    this.canvas.addEventListener("pointerleave", () => {
+      if (this.foregroundContent && !this.foregroundContent.pointer) {
+        this.foregroundContent.cursor = null;
+        this.requestDraw();
+      }
+    });
     this.canvas.addEventListener("contextmenu", (event) => this.openLayerContextMenu(event));
     this.canvas.addEventListener("keydown", (event) => this.keyDown(event));
     this.canvas.addEventListener("keyup", () => this.finishKeyTransaction());
@@ -371,6 +386,7 @@ class LayeredPlacementEditor {
     });
     this.resizeObserver.observe(this.stage);
     if (this.paintToolbar) this.resizeObserver.observe(this.paintToolbar);
+    if (this.foregroundContent) this.resizeObserver.observe(this.foregroundContent.root);
     this.resizeObserver.observe(this.layerList);
     this.syncModelButton();
   }
@@ -539,15 +555,21 @@ class LayeredPlacementEditor {
       overlayWidths: this.stageOverlayWidths(),
       chromeWidth: rootHorizontalChrome + widgetMargins,
     });
-    const pickerWidth = this.paintColorPicker?.isOpen() ? (this.paintColorPicker.panel.offsetWidth || 220) : 0;
-    const pickerGap = pickerWidth ? (Number.parseFloat(getComputedStyle(this.previewRow).gap) || 0) : 0;
+    // Foreground color controls are embedded below the tools in the left panel.
+    // Only the legacy standalone picker needs additional horizontal space.
+    const colorPicker = this.paintColorPicker;
+    const pickerWidth = colorPicker?.isOpen() ? (colorPicker.panel.offsetWidth || 220) : 0;
+    const controlsWidth = this.foregroundContent ? (this.foregroundContent.root.offsetWidth || 220) : 0;
+    const panelGap = Number.parseFloat(getComputedStyle(this.previewRow).gap) || 0;
+    const sidePanelCount = Number(pickerWidth > 0) + Number(controlsWidth > 0);
     const panelLayout = inlinePanelLayout(
       Math.max(requiredWidth, this.manualNodeSize[0] || 0),
       rootHorizontalChrome + widgetMargins,
-      pickerWidth,
-      pickerGap,
+      pickerWidth + controlsWidth,
+      sidePanelCount * panelGap,
     );
     const pickerExtra = panelLayout.extraWidth;
+    this.layoutPanelWidth = pickerExtra;
     this.layoutMinWidth = requiredWidth + pickerExtra;
     const nodeWidth = panelLayout.nodeWidth;
     const stageWidth = panelLayout.previewWidth;
@@ -556,7 +578,8 @@ class LayeredPlacementEditor {
     this.previewRow.style.minHeight = `${stageHeight}px`;
     this.stage.style.height = "auto";
     this.stage.style.aspectRatio = "auto";
-    this.paintColorPicker?.setPanelHeight(stageHeight);
+    colorPicker?.setPanelHeight(stageHeight);
+    if (this.foregroundContent) this.foregroundContent.root.style.height = `${stageHeight}px`;
 
     const rootVerticalChrome = this.stylePixels(this.root, ["paddingTop", "paddingBottom", "borderTopWidth", "borderBottomWidth"]);
     const gap = Number.parseFloat(rootStyle.rowGap || rootStyle.gap) || 0;
@@ -570,7 +593,7 @@ class LayeredPlacementEditor {
     });
     this.layoutMinHeight = minimumHeight;
     const requiredNode = this.baseComputeSize?.() || this.node.computeSize?.() || [requiredWidth, minimumHeight];
-    const next = growNodeSize(this.manualNodeSize, [requiredWidth + pickerExtra, requiredNode[1]]);
+    const next = growNodeSize(this.manualNodeSize, [nodeWidth, requiredNode[1]]);
     const signature = `${next[0]}:${next[1]}:${minimumHeight}:${stageHeight}`;
     if (signature === this.layoutSignature) return;
     this.layoutSignature = signature;
@@ -600,7 +623,9 @@ class LayeredPlacementEditor {
       if (resized) {
         resized[0] = Math.max(resized[0], minimum[0]);
         resized[1] = Math.max(resized[1], minimum[1]);
-        if (!this.applyingLayoutSize) this.manualNodeSize = [...resized];
+        if (!this.applyingLayoutSize) {
+          this.manualNodeSize = [resized[0] - this.layoutPanelWidth, resized[1]];
+        }
       }
       const result = originalResize?.call(this.node, resized);
       this.scheduleLayout();
@@ -707,6 +732,8 @@ class LayeredPlacementEditor {
   }
 
   async flushPaint() {
+    this.flushPlacement();
+    await this.foregroundContent?.flush();
     if (this.paintLayer && this.paintPointerId != null) {
       const pointerId = this.paintPointerId;
       const changed = this.paintLayer.end(false);
@@ -810,8 +837,10 @@ class LayeredPlacementEditor {
 
   refreshSources(force = false) {
     if (this.disposed) return;
+    this.foregroundContent?.sync();
     const foregroundLayers = this.connectedLayers();
     const layers = this.compositionLayers();
+    if (this.foregroundContent?.active && !foregroundLayers.includes(this.foregroundContent.active.key)) this.foregroundContent.exit();
     if (!this.selected || !layers.includes(this.selected)) this.selected = foregroundLayers[0] || (this.paintLayer ? PAINT_LAYER_KEY : null);
     this.syncLayerList(layers);
     if (this.lastLayerCount !== layers.length) {
@@ -873,7 +902,8 @@ class LayeredPlacementEditor {
         flexDirection: "row",
         gap: "3px",
       });
-      const reorderButton = (text, title, disabled, callback) => {
+      const reorderButton = (text, title, delta) => {
+        const disabled = delta < 0 ? index === 0 : index === layers.length - 1;
         const button = element("button", {
           width: "32px",
           height: "30px",
@@ -891,19 +921,19 @@ class LayeredPlacementEditor {
         button.textContent = text;
         button.title = title;
         button.disabled = disabled;
-        button.addEventListener("click", (event) => {
-          event.stopPropagation();
-          if (!disabled) callback();
+        bindHoldRepeat(button, () => this.moveLayerBy(key, delta), {
+          captureTarget: this.layerList,
+          enabled: () => {
+            const current = this.compositionLayers();
+            const position = current.indexOf(key);
+            return !this.disposed && position >= 0 && position + delta >= 0 && position + delta < current.length;
+          },
         });
         return button;
       };
       reorderButtons.append(
-        reorderButton("▲", "Move one layer toward the back", index === 0, () => {
-          this.dropLayer(key, layers[index - 1], false);
-        }),
-        reorderButton("▼", "Move one layer toward the front", index === layers.length - 1, () => {
-          this.dropLayer(key, layers[index + 1], true);
-        }),
+        reorderButton("▲", "Move one layer toward the back", -1),
+        reorderButton("▼", "Move one layer toward the front", 1),
       );
       const name = element("span", {
         flex: "0 0 48px",
@@ -927,8 +957,8 @@ class LayeredPlacementEditor {
       const numericInputs = {};
       const transformButtons = [];
       if (key === PAINT_LAYER_KEY) {
-        const paint = this.createLayerAction("Paint", "Toggle exclusive paint interaction", () => this.togglePaintMode());
-        const include = this.createLayerAction("Incl", "Include or exclude the paint layer", () => this.togglePaintIncluded());
+        const paint = createStagedAction("Paint", "Toggle exclusive paint interaction", () => this.togglePaintMode());
+        const include = createStagedAction("Incl", "Include or exclude the paint layer", () => this.togglePaintIncluded());
         controls.append(paint, include);
         this.rowControls.set(key, { inputs: numericInputs, include, paint, row });
       } else {
@@ -942,9 +972,9 @@ class LayeredPlacementEditor {
           transformButtons.push(numeric.decrement, numeric.increment);
           controls.append(numeric.root);
         }
-        const flip = this.createLayerAction("Flip H", "Mirror this foreground horizontally", () => this.toggleHorizontalFlip(key));
-        const flipVertical = this.createLayerAction("Flip V", "Mirror this foreground vertically", () => this.toggleVerticalFlip(key));
-        const reset = this.createLayerAction("Reset", "Reset this foreground placement", () => this.resetLayer(key));
+        const flip = createStagedAction("Flip H", "Mirror this foreground horizontally", () => this.toggleHorizontalFlip(key));
+        const flipVertical = createStagedAction("Flip V", "Mirror this foreground vertically", () => this.toggleVerticalFlip(key));
+        const reset = createStagedAction("Reset", "Reset this foreground placement", () => this.resetLayer(key));
         transformButtons.push(flip, flipVertical, reset);
         controls.append(flip, flipVertical, reset);
         const rotation = this.createLayerNumericControl(key, "rotation", "Rot°", "Layer rotation in degrees");
@@ -978,18 +1008,12 @@ class LayeredPlacementEditor {
         Object.assign(rotation.input.style, { flex: "0 0 48px", minWidth: "48px", width: "48px" });
         rotation.decrement.title = "Rotate left one degree";
         rotation.increment.title = "Rotate right one degree";
-        rotation.decrement.addEventListener("click", (event) => {
-          event.stopImmediatePropagation(); this.stepLayerRotation(key, -1);
-        }, true);
-        rotation.increment.addEventListener("click", (event) => {
-          event.stopImmediatePropagation(); this.stepLayerRotation(key, 1);
-        }, true);
         numericInputs.rotation = rotation.input;
         transformButtons.push(rotation.decrement, rotation.increment);
-        const warp = this.createLayerAction("Warp", "Toggle four-corner warp editing", () => this.toggleWarp(key));
+        const warp = createStagedAction("Warp", "Toggle four-corner warp editing", () => this.toggleWarp(key));
         transformButtons.push(warp);
-        const include = this.createLayerAction("Incl", "Include or exclude this layer", () => this.toggleLayerIncluded(key));
-        const lock = this.createLayerAction("🔓", "Lock this layer against transforms", () => this.toggleLayerLocked(key));
+        const include = createStagedAction("Incl", "Include or exclude this layer", () => this.toggleLayerIncluded(key));
+        const lock = createStagedAction("🔓", "Lock this layer against transforms", () => this.toggleLayerLocked(key));
         Object.assign(lock.style, { flex: "0 0 28px", width: "28px", padding: "0" });
         controls.append(rotation.root, warp, include, lock);
         this.rowControls.set(key, {
@@ -1060,37 +1084,8 @@ class LayeredPlacementEditor {
   }
 
   createLayerNumericControl(key, field, label, tooltip) {
-    const root = element("div", {
-      boxSizing: "border-box",
-      display: "flex",
-      flex: "0 0 auto",
-      height: "34px",
-      alignItems: "center",
-      gap: "2px",
-      padding: "1px 2px",
-      border: "1px solid rgba(255,255,255,.22)",
-      borderRadius: "6px",
-      background: "rgba(0,0,0,.16)",
-    });
-    root.title = tooltip;
-    const caption = element("span", { flex: "0 0 auto", opacity: ".78", whiteSpace: "nowrap" });
-    caption.textContent = label;
-    const decrement = this.createStepButton("◀", `${label}: decrease by 0.002`);
-    const increment = this.createStepButton("▶", `${label}: increase by 0.002`);
-    const input = element("input", {
-      boxSizing: "border-box",
-      flex: "0 0 56px",
-      minWidth: "56px",
-      width: "56px",
-      height: "28px",
-      border: "1px solid rgba(255,255,255,.2)",
-      borderRadius: "4px",
-      color: "inherit",
-      background: "rgba(0,0,0,.25)",
-      textAlign: "center",
-    });
-    input.type = "text";
-    input.inputMode = "decimal";
+    const step = field === "rotation" ? 1 : 0.002;
+    const { root, caption, input, decrement, increment } = createStagedNumericControl(label, tooltip, `${key} ${label}`, step);
     input.dataset.field = field;
     input.setAttribute("aria-label", `${key} ${label}`);
     input.addEventListener("click", (event) => event.stopPropagation());
@@ -1110,60 +1105,15 @@ class LayeredPlacementEditor {
         input.blur();
       }
     });
-    decrement.addEventListener("click", (event) => {
-      event.stopPropagation();
-      this.stepLayerValue(key, field, -0.002);
-    });
-    increment.addEventListener("click", (event) => {
-      event.stopPropagation();
-      this.stepLayerValue(key, field, 0.002);
-    });
+    for (const [button, direction] of [[decrement, -1], [increment, 1]]) {
+      bindHoldRepeat(button, () => field === "rotation"
+        ? this.stepLayerRotation(key, direction) : this.stepLayerValue(key, field, direction * step), {
+        captureTarget: this.layerList,
+        enabled: () => !this.disposed && !this.paintMode && !this.layerPlacement(key).locked && this.compositionLayers().includes(key),
+      });
+    }
     root.addEventListener("click", (event) => event.stopPropagation());
-    root.append(caption, decrement, input, increment);
     return { root, caption, input, decrement, increment };
-  }
-
-  createStepButton(text, title) {
-    const button = element("button", {
-      flex: "0 0 22px",
-      width: "22px",
-      height: "28px",
-      padding: "0",
-      border: "1px solid rgba(255,255,255,.2)",
-      borderRadius: "4px",
-      color: "inherit",
-      background: "rgba(0,0,0,.25)",
-      cursor: "pointer",
-      fontSize: "14px",
-      lineHeight: "1",
-    });
-    button.type = "button";
-    button.textContent = text;
-    button.title = title;
-    button.setAttribute("aria-label", title);
-    return button;
-  }
-
-  createLayerAction(text, title, callback) {
-    const button = element("button", {
-      flex: "0 0 auto",
-      height: "28px",
-      padding: "1px 7px",
-      border: "1px solid rgba(255,255,255,.2)",
-      borderRadius: "4px",
-      color: "inherit",
-      background: "rgba(0,0,0,.25)",
-      cursor: "pointer",
-    });
-    button.type = "button";
-    button.textContent = text;
-    button.title = title;
-    button.setAttribute("aria-label", title);
-    button.addEventListener("click", (event) => {
-      event.stopPropagation();
-      callback();
-    });
-    return button;
   }
 
   resolveBackground(force) {
@@ -1409,6 +1359,7 @@ class LayeredPlacementEditor {
   }
 
   draw() {
+    this.foregroundContent?.sync();
     const width = this.stage.clientWidth;
     const height = this.stage.clientHeight;
     if (width <= 0 || height <= 0) return;
@@ -1447,13 +1398,14 @@ class LayeredPlacementEditor {
     context.strokeStyle = "rgba(255,255,255,.65)";
     context.strokeRect(this.view.x, this.view.y, this.view.width, this.view.height);
     if (
-      this.selected && this.selected !== PAINT_LAYER_KEY && !this.paintMode
+      this.selected && this.selected !== PAINT_LAYER_KEY && !this.paintMode && !this.foregroundContent?.active
       && this.layerPlacement(this.selected).locked !== true
       && this.layerPlacement(this.selected).included !== false
     ) {
       this.drawHandles(context, this.selected, dimensions);
     }
     if (this.paintMode && this.paintCursor) this.drawPaintCursor(context);
+    this.foregroundContent?.drawCursor(context);
     const pending = foregroundLayers.filter((key) => !this.layerMetadata(key)).length;
     if (this.isStagedComposite() && this.modelSelectionStale) {
       this.status.textContent = "Removal model changed • next queue rebuilds stage • Run Staging refreshes previews now";
@@ -1470,6 +1422,7 @@ class LayeredPlacementEditor {
       this.status.textContent = `${layers.length} layer${layers.length === 1 ? "" : "s"} • back → front${stage}`;
     }
     this.status.hidden = false;
+    if (this.foregroundContent?.error) this.status.textContent = this.foregroundContent.error;
   }
 
   rectFor(key, dimensions) {
@@ -1601,7 +1554,8 @@ class LayeredPlacementEditor {
       }
       return;
     }
-    const preview = this.cutouts.get(key) || this.preliminaryLayers.get(key);
+    const sourcePreview = this.cutouts.get(key) || this.preliminaryLayers.get(key);
+    const preview = mode !== "overlay" ? (this.foregroundContent?.preview(key, sourcePreview) || sourcePreview) : sourcePreview;
     const placement = this.layerPlacement(key);
     const geometry = this.resolvedGeometry(key, dimensions, placement);
     const destinationPoints = geometry.points.map((point) => [
@@ -1655,7 +1609,7 @@ class LayeredPlacementEditor {
     for (const point of outline.slice(1)) context.lineTo(...point);
     context.closePath();
     context.fillStyle = key === this.selected ? "rgba(64,180,255,.16)" : "rgba(255,255,255,.055)";
-    context.fill();
+    if (this.foregroundContent?.active?.key !== key) context.fill();
     context.save();
     context.setLineDash(this.layerMetadata(key) ? [] : [6, 4]);
     context.lineWidth = key === this.selected ? 4 : 3;
@@ -1711,12 +1665,17 @@ class LayeredPlacementEditor {
     if (this.paintMode) return;
     const dimensions = this.dimensions();
     if (!this.view || !dimensions) return;
-    const key = this.layerAtCanvasPoint(this.canvasPoint(event), dimensions);
+    const key = this.layerAtCanvasPoint(this.canvasPoint(event), dimensions) || this.foregroundContent?.active?.key;
     if (!key) return;
     this.selectLayer(key);
+    this.contextMenu.open(event.clientX, event.clientY, this.layerContextActions(key));
+  }
+
+  layerContextActions(key) {
     const layers = this.compositionLayers();
     const index = layers.indexOf(key);
-    const actions = buildLayerContextActions({
+    if (index < 0) return [];
+    return buildLayerContextActions({
       index,
       count: layers.length,
       placement: this.layerPlacement(key),
@@ -1733,8 +1692,8 @@ class LayeredPlacementEditor {
       toggleLock: () => this.toggleLayerLocked(key),
       exclude: () => this.toggleLayerIncluded(key),
       reset: () => this.resetLayer(key),
+      contentActions: this.foregroundContent?.menuActions(key) || [],
     });
-    this.contextMenu.open(event.clientX, event.clientY, actions);
   }
 
   drawHandles(context, key, dimensions) {
@@ -1771,6 +1730,7 @@ class LayeredPlacementEditor {
   }
 
   pointerDown(event) {
+    if (this.foregroundContent?.down(event)) return;
     const dimensions = this.dimensions();
     if (this.paintMode) {
       if (!this.view || !dimensions || event.button !== 0) return;
@@ -1857,6 +1817,7 @@ class LayeredPlacementEditor {
   }
 
   pointerMove(event) {
+    if (this.foregroundContent?.move(event)) return;
     if (this.paintMode) {
       if (!this.view) return;
       const cursorPoint = this.canvasPoint(event);
@@ -1949,6 +1910,7 @@ class LayeredPlacementEditor {
   }
 
   pointerEnd(event, cancelled) {
+    if (this.foregroundContent?.end(cancelled, event)) return;
     if (this.paintPointerId != null && event.pointerId === this.paintPointerId) {
       const changed = this.paintLayer.end(cancelled);
       if (this.canvas.hasPointerCapture?.(this.paintPointerId)) {
@@ -2019,6 +1981,7 @@ class LayeredPlacementEditor {
 
   selectLayer(key) {
     if (!this.compositionLayers().includes(key)) return;
+    if (this.foregroundContent?.active && this.foregroundContent.active.key !== key) this.foregroundContent.exit();
     if (this.paintMode && key !== PAINT_LAYER_KEY) return;
     this.selected = key;
     this.layerListSignature = null;
@@ -2228,6 +2191,7 @@ class LayeredPlacementEditor {
   }
 
   resetLayer(key) {
+    this.foregroundContent?.exit();
     if (key === PAINT_LAYER_KEY) {
       if (this.paintLayer.clear()) this.paintChanged();
       return;
@@ -2261,6 +2225,7 @@ class LayeredPlacementEditor {
   }
 
   toggleFlip(key, field) {
+    this.foregroundContent?.exit();
     if (!key || this.paintMode || this.layerPlacement(key).locked === true) return;
     const placement = this.layerPlacement(key);
     this.node.graph?.beforeChange?.();
@@ -2292,6 +2257,7 @@ class LayeredPlacementEditor {
   }
 
   toggleWarp(key) {
+    this.foregroundContent?.exit();
     if (this.paintMode || this.layerPlacement(key).locked === true) return;
     const enabling = this.warpLayer !== key;
     if (enabling && this.layerPlacement(key).included === false) return;
@@ -2309,6 +2275,7 @@ class LayeredPlacementEditor {
   }
 
   toggleRotate(key) {
+    this.foregroundContent?.exit();
     if (this.paintMode || this.layerPlacement(key).locked === true) return;
     const enabling = this.rotateLayer !== key;
     if (enabling && this.layerPlacement(key).included === false) return;
@@ -2320,6 +2287,7 @@ class LayeredPlacementEditor {
   }
 
   toggleLayerIncluded(key) {
+    if (this.foregroundContent?.active?.key === key) this.foregroundContent.exit();
     const excluding = this.layerPlacement(key).included !== false;
     if (excluding) {
       if (this.selected === key) this.selected = null;
@@ -2330,6 +2298,7 @@ class LayeredPlacementEditor {
   }
 
   toggleLayerLocked(key) {
+    if (this.foregroundContent?.active?.key === key) this.foregroundContent.exit();
     if (!key || key === PAINT_LAYER_KEY || this.paintMode) return;
     const locked = this.layerPlacement(key).locked === true;
     if (!locked) {
@@ -2374,6 +2343,7 @@ class LayeredPlacementEditor {
   }
 
   keyDown(event) {
+    if (this.foregroundContent?.keyDown(event)) return;
     if (!this.selected || !this.view) return;
     if (this.paintMode) {
       const command = event.ctrlKey || event.metaKey;
@@ -2432,6 +2402,7 @@ class LayeredPlacementEditor {
   dispose() {
     if (this.disposed) return;
     this.disposed = true;
+    this.foregroundContent?.dispose();
     this.endPaddingEdit();
     clearInterval(this.pollTimer);
     if (this.paintSaveTimer) clearTimeout(this.paintSaveTimer);
@@ -2464,11 +2435,13 @@ app.registerExtension({
   loadedGraphNode(node) {
     if (NODE_TYPES.has(node.comfyClass) || NODE_TYPES.has(node.type)) {
       const editor = install(node);
-      if (editor.migrateLegacyWidgetOrder()) {
-        editor.data = parsePlacementData(editor.placementWidget.value);
+      const migrated = editor.migrateLegacyWidgetOrder();
+      editor.foregroundContent?.exit();
+      editor.data = parsePlacementData(editor.placementWidget.value);
+      if (migrated) {
         editor.node.graph?.setDirtyCanvas?.(true, true);
-        editor.refreshSources(true);
       }
+      editor.refreshSources(true);
       editor.scheduleLayout();
     }
   },

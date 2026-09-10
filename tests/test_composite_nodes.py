@@ -24,6 +24,7 @@ try:
         background_replace_helpers,
         composite_helpers,
         composite_nodes,
+        foreground_content_helpers,
         image_helpers,
         image_nodes,
         model_assets,
@@ -72,6 +73,111 @@ def _paint_placement(order, included=True):
             },
         }
     )
+
+
+@pytest.mark.parametrize("individual", [False, True])
+@pytest.mark.parametrize("socket", ["foreground_0", "foreground_0_face_0"])
+def test_foreground_annotations_fill_transparency_keep_indices_and_leave_stage_unchanged(tmp_path, monkeypatch, individual, socket):
+    monkeypatch.setattr(foreground_content_helpers.folder_paths, "get_input_directory", lambda: str(tmp_path))
+    monkeypatch.setattr(staged_compositor_helpers, "_save_editor_preview", lambda *args: {})
+    brush = np.zeros((4, 4, 4), dtype=np.uint8)
+    brush[0, 0] = (0, 0, 255, 255)
+    text = np.zeros_like(brush)
+    text[0, 0] = (0, 255, 0, 128)
+    Image.fromarray(brush).save(tmp_path / "brush.png")
+    Image.fromarray(text).save(tmp_path / "text.png")
+    stage = _paint_test_stage()
+    stage["layers"][0]["socket"] = socket
+    stage["layers"][0]["mask"][0, 0, 0] = 0
+    stage["layers"][0]["is_face"] = "face" in socket
+    original_image = stage["layers"][0]["image"].clone()
+    original_mask = stage["layers"][0]["mask"].clone()
+    data = json.loads(_paint_placement([socket]))
+    data["layers"] = {socket: data["layers"]["foreground_0"]}
+    data["foreground_content"] = {socket: {
+        kind: {"visible": True, "asset": {"filename": f"{kind}.png", "subfolder": "", "type": "input"}}
+        for kind in ("brush", "text")
+    }}
+    render = staged_compositor_helpers._composite_staged_individual_foregrounds if individual else staged_compositor_helpers._composite_staged_foregrounds
+    result = render(torch.zeros(1, 4, 4, 3), stage, json.dumps(data), 0)
+    expected = torch.tensor([0.0, 128 / 255, 127 / 255])
+    torch.testing.assert_close(result.result[0][0, 0, 0], expected)
+    assert result.result[1][0, 0, 0] == 1
+    assert len(result.result[2][0]) == 1
+    torch.testing.assert_close(stage["layers"][0]["image"], original_image)
+    torch.testing.assert_close(stage["layers"][0]["mask"], original_mask)
+
+    data["foreground_content"][socket]["text"]["visible"] = False
+    brush_only = render(torch.zeros(1, 4, 4, 3), stage, json.dumps(data), 0)
+    torch.testing.assert_close(brush_only.result[0][0, 0, 0], torch.tensor([0.0, 0.0, 1.0]))
+    data["foreground_content"][socket]["brush"]["visible"] = False
+    hidden = render(torch.zeros(1, 4, 4, 3), stage, json.dumps(data), 0)
+    assert hidden.result[1][0, 0, 0] == 0
+    assert not hidden.result[0][0, 0, 0].any()
+
+
+@pytest.mark.parametrize("flip_h,flip_v,rotation,target", [
+    (True, False, 0, (0, 3)), (False, True, 0, (3, 0)), (False, False, 180, (3, 3)),
+])
+def test_foreground_annotations_follow_transform_after_restaging(tmp_path, monkeypatch, flip_h, flip_v, rotation, target):
+    monkeypatch.setattr(foreground_content_helpers.folder_paths, "get_input_directory", lambda: str(tmp_path))
+    monkeypatch.setattr(staged_compositor_helpers, "_save_editor_preview", lambda *args: {})
+    pixels = np.zeros((4, 4, 4), dtype=np.uint8)
+    pixels[0, 0] = (0, 0, 255, 255)
+    Image.fromarray(pixels).save(tmp_path / "brush.png")
+    stage = _paint_test_stage()
+    stage["layers"][0]["flip_horizontal"] = flip_h
+    stage["layers"][0]["flip_vertical"] = flip_v
+    data = json.loads(_paint_placement(["foreground_0"]))
+    data["layers"]["foreground_0"].update(flip_horizontal=flip_h, flip_vertical=flip_v, rotation=rotation)
+    data["foreground_content"] = {"foreground_0": {"brush": {
+        "asset": {"filename": "brush.png", "subfolder": "", "type": "input"},
+    }}}
+    result = staged_compositor_helpers._composite_staged_foregrounds(torch.zeros(1, 4, 4, 3), stage, json.dumps(data), 0)
+    torch.testing.assert_close(result.result[0][(0, *target)], torch.tensor([0.0, 0.0, 1.0]), atol=1e-6, rtol=0)
+
+
+def test_foreground_assets_reject_missing_files_and_input_escape(tmp_path, monkeypatch):
+    monkeypatch.setattr(foreground_content_helpers.folder_paths, "get_input_directory", lambda: str(tmp_path))
+    for filename, message in [("missing.png", "missing"), ("../outside.png", "inside")]:
+        with pytest.raises(ValueError, match=message):
+            foreground_content_helpers.load_foreground_rgba({"filename": filename, "subfolder": ""}, torch.zeros(1))
+
+
+@pytest.mark.parametrize("individual", [False, True])
+@pytest.mark.parametrize("flipped", [False, True])
+def test_object_eraser_reduces_original_alpha_without_erasing_text_or_mutating_stage(tmp_path, monkeypatch, individual, flipped):
+    monkeypatch.setattr(foreground_content_helpers.folder_paths, "get_input_directory", lambda: str(tmp_path))
+    monkeypatch.setattr(staged_compositor_helpers, "_save_editor_preview", lambda *args: {})
+    eraser = np.zeros((4, 4, 4), dtype=np.uint8)
+    eraser[0, 0] = (255, 255, 255, 128)
+    eraser[0, 3] = (255, 255, 255, 255)
+    eraser[1, 1] = (255, 255, 255, 255)
+    text = np.zeros_like(eraser)
+    text[1, 1] = (0, 255, 0, 255)
+    Image.fromarray(eraser).save(tmp_path / "erase.png")
+    Image.fromarray(text).save(tmp_path / "text.png")
+    asset = lambda name: {"filename": name, "subfolder": "", "type": "input"}
+    data = json.loads(_paint_placement(["foreground_0"]))
+    data["layers"]["foreground_0"]["flip_horizontal"] = flipped
+    data["foreground_content"] = {"foreground_0": {
+        "brush": {"visible": True}, "object_erase": {"asset": asset("erase.png")},
+        "text": {"asset": asset("text.png")},
+    }}
+    stage = _paint_test_stage()
+    render = staged_compositor_helpers._composite_staged_individual_foregrounds if individual else staged_compositor_helpers._composite_staged_foregrounds
+    result = render(torch.zeros(1, 4, 4, 3), stage, json.dumps(data), 0)
+    soft_x, hole_x, text_x = (3, 0, 2) if flipped else (0, 3, 1)
+    assert result.result[1][0, 0, soft_x] == pytest.approx(127 / 255)
+    assert result.result[1][0, 0, hole_x] == 0
+    assert not result.result[0][0, 0, hole_x].any()
+    torch.testing.assert_close(result.result[0][0, 1, text_x], torch.tensor([0.0, 1.0, 0.0]))
+    assert bool(torch.all(stage["layers"][0]["mask"] == 1))
+    assert len(result.result[2][0]) == 1
+    data["foreground_content"]["foreground_0"]["brush"]["visible"] = False
+    restored = render(torch.zeros(1, 4, 4, 3), stage, json.dumps(data), 0)
+    assert restored.result[1][0, 0, hole_x] == 1
+    torch.testing.assert_close(restored.result[0][0, 0, hole_x], torch.tensor([1.0, 0.0, 0.0]))
 
 
 def test_resize_mask_preserves_asymmetric_orientation():

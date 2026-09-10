@@ -19,6 +19,7 @@ export function buildLayerContextActions({
   toggleLock,
   exclude,
   reset,
+  contentActions = [],
 }) {
   return [
     action("Move Back", moveBack, { disabled: index <= 0 }),
@@ -30,8 +31,9 @@ export function buildLayerContextActions({
     action("Flip V", flipVertical, { checked: placement.flip_vertical === true, disabled: placement.locked === true }),
     action("Warp", toggleWarp, { checked: warpActive, disabled: placement.locked === true }),
     action("Rotate", toggleRotate, { checked: rotateActive, disabled: placement.locked === true }),
+    ...contentActions,
     action(placement.locked === true ? "Unlock" : "Lock", toggleLock, { checked: placement.locked === true }),
-    action("Exclude", exclude),
+    action(placement.included === false ? "Include" : "Exclude", exclude),
     { separator: true },
     action("Reset", reset, { disabled: placement.locked === true }),
   ];
