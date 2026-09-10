@@ -29,6 +29,23 @@ function widgetValue(node, name) {
   return node.widgets?.find((widget) => widget.name === name)?.value;
 }
 
+function widgetIsLinked(node, name) {
+  return node.inputs?.some((input) => input.widget?.name === name && input.link != null) ?? false;
+}
+
+// Python's round() resolves exact halves to the even neighbour; Math.round always rounds up.
+function roundHalfEven(value) {
+  const rounded = Math.round(value);
+  return Math.abs(value % 1) === 0.5 && rounded % 2 !== 0 ? rounded - 1 : rounded;
+}
+
+// Mirrors h3_video_length_from_seconds in parameter_helpers.py.
+function h3VideoLengthFromSeconds(seconds) {
+  if (!Number.isFinite(seconds) || seconds < 0) return null;
+  const frames = Math.max(5, roundHalfEven(seconds * 24));
+  return frames + ((((5 - (frames % 17)) % 17) + 17) % 17);
+}
+
 function compareKeys(left, right) {
   for (let index = 0; index < left.length; index += 1) {
     if (left[index] !== right[index]) return left[index] - right[index];
@@ -121,7 +138,12 @@ function updatePreview(node, backendValue) {
     const [width, height] = node.__ucVideoResolutionSelector
       ? videoResolution(...ratio, megapixels, multiple, minimum)
       : regularResolution(...ratio, megapixels, multiple, minimum);
-    node.__ucResolutionPreview = `${width}×${height}`;
+    const length = node.__ucVideoResolutionSelector && !widgetIsLinked(node, "duration_seconds")
+      ? h3VideoLengthFromSeconds(Number(widgetValue(node, "duration_seconds")))
+      : null;
+    node.__ucResolutionPreview = length === null
+      ? `${width}×${height}`
+      : `${width}×${height} · ${length} frames`;
   }
   node.setDirtyCanvas(true, true);
 }
@@ -172,7 +194,7 @@ app.registerExtension({
     const onWidgetChanged = nodeType.prototype.onWidgetChanged;
     nodeType.prototype.onWidgetChanged = function (name) {
       const result = onWidgetChanged?.apply(this, arguments);
-      if (["aspect_ratio", "megapixels", "multiple", "minimum"].includes(name)) updatePreview(this);
+      if (["aspect_ratio", "megapixels", "multiple", "minimum", "duration_seconds"].includes(name)) updatePreview(this);
       return result;
     };
 

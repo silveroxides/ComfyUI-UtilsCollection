@@ -89,7 +89,7 @@ def test_video_resolution_selector_returns_resolution_preview():
     )
 
     assert output.result == (864, 480, 226)
-    assert output.ui == {"resolution": ("864×480",)}
+    assert output.ui == {"resolution": ("864×480 · 226 frames",)}
 
 
 def test_regular_resolution_selector_returns_resolution_preview():
