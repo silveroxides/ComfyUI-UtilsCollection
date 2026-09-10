@@ -1,6 +1,7 @@
 import json
 import numpy as np
 import comfy.model_patcher
+import comfy.ops
 from .model_assets import download_huggingface_model, get_model_migration, MODEL_MIGRATIONS
 from .models.openpose import BodyPoseModel, HandPoseModel, FacePoseModel
 from .models.yolox import YOLOXDetector
@@ -66,8 +67,27 @@ def load_pose_safetensors(path, architecture):
     handler = MemoryEfficientSafeOpen(str(path), low_memory=True)
     try:
         expected = model.state_dict()
-        if set(expected) != set(handler.keys()):
-            raise ValueError(f"Invalid {architecture.__name__} checkpoint keys")
+        lazy_parameters = set()
+        # Dynamic VRAM Linear leaves parameters unset until checkpoint loading.
+        # Describe those tensors without allocating a second full weight buffer.
+        for name, module in model.named_modules():
+            if isinstance(module, comfy.ops.disable_weight_init.Linear) and module.weight is None:
+                prefix = f"{name}." if name else ""
+                dtype = module.weight_comfy_model_dtype or torch.get_default_dtype()
+                expected[prefix + "weight"] = torch.empty((module.out_features, module.in_features), device="meta", dtype=dtype)
+                lazy_parameters.add(prefix + "weight")
+                if module.comfy_need_lazy_init_bias:
+                    expected[prefix + "bias"] = torch.empty(module.out_features, device="meta", dtype=dtype)
+                    lazy_parameters.add(prefix + "bias")
+        actual_keys = set(handler.keys())
+        missing = sorted(set(expected) - actual_keys)
+        unexpected = sorted(actual_keys - set(expected))
+        if missing or unexpected:
+            raise ValueError(
+                f"Invalid {architecture.__name__} checkpoint keys in {path}: "
+                f"missing ({len(missing)})={missing[:10]}, "
+                f"unexpected ({len(unexpected)})={unexpected[:10]}."
+            )
         metadata = handler.metadata() or {}
         if metadata.get("architecture") != architecture.__name__:
             raise ValueError(f"Expected architecture metadata {architecture.__name__}")
@@ -82,7 +102,10 @@ def load_pose_safetensors(path, architecture):
                 for key, tensor in batch:
                     if key != keys[consumed]:
                         raise RuntimeError(f"Unexpected pose checkpoint stream key: {key}")
-                    comfy.utils.copy_to_param(model, key, tensor)
+                    if key in lazy_parameters:
+                        comfy.utils.set_attr_param(model, key, tensor)
+                    else:
+                        comfy.utils.copy_to_param(model, key, tensor)
                     handler.mark_processed(key)
                     consumed += 1
             if consumed != len(keys):

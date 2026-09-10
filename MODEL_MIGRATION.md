@@ -32,7 +32,7 @@ Authority: `models/migrations.json`. Its structure is defined by
 
 | Gate | Required evidence |
 | --- | --- |
-| Artifact integrity | Exact tensor mapping and tensor-value verification; runtime UEL load succeeds |
+| Artifact integrity | Exact tensor mapping and tensor-value verification; runtime UEL load succeeds with ComfyUI Dynamic VRAM lazy initialization enabled and disabled |
 | Forward math | Regression tests for exported arithmetic/control-flow boundaries, not just key/shape checks |
 | Numerical parity | With explicit inference authorization, compare source and eager outputs on identical inputs; record source hash, code revision, dtype/device, shapes and numerical errors |
 | Batch semantics | Single/multiple/tail batches; preserve frame/subject order; no emitted padding subjects |
@@ -44,6 +44,12 @@ GAU activation/squaring and division order, residual connections, and whether NM
 is per level/class/image. If inference is not authorized or available, report
 numerical parity and prediction quality as **unverified**; do not replace that gate
 with a passing mocked test.
+
+Dynamic VRAM is the default runtime: an uninitialized ComfyUI Linear can omit
+weight/bias from `state_dict()`. Validate its declared dimensions and load the
+checkpoint parameters without allocating duplicate full weight buffers. A
+CPU-only loading check does not cover this path; verify loaded lazy tensors
+against the checkpoint as well.
 
 ## Publish and continue
 

@@ -5,6 +5,7 @@ import types
 import numpy as np
 import pytest
 import torch
+import comfy.memory_management
 
 from comfy.cli_args import args as cli_args
 
@@ -235,7 +236,9 @@ def test_dwpose_thresholds_filter_detections_and_uncertain_joints_independently(
 
 
 @pytest.mark.parametrize("family,kind", [("openpose", "body"), ("openpose", "hand"), ("openpose", "face"), ("dwpose", "detector"), ("dwpose", "pose")])
-def test_available_safetensors_load_through_uel_without_inference(monkeypatch, family, kind):
+@pytest.mark.parametrize("lazy_linear", [False, True])
+def test_available_safetensors_load_through_uel_without_inference(monkeypatch, family, kind, lazy_linear):
+    monkeypatch.setattr(comfy.memory_management, "aimdo_enabled", lazy_linear)
     filename = model_helpers.CHECKPOINTS[kind][0] if family == "openpose" else model_helpers.DWPOSE_CHECKPOINTS[kind]
     path = model_helpers.folder_paths.get_full_path(model_helpers.MODEL_FOLDER, filename)
     if path is None:
@@ -514,7 +517,9 @@ def test_densepose_batches_frames_renders_parts_and_handles_empty_results():
 
 @pytest.mark.parametrize("kind,loader", [("animalpose", lambda: model_helpers.load_animal_pose_model("pose")),
                                          ("densepose_r50", model_helpers.load_densepose_model)])
-def test_new_pose_migrations_load_installed_safetensors_without_inference(monkeypatch, kind, loader):
+@pytest.mark.parametrize("lazy_linear", [False, True])
+def test_new_pose_migrations_load_installed_safetensors_without_inference(monkeypatch, kind, loader, lazy_linear):
+    monkeypatch.setattr(comfy.memory_management, "aimdo_enabled", lazy_linear)
     specification = model_helpers.get_model_migration(kind)
     path = model_helpers.folder_paths.get_full_path(model_helpers.MODEL_FOLDER, specification["filename"])
     if path is None:
@@ -528,6 +533,11 @@ def test_new_pose_migrations_load_installed_safetensors_without_inference(monkey
         assert set(loaded) == set(source.keys())
         last = next(reversed(loaded))
         assert torch.equal(loaded[last], source.get_tensor(last))
+        if kind == "densepose_r50":
+            for name in ("roi_heads.box_head.fc1", "roi_heads.box_head.fc2", "roi_heads.box_predictor.cls_score", "roi_heads.box_predictor.bbox_pred"):
+                for suffix in ("weight", "bias"):
+                    key = f"{name}.{suffix}"
+                    assert torch.equal(loaded[key], source.get_tensor(key))
 
 
 def test_animal_and_densepose_node_controls_reach_shared_helpers(monkeypatch):
