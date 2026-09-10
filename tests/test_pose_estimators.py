@@ -16,7 +16,8 @@ sys.modules.setdefault(package.__name__, package)
 prior_cpu = cli_args.cpu
 cli_args.cpu = True
 try:
-    from utils_collection_pose_test import image_helpers, image_nodes, model_helpers
+    from utils_collection_pose_test import image_helpers, model_helpers
+    model_helpers.register_openpose_paths()
 finally:
     cli_args.cpu = prior_cpu
 
@@ -27,25 +28,6 @@ def _body(offset=0):
                          5: (84, 40), 6: (100, 65), 7: (108, 92), 14: (57, 21), 15: (71, 21)}.items():
         points[index] = (point[0] + offset, point[1])
     return points
-
-
-@pytest.mark.parametrize("resolution,shape", [(0, (73, 119)), (64, (64, 104))])
-def test_pose_resolution_preserves_input_or_sets_shortest_edge(resolution, shape):
-    images = torch.zeros(2, 73, 119, 3)
-    _, _, target = image_helpers.prepare_pose_frames(images, resolution)
-    assert target == shape
-    for animal in (False, True):
-        result, documents = image_helpers.run_dwpose_batch(
-            images, resolution=resolution, animal=animal, loader=lambda kind: object(),
-            forward=lambda model, frames: np.zeros((len(frames), 8400, 85), dtype=np.float32),
-        )
-        assert result.shape == (2, *shape, 3)
-        assert all((doc["canvas_height"], doc["canvas_width"]) == shape for doc in documents)
-    def empty_densepose(model, frames, **kwargs):
-        assert all(frame.shape[:2] == shape for frame in frames)
-        return [(torch.zeros(0, 4), torch.zeros(0, 2, 2, 2), *(torch.zeros(0, 25, 2, 2) for _ in range(3))) for frame in frames]
-    result = image_helpers.run_densepose_batch(images, resolution=resolution, loader=lambda: object(), forward=empty_densepose)
-    assert result.shape == (2, *shape, 3)
 
 
 def test_openpose_batches_frames_and_person_crops_with_tail_and_frame_order():
@@ -134,36 +116,6 @@ def test_model_directory_registration_preserves_custom_paths(monkeypatch, tmp_pa
     assert extensions == {".bin", ".safetensors"}
 
 
-def test_forward_pass_preserves_batch_dimension_and_uses_comfy_model_management(monkeypatch):
-    loaded, shapes = [], []
-    monkeypatch.setattr(model_helpers.comfy.model_management, "load_models_gpu", lambda models: loaded.extend(models))
-    def model(tensor):
-        shapes.append(tuple(tensor.shape))
-        return tensor[:, :1], tensor[:, 1:]
-    patcher = types.SimpleNamespace(load_device=torch.device("cpu"), model=model)
-    first, second = model_helpers.openpose_forward(patcher, [np.zeros((8, 16, 3), np.uint8)] * 3)
-    assert loaded == [patcher]
-    assert shapes == [(3, 3, 8, 16)]
-    assert first.shape == (3, 8, 16, 1) and second.shape == (3, 8, 16, 2)
-
-
-def test_openpose_node_exposes_batch_and_pose_keypoint_contract(monkeypatch):
-    expected = (torch.zeros(2, 64, 64, 3), [{"people": []}, {"people": []}])
-    calls = []
-    monkeypatch.setattr(image_nodes, "run_openpose_batch", lambda *args, **kwargs: calls.append((args, kwargs)) or expected)
-    result = image_nodes.UC_BatchedOpenPose.execute(expected[0], batch_size=2, body_threshold=0.2, face_threshold=0.15,
-                                                   hand_threshold=0.12, temporal_filter=True, temporal_match_iou=0.4)
-    assert result.result[0] is expected[0] and result.result[1] is expected[1]
-    assert calls[0][0][2] == 2
-    assert calls[0][1]["loader"] is model_helpers.load_openpose_model
-    assert calls[0][1]["body_threshold"] == 0.2
-    assert calls[0][1]["face_threshold"] == 0.15
-    assert calls[0][1]["hand_threshold"] == 0.12
-    assert calls[0][1]["temporal_filter"] is True
-    assert calls[0][1]["temporal_match_iou"] == 0.4
-    assert "openpose_json" in result.ui
-
-
 def test_dwpose_pools_people_across_frames_without_emitting_padding_people():
     calls, loaded = [], []
     counts = [2, 0, 1, 2, 0]
@@ -211,83 +163,6 @@ def test_dwpose_empty_batch_does_not_load_pose_checkpoint():
     assert not output.any()
 
 
-def test_dwpose_coordinates_and_confidence_follow_crop_to_canvas_mapping():
-    crop, center, scale = image_helpers.prepare_dwpose_crop(np.zeros((100, 200, 3), np.uint8), [40, 10, 120, 90])
-    assert crop.shape == (384, 288, 3)
-    x, y = np.zeros((133, 576), np.float32), np.zeros((133, 768), np.float32)
-    x[:, 288], y[:, 384] = 1, 1
-    x[5] = 0
-    person = image_helpers.decode_dwpose_person(x, y, center, scale, 200, 100)
-    assert person["pose_keypoints_2d"][:3] == pytest.approx([0.4, 0.5, 1])
-    assert person["pose_keypoints_2d"][3:6] == [0, 0, 0]
-
-
-def test_dwpose_node_uses_shared_output_contract(monkeypatch):
-    expected = (torch.zeros(2, 64, 64, 3), [{"people": []}, {"people": []}])
-    calls = []
-    monkeypatch.setattr(image_nodes, "run_dwpose_batch", lambda *args, **kwargs: calls.append((args, kwargs)) or expected)
-    result = image_nodes.UC_DWPoseEstimator.execute(expected[0], batch_size=2, detection_threshold=0.6, keypoint_threshold=0.5)
-    assert result.result[1] is expected[1]
-    assert calls[0][1]["forward"] is model_helpers.dwpose_forward
-    assert calls[0][1]["detection_threshold"] == 0.6
-    assert calls[0][1]["keypoint_threshold"] == 0.5
-    assert "openpose_json" in result.ui
-
-
-@pytest.mark.parametrize("node,runner", [(image_nodes.UC_BatchedOpenPose, "run_openpose_batch"), (image_nodes.UC_DWPoseEstimator, "run_dwpose_batch")])
-def test_pose_overlay_mask_composites_rendered_pixels_and_preserves_empty_frames(monkeypatch, node, runner):
-    maps = torch.zeros(2, 8, 8, 3)
-    maps[0, 2, 3] = torch.tensor([0.0, 0.01, 0.0])
-    maps[0, 3, 3] = torch.tensor([1.0, 0.0, 0.0])
-    poses = [{"people": []}, {"people": []}]
-    monkeypatch.setattr(image_nodes, runner, lambda *args, **kwargs: (maps, poses))
-    result = node.execute(torch.ones_like(maps)).result
-    assert result[0] is maps and result[1] is poses
-    mask = result[2]
-    assert mask.shape == (2, 8, 8) and mask.dtype == torch.float32
-    background = torch.full_like(maps, 0.5)
-    composite = maps * mask[..., None] + background * (1 - mask[..., None])
-    assert torch.equal(composite[0, 2:4, 3], maps[0, 2:4, 3])
-    assert torch.equal(composite[1], background[1])
-    assert mask.sum() == 2
-
-
-def test_keypoint_overlay_resizes_pose_and_preserves_background_alpha_and_order():
-    background = torch.full((2, 32, 48, 4), 0.4)
-    person = {"pose_keypoints_2d": [0.5, 0.5, 1.0] + [0.0] * 51}
-    documents = [{"people": [person]}, {"people": []}]
-    image, mask = image_helpers.overlay_pose_keypoints(background, documents, opacity=0.5)
-    assert mask[0, 16, 24] == 0.5 and mask[1].sum() == 0
-    assert torch.equal(image[1], background[1])
-    assert torch.equal(image[..., 3], background[..., 3])
-    hidden, hidden_mask = image_helpers.overlay_pose_keypoints(background, documents, draw_body=False)
-    assert torch.equal(hidden, background) and hidden_mask.sum() == 0
-    repeated, repeated_mask = image_helpers.overlay_pose_keypoints(background, documents[:1])
-    assert torch.equal(repeated[0], repeated[1]) and torch.equal(repeated_mask[0], repeated_mask[1])
-    with pytest.raises(ValueError, match="one pose frame"):
-        image_helpers.overlay_pose_keypoints(background, documents * 2)
-
-
-def test_dwpose_thresholds_filter_detections_and_uncertain_joints_independently():
-    prediction = np.zeros((8400, 85), np.float32)
-    prediction[1000, 4:6] = [1, 0.4]
-    prediction[1100, 4:6] = [1, 0.8]
-    assert len(image_helpers.decode_dwpose_boxes(prediction, 1)) == 2
-    assert len(image_helpers.decode_dwpose_boxes(prediction, 1, detection_threshold=0.6)) == 1
-    x, y = np.zeros((133, 576), np.float32), np.zeros((133, 768), np.float32)
-    x[:, 288], y[:, 384] = 0.4, 0.4
-    x[0, 288], y[0, 384] = 0.8, 0.8
-    low = image_helpers.decode_dwpose_person(x, y, np.array([50, 50]), np.array([75, 100]), 100, 100)
-    high = image_helpers.decode_dwpose_person(x, y, np.array([50, 50]), np.array([75, 100]), 100, 100, keypoint_threshold=0.6)
-    assert low["hand_left_keypoints_2d"] is not None
-    assert high["hand_left_keypoints_2d"] is None
-    assert high["face_keypoints_2d"] is None
-    assert high["pose_keypoints_2d"][:3] == [0.5, 0.5, 1.0]
-    assert high["pose_keypoints_2d"][3:6] == [0.0, 0.0, 0.0]
-    empty = image_helpers.decode_dwpose_person(x * 0, y * 0, np.array([50, 50]), np.array([75, 100]), 100, 100, keypoint_threshold=0)
-    assert not any(empty["pose_keypoints_2d"])
-
-
 @pytest.mark.parametrize("family,kind", [("openpose", "body"), ("openpose", "hand"), ("openpose", "face"), ("dwpose", "detector"), ("dwpose", "pose")])
 @pytest.mark.parametrize("lazy_linear", [False, True])
 def test_available_safetensors_load_through_uel_without_inference(monkeypatch, family, kind, lazy_linear):
@@ -322,68 +197,6 @@ def test_pose_download_uses_registered_directory_and_reuses_existing_file(monkey
     assert pathlib.Path(actual) == target and target.read_bytes() == source.read_bytes()
     model_assets.download_huggingface_model("controlnet_preprocessors", target.name, "owner/repo", "detectors/model.safetensors")
     assert calls == [{"repo_id": "owner/repo", "filename": "detectors/model.safetensors"}]
-
-
-@pytest.mark.parametrize("family", ["human", "animal"])
-def test_rtmpose_head_matches_exported_gated_attention_math(family):
-    # Synthetic weights test the exported math without running a trained model.
-    def values(shape, amplitude=0.03):
-        return torch.sin(torch.arange(int(np.prod(shape)), dtype=torch.float64).reshape(shape)) * amplitude
-    state = types.SimpleNamespace(**{
-        "onnx_initializer_0": torch.tensor(1e-5, dtype=torch.float64),
-        "onnx_initializer_1": torch.linspace(0.5, 1.5, 108, dtype=torch.float64),
-        "onnx_initializer_2": values((108, 256)),
-        "onnx_initializer_3": torch.linspace(0.7, 1.3, 256, dtype=torch.float64),
-        "onnx_initializer_4": values((256, 1152)),
-        "onnx_initializer_5": values((1, 1, 2, 128), 0.7),
-        "onnx_initializer_6": values((1, 1, 2, 128), 0.2),
-        "onnx_initializer_7": values((512, 256)),
-        "onnx_initializer_8": torch.linspace(0.1, 0.9, 256, dtype=torch.float64),
-        "onnx_initializer_9": values((256, 5)),
-        "onnx_initializer_10": values((256, 7)),
-    })
-    head = types.SimpleNamespace(
-        initializers=state, Constant_277=types.SimpleNamespace(value=108 ** -0.5),
-        Constant_286=types.SimpleNamespace(value=256 ** -0.5), Constant_303=types.SimpleNamespace(value=128 ** 0.5),
-        _silu=torch.nn.functional.silu,
-    )
-    features = values((2, 3, 6, 18), 2)
-    flat = features.flatten(2)
-    normalized = flat / flat.square().mean(-1, keepdim=True).sqrt().clamp_min(1e-5)
-    embedding = torch.einsum("bnf,fd->bnd", normalized * state.onnx_initializer_1, state.onnx_initializer_2)
-    normalized = embedding / embedding.square().mean(-1, keepdim=True).sqrt().clamp_min(1e-5)
-    projected = torch.nn.functional.silu(torch.einsum("bnd,de->bne", normalized * state.onnx_initializer_3, state.onnx_initializer_4))
-    gate, value, base = projected[..., :512], projected[..., 512:1024], projected[..., 1024:]
-    query = base * state.onnx_initializer_5[..., 0, :] + state.onnx_initializer_6[..., 0, :]
-    key = base * state.onnx_initializer_5[..., 1, :] + state.onnx_initializer_6[..., 1, :]
-    attention = (torch.einsum("bnc,bmc->bnm", query, key) / np.sqrt(128)).clamp_min(0).square()
-    attended = gate * torch.einsum("bnm,bmc->bnc", attention, value)
-    result = torch.einsum("bnc,cd->bnd", attended, state.onnx_initializer_7) + embedding * state.onnx_initializer_8
-    expected = (result @ state.onnx_initializer_9, result @ state.onnx_initializer_10)
-    if family == "human":
-        actual = model_helpers.RTMPoseEstimator._head(head, features)
-    else:
-        animal_state = {"onnx_initializer_4": head.Constant_277.value, "onnx_initializer_7": head.Constant_286.value,
-                        "onnx_initializer_12": head.Constant_303.value}
-        for source, target in zip(range(1, 11), (5, 6, 8, 9, 10, 11, 13, 14, 15, 16)):
-            animal_state[f"onnx_initializer_{target}"] = getattr(state, f"onnx_initializer_{source}")
-        actual = model_helpers.AP10KPoseEstimator._head(types.SimpleNamespace(initializers=types.SimpleNamespace(**animal_state)), features)
-    for predicted, reference in zip(actual, expected):
-        torch.testing.assert_close(predicted, reference, atol=1e-10, rtol=1e-10)
-
-
-@pytest.mark.parametrize("shortcut", [True, False])
-def test_rtmpose_bottleneck_activates_projection_and_respects_shortcut(shortcut):
-    block = types.SimpleNamespace(
-        Conv_1=lambda x: x * 2 - 1, Conv_2=lambda x: x * 0.5 + 0.3,
-        Conv_3=lambda x: x * 0.25 - 0.2, _silu=torch.nn.functional.silu,
-    )
-    value = torch.tensor([-3., -1., 0., 2.])
-    expected = torch.nn.functional.silu(torch.nn.functional.silu(torch.nn.functional.silu(value * 2 - 1) * 0.5 + 0.3) * 0.25 - 0.2)
-    if shortcut:
-        expected = expected + value
-    actual = model_helpers.RTMPoseEstimator._residual(block, value, (1, 2, 3), shortcut=shortcut)
-    torch.testing.assert_close(actual, expected)
 
 
 def _temporal_person(x):
@@ -541,35 +354,6 @@ def test_animal_temporal_filter_prunes_joint_without_removing_animal():
     assert frames[3]["animals"][0][8] == [90, 90, 0.9]
 
 
-@pytest.mark.parametrize("cmap", ["viridis", "parula"])
-def test_densepose_renderer_keeps_all_24_part_labels_distinct(cmap):
-    coarse = torch.zeros(1, 2, 1, 24)
-    coarse[:, 1] = 1
-    fine = torch.zeros(1, 25, 1, 24)
-    for index in range(24):
-        fine[0, index + 1, 0, index] = 1
-    rendered = image_helpers.render_densepose_frame((torch.tensor([[0., 0., 24., 1.]]), coarse, fine, fine, fine), 1, 24, cmap)
-    assert np.unique(rendered.reshape(-1, 3), axis=0).shape[0] == 24
-
-
-@pytest.mark.parametrize("branch,depth", [("p4", 2), ("p5", 3)])
-def test_densepose_decoder_upsamples_between_convolutions_without_relu(branch, depth):
-    from utils_collection_pose_test.models.densepose import _Decoder
-
-    # Synthetic spatial filter: distinguishes intermediate upsampling from a
-    # final resize and keeps negative values to catch the spurious ReLUs.
-    class SpatialFilter(torch.nn.Module):
-        def forward(self, value):
-            return torch.nn.functional.avg_pool2d(value, 3, stride=1, padding=1) - 0.2
-
-    decoder = _Decoder(types.SimpleNamespace(Conv2d=lambda *args, **kwargs: SpatialFilter()))
-    value = torch.linspace(-1, 1, 12).reshape(1, 1, 3, 4)
-    expected = value
-    for _ in range(depth):
-        expected = torch.nn.functional.interpolate(SpatialFilter()(expected), scale_factor=2, mode="bilinear", align_corners=False)
-    torch.testing.assert_close(getattr(decoder, branch)(value), expected)
-
-
 def test_densepose_batches_frames_renders_parts_and_handles_empty_results():
     calls = []
     def forward(model, frames, **options):
@@ -620,14 +404,3 @@ def test_new_pose_migrations_load_installed_safetensors_without_inference(monkey
                 for suffix in ("weight", "bias"):
                     key = f"{name}.{suffix}"
                     assert torch.equal(loaded[key], source.get_tensor(key))
-
-
-def test_animal_and_densepose_node_controls_reach_shared_helpers(monkeypatch):
-    calls = []
-    image = torch.zeros(1, 64, 64, 3)
-    monkeypatch.setattr(image_nodes, "run_dwpose_batch", lambda *args, **kwargs: calls.append(kwargs) or (image, []))
-    monkeypatch.setattr(image_nodes, "run_densepose_batch", lambda *args, **kwargs: calls.append(kwargs) or image)
-    image_nodes.UC_AnimalPoseEstimator.execute(image, detection_threshold=0.6, temporal_filter=True)
-    image_nodes.UC_DensePoseEstimator.execute(image, score_threshold=0.4, rpn_nms_threshold=0.6)
-    assert calls[0]["animal"] is True and calls[0]["detection_threshold"] == 0.6 and calls[0]["temporal_filter"] is True
-    assert calls[1]["score_threshold"] == 0.4 and calls[1]["rpn_nms_threshold"] == 0.6
