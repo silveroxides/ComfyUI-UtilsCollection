@@ -198,7 +198,7 @@ class UC_VideoResolutionSelector(io.ComfyNode):
             nodes.MAX_RESOLUTION,
         )
         length = h3_video_length_from_seconds(duration_seconds)
-        return io.NodeOutput(width, height, length, ui={"resolution": (f"{width}×{height}",)})
+        return io.NodeOutput(width, height, length, ui={"resolution": (f"{width}×{height} · {length} frames",)})
 
 
 class UC_ImageScaleAndResolutionPicker(io.ComfyNode):
