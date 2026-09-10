@@ -1,4 +1,10 @@
 import json
+import numpy as np
+import comfy.model_patcher
+from .model_assets import download_huggingface_model
+from .models.openpose import BodyPoseModel, HandPoseModel, FacePoseModel
+from .models.yolox import YOLOXDetector
+from .models.rtmpose import RTMPoseEstimator
 import math
 import numbers
 import os
@@ -23,6 +29,101 @@ from .encoder_helpers import (
 
 SAM3_WORKING_SIZE = 1008
 SAM3_EDGE_PADDING = 32
+
+
+MODEL_FOLDER = "controlnet_preprocessors"
+MODEL_REPO = "silveroxides/ComfyUI-UtilsCollection-Models"
+CHECKPOINTS = {
+    "body": ("openpose_body.safetensors", BodyPoseModel),
+    "hand": ("openpose_hand.safetensors", HandPoseModel),
+    "face": ("openpose_face.safetensors", FacePoseModel),
+}
+
+
+def register_openpose_paths():
+    for directory in folder_paths.get_folder_paths("controlnet"):
+        folder_paths.add_model_folder_path(MODEL_FOLDER, os.path.join(directory, "preprocessors"))
+    paths, extensions = folder_paths.folder_names_and_paths[MODEL_FOLDER]
+    folder_paths.folder_names_and_paths[MODEL_FOLDER] = (paths, extensions | {".safetensors"})
+
+
+def load_openpose_model(kind):
+    filename, architecture = CHECKPOINTS[kind]
+    path = download_huggingface_model(MODEL_FOLDER, filename, MODEL_REPO, f"preprocessors/openpose/{filename}")
+    return load_pose_safetensors(path, architecture)
+
+
+def load_pose_safetensors(path, architecture):
+    model = architecture()
+    handler = MemoryEfficientSafeOpen(str(path), low_memory=True)
+    try:
+        expected = model.state_dict()
+        if set(expected) != set(handler.keys()):
+            raise ValueError(f"Invalid {architecture.__name__} checkpoint keys")
+        metadata = handler.metadata() or {}
+        if metadata.get("architecture") != architecture.__name__:
+            raise ValueError(f"Expected architecture metadata {architecture.__name__}")
+        for key, tensor in expected.items():
+            if tuple(handler.get_shape(key)) != tuple(tensor.shape) or handler.get_dtype(key) != tensor.dtype:
+                raise ValueError(f"Invalid {architecture.__name__} tensor: {key}")
+        keys = list(expected)
+        stream = handler.async_stream(keys, batch_size=1, prefetch_batches=1, pin_memory=False)
+        consumed = 0
+        try:
+            for batch in stream:
+                for key, tensor in batch:
+                    if key != keys[consumed]:
+                        raise RuntimeError(f"Unexpected pose checkpoint stream key: {key}")
+                    comfy.utils.copy_to_param(model, key, tensor)
+                    handler.mark_processed(key)
+                    consumed += 1
+            if consumed != len(keys):
+                raise RuntimeError("Incomplete pose checkpoint stream")
+        finally:
+            stream.close()
+    finally:
+        handler.close()
+    model.eval()
+    offload = comfy.model_management.unet_offload_device()
+    model.to(offload)
+    return comfy.model_patcher.CoreModelPatcher(
+        model, load_device=comfy.model_management.get_torch_device(), offload_device=offload,
+    )
+
+
+def openpose_forward(patcher, images):
+    comfy.model_management.throw_exception_if_processing_interrupted()
+    comfy.model_management.load_models_gpu([patcher])
+    array = np.ascontiguousarray(np.stack(images).transpose(0, 3, 1, 2), dtype=np.float32)
+    tensor = (torch.from_numpy(array) / 256.0 - 0.5).to(patcher.load_device)
+    output = patcher.model(tensor)
+    if isinstance(output, tuple):
+        return tuple(value.detach().movedim(1, -1).cpu().numpy() for value in output)
+    return output.detach().movedim(1, -1).cpu().numpy()
+
+
+DWPOSE_CHECKPOINTS = {
+    "detector": "dwpose_yolox_l.safetensors",
+    "pose": "dwpose_ucoco_384.safetensors",
+}
+
+
+def load_dwpose_model(kind):
+    filename = DWPOSE_CHECKPOINTS[kind]
+    repo_path = f"detectors/{filename}" if kind == "detector" else f"preprocessors/dwpose/{filename}"
+    path = download_huggingface_model(MODEL_FOLDER, filename, MODEL_REPO, repo_path)
+    return load_pose_safetensors(path, YOLOXDetector if kind == "detector" else RTMPoseEstimator)
+
+
+def dwpose_forward(patcher, images):
+    comfy.model_management.throw_exception_if_processing_interrupted()
+    comfy.model_management.load_models_gpu([patcher])
+    dtype = next(patcher.model.parameters()).dtype
+    tensor = torch.from_numpy(np.ascontiguousarray(np.stack(images).transpose(0, 3, 1, 2))).to(device=patcher.load_device, dtype=dtype)
+    output = patcher.model(tensor)
+    if isinstance(output, (tuple, list)):
+        return tuple(value.detach().float().cpu().numpy() for value in output)
+    return output.detach().float().cpu().numpy()
 
 
 def _extract_text_prompts(conditioning, device, dtype):

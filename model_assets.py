@@ -1,5 +1,34 @@
 import os
+import shutil
+import tempfile
 from urllib.parse import quote
+import folder_paths
+from huggingface_hub import hf_hub_download
+
+
+def download_huggingface_model(category, filename, repo_id, repo_path):
+    """Reuse a registered checkpoint or download it on explicit node execution."""
+    existing = folder_paths.get_full_path(category, filename)
+    if existing and os.path.isfile(existing) and os.path.getsize(existing) > 0:
+        return existing
+    directories = folder_paths.get_folder_paths(category)
+    if not directories:
+        raise ValueError(f"No model directory registered for {category}")
+    if os.path.basename(filename) != filename:
+        raise ValueError("Downloaded model filename must be a plain filename")
+    source = hf_hub_download(repo_id=repo_id, filename=repo_path)
+    directory = directories[0]
+    os.makedirs(directory, exist_ok=True)
+    destination = os.path.join(directory, filename)
+    with tempfile.NamedTemporaryFile(dir=directory, prefix=f".{filename}.", suffix=".tmp", delete=False) as temporary:
+        temporary_path = temporary.name
+    try:
+        shutil.copyfile(source, temporary_path)
+        os.replace(temporary_path, destination)
+    finally:
+        if os.path.exists(temporary_path):
+            os.unlink(temporary_path)
+    return destination
 
 
 def require_huggingface_model(category, filename, repo_id, repo_path):

@@ -98,6 +98,9 @@ frontend_tests = []
 paths = [
   "image_nodes.py",
   "image_helpers.py",
+  "models/openpose.py",
+  "models/yolox.py",
+  "models/rtmpose.py",
   "color_name_data.py",
   "color_palette_helpers.py",
 ]
@@ -107,6 +110,7 @@ python_tests = [
   "tests/test_prevalent_colors.py",
   "tests/test_image_resampling.py",
   "tests/test_video_frame_sampler.py",
+  "tests/test_pose_estimators.py",
 ]
 frontend_tests = []
 

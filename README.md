@@ -173,6 +173,20 @@ the base-resolution conditioning fusion.
 - `UC_TextOverlayNode`
 - `UC_CompositeNodesGuide`
 - `UC_LaMaInpaint`
+- `UC_BatchedOpenPose`
+- `UC_DWPoseEstimator`
+
+`UC_BatchedOpenPose` batches video frames for body inference and person crops for hand/face inference. `UC_DWPoseEstimator` batches YOLOX frames and RTMPose person crops, including partial batches without padding. Both return `IMAGE` and `POSE_KEYPOINT`, use ComfyUI's selected device/model management, and expose a batch size to control VRAM use. These are independent eager implementations loaded through UEL; `comfyui_controlnet_aux`, Ultralytics, ONNX Runtime, MMPose, and TorchScript are not runtime dependencies. Speed and prediction parity need real-model validation.
+
+Checkpoints belong in `ComfyUI/models/controlnet/preprocessors` (also discovered under additional `controlnet` roots registered through `folder_paths`). Executing a pose node downloads missing weights from the pack's HF repository through `huggingface_hub` and reuses existing local files. No model weights are stored in this node repository.
+
+| Node | Checkpoints | Path in `silveroxides/ComfyUI-UtilsCollection-Models` |
+| --- | --- | --- |
+| OpenPose | `openpose_body.safetensors`; `openpose_hand.safetensors` when hands enabled; `openpose_face.safetensors` when face enabled | `preprocessors/openpose/` |
+| DWPose detector | `dwpose_yolox_l.safetensors` | `detectors/` |
+| DWPose pose | `dwpose_ucoco_384.safetensors` | `preprocessors/dwpose/` |
+
+`scripts/convert_pose_models_to_safetensors.py` converts the original trusted `.pth`/TorchScript sources, maps eager tensor names, and verifies shapes, dtypes, and tensor values before accepting the output. Runtime loaders accept the converted safetensors, not the original executable archives.
 
 `UC_StagedLayeredBackgroundComposite` builds a scene from a background and ordered foreground sockets. Use `run_staging` to retain cutouts and populate the placement editor. Use `run_staged` to composite retained cutouts without loading models or evaluating foreground branches. Use `full_run` to restage and composite in one queue. `foreground_0` is the backmost layer. Retained cutouts are held in server memory and must be recreated after restarting ComfyUI.
 

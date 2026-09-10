@@ -1,4 +1,6 @@
 import os
+import json
+from .model_helpers import register_openpose_paths, load_openpose_model, openpose_forward, load_dwpose_model, dwpose_forward
 import numpy as np
 import torch
 import torch.nn.functional as F
@@ -18,6 +20,8 @@ from .tile_helpers import (
 )
 from .color_palette_helpers import extract_prevalent_color_outputs
 from .image_helpers import (
+    run_openpose_batch,
+    run_dwpose_batch,
     VIDEO_FRAME_SAMPLING_STRATEGIES,
     VIDEO_FRAME_TIMESTAMP_FORMATS,
     VIDEO_FRAME_TIMELINE_STYLES,
@@ -40,6 +44,59 @@ import node_helpers
 from nodes import MAX_RESOLUTION
 
 HighResolutionTileLayout = io.Custom("UC_HIGH_RES_TILE_LAYOUT")
+PoseKeypoint = io.Custom("POSE_KEYPOINT")
+register_openpose_paths()
+
+
+class UC_BatchedOpenPose(io.ComfyNode):
+    @classmethod
+    def define_schema(cls):
+        return io.Schema(
+            node_id="UC_BatchedOpenPose", display_name="Batched OpenPose Pose", category="image/pose",
+            description="Batches body frames and hand/face crops on ComfyUI's selected device. Models belong in models/controlnet/preprocessors.",
+            inputs=[
+                io.Image.Input("image"),
+                io.Boolean.Input("detect_hand", default=True),
+                io.Boolean.Input("detect_body", default=True, tooltip="Draw body skeletons. Body inference still locates hands/faces and produces keypoints."),
+                io.Boolean.Input("detect_face", default=True),
+                io.Int.Input("resolution", default=512, min=64, max=4096, step=64, tooltip="Output shortest edge in pixels."),
+                io.Int.Input("batch_size", default=4, min=1, max=64, tooltip="Maximum frames or person crops per network call. Lower this if VRAM is insufficient."),
+                io.Boolean.Input("scale_stick_for_xinsr_cn", default=False),
+            ],
+            outputs=[io.Image.Output("image"), PoseKeypoint.Output("pose_keypoint")],
+        )
+
+    @classmethod
+    def execute(cls, image, detect_hand=True, detect_body=True, detect_face=True, resolution=512,
+                batch_size=4, scale_stick_for_xinsr_cn=False):
+        result, poses = run_openpose_batch(image, resolution, batch_size, detect_body, detect_hand, detect_face, scale_stick_for_xinsr_cn, loader=load_openpose_model, forward=openpose_forward)
+        return io.NodeOutput(result, poses, ui={"openpose_json": [json.dumps(poses)]})
+
+
+class UC_DWPoseEstimator(io.ComfyNode):
+    @classmethod
+    def define_schema(cls):
+        return io.Schema(
+            node_id="UC_DWPoseEstimator", display_name="DWPose Estimator", category="image/pose",
+            description="Batches eager YOLOX frames and DWPose person crops using safetensors models in models/controlnet/preprocessors.",
+            inputs=[
+                io.Image.Input("image"),
+                io.Boolean.Input("detect_hand", default=True),
+                io.Boolean.Input("detect_body", default=True),
+                io.Boolean.Input("detect_face", default=True),
+                io.Int.Input("resolution", default=512, min=64, max=4096, step=64),
+                io.Int.Input("batch_size", default=5, min=1, max=64, tooltip="Maximum frames or person crops per model call; partial batches do not need padding."),
+                io.Boolean.Input("scale_stick_for_xinsr_cn", default=False),
+            ],
+            outputs=[io.Image.Output("image"), PoseKeypoint.Output("pose_keypoint")],
+        )
+
+    @classmethod
+    def execute(cls, image, detect_hand=True, detect_body=True, detect_face=True, resolution=512,
+                batch_size=5, scale_stick_for_xinsr_cn=False):
+        result, poses = run_dwpose_batch(image, resolution, batch_size, detect_body, detect_hand, detect_face,
+                                        scale_stick_for_xinsr_cn, loader=load_dwpose_model, forward=dwpose_forward)
+        return io.NodeOutput(result, poses, ui={"openpose_json": [json.dumps(poses)]})
 
 
 class UC_ExtractPrevalentColors(io.ComfyNode):

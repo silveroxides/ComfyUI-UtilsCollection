@@ -175,6 +175,8 @@ class SamplingUtils(ComfyExtension):
             UC_LoadImageWithAlpha,
             UC_LoadLaMaModel,
             UC_LaMaInpaint,
+            UC_BatchedOpenPose,
+            UC_DWPoseEstimator,
             UC_BoldFrakturTextStyle,
             UC_UnBoldFrakturTextStyle,
             UC_WordJoiner,
