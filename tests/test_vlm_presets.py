@@ -1574,6 +1574,47 @@ def test_minimax_h3_reference_debug_preserves_control_and_fixes_label_contract()
     assert assembled.index(system_query) < assembled.index(user_query)
 
 
+def test_minimax_h3_reference_newdebug_preserves_literal_template_contract():
+    runtime_key = "video_timeline_minimax_h3_reference_system_instruction_newdebug"
+    readable_name = "VIDEO_TIMELINE_MINIMAX_H3_REFERENCE_SYSTEM_INSTRUCTION_NEWDEBUG"
+    debug = vlm_presets.system_instructions_vlm[
+        "video_timeline_minimax_h3_reference_system_instruction_debug"
+    ]
+    newdebug = vlm_presets.system_instructions_vlm[runtime_key]
+    readable = runpy.run_path(str(CUSTOM_NODE_ROOT / "vlm_presets_vars.py"))
+    basic_options = vlm_nodes.UC_VLMSysInstrPresets.define_schema().inputs[0].options
+    advanced_options = (
+        vlm_nodes.UC_VLMSysInstrAdvPresets.define_schema().inputs[0].options
+    )
+
+    assert newdebug == readable[readable_name]
+    assert runtime_key in basic_options
+    assert runtime_key in advanced_options
+    assert newdebug != debug
+    for required in (
+        "everything within curly brace `{}` contains elements to replace",
+        "Completely leave out lyrics for theme music.",
+        "Do NOT invent sounds.",
+        "[SOUNDS] is not for music or instruments.",
+        "[VISUAL]: [Shot 18]",
+        "<Audio 1> serves as the full {description of the music}",
+    ):
+        assert required in newdebug
+
+    system_query = "SYSTEM QUERY NEWDEBUG SENTINEL"
+    user_query = "USER QUERY NEWDEBUG SENTINEL: create a 6.00s video."
+    assembled = vlm_nodes.UC_VLMSysInstrAdvPresets.execute(
+        runtime_key,
+        False,
+        system_query,
+        user_query,
+    ).args[0]
+    assert assembled.startswith(newdebug)
+    assert assembled.count(system_query) == 1
+    assert assembled.count(user_query) == 1
+    assert assembled.index(system_query) < assembled.index(user_query)
+
+
 def test_experimental_h3_reference_keeps_regression_contract():
     instruction = vlm_experimental_presets.system_instructions_vlm_experimental[
         "video_timeline_minimax_h3_reference_system_instruction"
