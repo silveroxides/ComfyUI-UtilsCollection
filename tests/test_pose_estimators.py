@@ -234,3 +234,57 @@ def test_pose_download_uses_registered_directory_and_reuses_existing_file(monkey
     assert pathlib.Path(actual) == target and target.read_bytes() == source.read_bytes()
     model_assets.download_huggingface_model("controlnet_preprocessors", target.name, "owner/repo", "detectors/model.safetensors")
     assert calls == [{"repo_id": "owner/repo", "filename": "detectors/model.safetensors"}]
+
+
+def test_rtmpose_head_matches_exported_gated_attention_math():
+    # Synthetic weights test the exported math without running a trained model.
+    def values(shape, amplitude=0.03):
+        return torch.sin(torch.arange(int(np.prod(shape)), dtype=torch.float64).reshape(shape)) * amplitude
+    state = types.SimpleNamespace(**{
+        "onnx_initializer_0": torch.tensor(1e-5, dtype=torch.float64),
+        "onnx_initializer_1": torch.linspace(0.5, 1.5, 108, dtype=torch.float64),
+        "onnx_initializer_2": values((108, 256)),
+        "onnx_initializer_3": torch.linspace(0.7, 1.3, 256, dtype=torch.float64),
+        "onnx_initializer_4": values((256, 1152)),
+        "onnx_initializer_5": values((1, 1, 2, 128), 0.7),
+        "onnx_initializer_6": values((1, 1, 2, 128), 0.2),
+        "onnx_initializer_7": values((512, 256)),
+        "onnx_initializer_8": torch.linspace(0.1, 0.9, 256, dtype=torch.float64),
+        "onnx_initializer_9": values((256, 5)),
+        "onnx_initializer_10": values((256, 7)),
+    })
+    head = types.SimpleNamespace(
+        initializers=state, Constant_277=types.SimpleNamespace(value=108 ** -0.5),
+        Constant_286=types.SimpleNamespace(value=256 ** -0.5), Constant_303=types.SimpleNamespace(value=128 ** 0.5),
+        _silu=torch.nn.functional.silu,
+    )
+    features = values((2, 3, 6, 18), 2)
+    flat = features.flatten(2)
+    normalized = flat / flat.square().mean(-1, keepdim=True).sqrt().clamp_min(1e-5)
+    embedding = torch.einsum("bnf,fd->bnd", normalized * state.onnx_initializer_1, state.onnx_initializer_2)
+    normalized = embedding / embedding.square().mean(-1, keepdim=True).sqrt().clamp_min(1e-5)
+    projected = torch.nn.functional.silu(torch.einsum("bnd,de->bne", normalized * state.onnx_initializer_3, state.onnx_initializer_4))
+    gate, value, base = projected[..., :512], projected[..., 512:1024], projected[..., 1024:]
+    query = base * state.onnx_initializer_5[..., 0, :] + state.onnx_initializer_6[..., 0, :]
+    key = base * state.onnx_initializer_5[..., 1, :] + state.onnx_initializer_6[..., 1, :]
+    attention = (torch.einsum("bnc,bmc->bnm", query, key) / np.sqrt(128)).clamp_min(0).square()
+    attended = gate * torch.einsum("bnm,bmc->bnc", attention, value)
+    result = torch.einsum("bnc,cd->bnd", attended, state.onnx_initializer_7) + embedding * state.onnx_initializer_8
+    expected = (result @ state.onnx_initializer_9, result @ state.onnx_initializer_10)
+    actual = model_helpers.RTMPoseEstimator._head(head, features)
+    for predicted, reference in zip(actual, expected):
+        torch.testing.assert_close(predicted, reference, atol=1e-10, rtol=1e-10)
+
+
+@pytest.mark.parametrize("shortcut", [True, False])
+def test_rtmpose_bottleneck_activates_projection_and_respects_shortcut(shortcut):
+    block = types.SimpleNamespace(
+        Conv_1=lambda x: x * 2 - 1, Conv_2=lambda x: x * 0.5 + 0.3,
+        Conv_3=lambda x: x * 0.25 - 0.2, _silu=torch.nn.functional.silu,
+    )
+    value = torch.tensor([-3., -1., 0., 2.])
+    expected = torch.nn.functional.silu(torch.nn.functional.silu(torch.nn.functional.silu(value * 2 - 1) * 0.5 + 0.3) * 0.25 - 0.2)
+    if shortcut:
+        expected = expected + value
+    actual = model_helpers.RTMPoseEstimator._residual(block, value, (1, 2, 3), shortcut=shortcut)
+    torch.testing.assert_close(actual, expected)

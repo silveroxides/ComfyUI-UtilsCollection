@@ -11,6 +11,7 @@ TORCHSCRIPT_STATE_DICT_ROOT_MAP = {}
 TORCHSCRIPT_STATE_DICT_KEY_MAP = {}
 
 
+
 class RTMPoseEstimator(nn.Module):
     """Eager DWPose RTMPose matching the exported BatchSize5 TorchScript graph."""
 
@@ -72,11 +73,12 @@ class RTMPoseEstimator(nn.Module):
     def _hardsigmoid(value):
         return torch.clamp(value * (1.0 / 6.0) + 0.5, 0.0, 1.0)
 
-    def _residual(self, value, names):
+    def _residual(self, value, names, shortcut=True):
         for first, second, third in zip(names[::3], names[1::3], names[2::3]):
             residual = self._silu(getattr(self, f"Conv_{first}")(value))
             residual = self._silu(getattr(self, f"Conv_{second}")(residual))
-            value = getattr(self, f"Conv_{third}")(residual) + value
+            residual = self._silu(getattr(self, f"Conv_{third}")(residual))
+            value = residual + value if shortcut else residual
         return value
 
     def _se(self, value, conv_name):
@@ -89,16 +91,15 @@ class RTMPoseEstimator(nn.Module):
         value = value / torch.clamp(self.Constant_277.value * torch.sqrt((value * value).sum(-1, keepdim=True)), min=initializers.onnx_initializer_0)
         value = value * initializers.onnx_initializer_1
         value = value @ initializers.onnx_initializer_2
+        residual = value
         value = value / torch.clamp(self.Constant_286.value * torch.sqrt((value * value).sum(-1, keepdim=True)), min=initializers.onnx_initializer_0)
-        value = value * self.Constant_286.value
-        embedding = value
-        q, k, u = (embedding @ initializers.onnx_initializer_4).split((512, 512, 128), dim=2)
-        position = initializers.onnx_initializer_5 * u.unsqueeze(-2) + initializers.onnx_initializer_6
-        sin, cos = position.split(1, dim=2)
-        sin, cos = sin.squeeze(2), cos.squeeze(2).transpose(1, 2)
-        attention = torch.relu(self.Constant_303.value / (sin @ cos))
-        value = q * (attention @ k)
-        value = value @ initializers.onnx_initializer_7 + initializers.onnx_initializer_8 * embedding
+        value = value * initializers.onnx_initializer_3
+        u, v, base = self._silu(value @ initializers.onnx_initializer_4).split((512, 512, 128), dim=2)
+        position = initializers.onnx_initializer_5 * base.unsqueeze(-2) + initializers.onnx_initializer_6
+        query, key = position.unbind(dim=2)
+        attention = torch.relu((query @ key.transpose(1, 2)) / self.Constant_303.value).square()
+        value = u * (attention @ v)
+        value = value @ initializers.onnx_initializer_7 + initializers.onnx_initializer_8 * residual
         return value @ initializers.onnx_initializer_9, value @ initializers.onnx_initializer_10
 
     def forward(self, value):
@@ -120,5 +121,5 @@ class RTMPoseEstimator(nn.Module):
         value = self._silu(self.Conv_214(self._silu(self.Conv_211(value))))
         value = self._silu(self.Conv_221(torch.cat((value, torch.nn.functional.max_pool2d(value, 5, 1, 2), torch.nn.functional.max_pool2d(value, 9, 1, 4), torch.nn.functional.max_pool2d(value, 13, 1, 6)), 1)))
         shortcut = self._silu(self.Conv_224(value))
-        value = self._residual(self._silu(self.Conv_227(value)), (230, 233, 236, 239, 242, 245, 248, 251, 254))
-        return self._head(self._silu(self.Conv_265(self._silu(self.Conv_262(self._se(torch.cat((value, shortcut), 1), 259))))))
+        value = self._residual(self._silu(self.Conv_227(value)), (230, 233, 236, 239, 242, 245, 248, 251, 254), shortcut=False)
+        return self._head(self.Conv_265(self._silu(self.Conv_262(self._se(torch.cat((value, shortcut), 1), 259)))))
