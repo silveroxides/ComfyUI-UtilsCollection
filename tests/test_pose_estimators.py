@@ -533,6 +533,24 @@ def test_densepose_renderer_keeps_all_24_part_labels_distinct(cmap):
     assert np.unique(rendered.reshape(-1, 3), axis=0).shape[0] == 24
 
 
+@pytest.mark.parametrize("branch,depth", [("p4", 2), ("p5", 3)])
+def test_densepose_decoder_upsamples_between_convolutions_without_relu(branch, depth):
+    from utils_collection_pose_test.models.densepose import _Decoder
+
+    # Synthetic spatial filter: distinguishes intermediate upsampling from a
+    # final resize and keeps negative values to catch the spurious ReLUs.
+    class SpatialFilter(torch.nn.Module):
+        def forward(self, value):
+            return torch.nn.functional.avg_pool2d(value, 3, stride=1, padding=1) - 0.2
+
+    decoder = _Decoder(types.SimpleNamespace(Conv2d=lambda *args, **kwargs: SpatialFilter()))
+    value = torch.linspace(-1, 1, 12).reshape(1, 1, 3, 4)
+    expected = value
+    for _ in range(depth):
+        expected = torch.nn.functional.interpolate(SpatialFilter()(expected), scale_factor=2, mode="bilinear", align_corners=False)
+    torch.testing.assert_close(getattr(decoder, branch)(value), expected)
+
+
 def test_densepose_batches_frames_renders_parts_and_handles_empty_results():
     calls = []
     def forward(model, frames, **options):

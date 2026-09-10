@@ -258,8 +258,8 @@ class _Decoder(nn.Module):
         super().__init__()
         self.p2 = nn.Sequential(operations.Conv2d(256, 256, 3, padding=1))
         self.p3 = nn.Sequential(operations.Conv2d(256, 256, 3, padding=1), nn.Upsample(scale_factor=2, mode="bilinear", align_corners=False))
-        self.p4 = nn.Sequential(operations.Conv2d(256, 256, 3, padding=1), nn.ReLU(), operations.Conv2d(256, 256, 3, padding=1), nn.Upsample(scale_factor=4, mode="bilinear", align_corners=False))
-        self.p5 = nn.Sequential(operations.Conv2d(256, 256, 3, padding=1), nn.ReLU(), operations.Conv2d(256, 256, 3, padding=1), nn.ReLU(), operations.Conv2d(256, 256, 3, padding=1), nn.Upsample(scale_factor=8, mode="bilinear", align_corners=False))
+        self.p4 = nn.Sequential(operations.Conv2d(256, 256, 3, padding=1), nn.Upsample(scale_factor=2, mode="bilinear", align_corners=False), operations.Conv2d(256, 256, 3, padding=1), nn.Upsample(scale_factor=2, mode="bilinear", align_corners=False))
+        self.p5 = nn.Sequential(operations.Conv2d(256, 256, 3, padding=1), nn.Upsample(scale_factor=2, mode="bilinear", align_corners=False), operations.Conv2d(256, 256, 3, padding=1), nn.Upsample(scale_factor=2, mode="bilinear", align_corners=False), operations.Conv2d(256, 256, 3, padding=1), nn.Upsample(scale_factor=2, mode="bilinear", align_corners=False))
         self.predictor = operations.Conv2d(256, 256, 1)
 
     def forward(self, features):
