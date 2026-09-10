@@ -257,7 +257,7 @@ def overlay_pose_keypoints(images, documents, draw_body=True, draw_hands=True, d
 
 def prepare_pose_frames(images, resolution):
     height, width = images.shape[1:3]
-    factor = resolution / min(height, width)
+    factor = resolution / min(height, width) if resolution else 1.0
     target_height, target_width = max(1, round(height * factor)), max(1, round(width * factor))
     frames, body_inputs = [], []
     for image in images:
@@ -313,16 +313,16 @@ def estimate_face_jobs(patcher, jobs, frames, people, batch_size, forward, thres
             people[frame][person]["face_keypoints_2d"] = decode_face(heatmap, box, width, height, threshold)
 
 
-def run_openpose_batch(images, resolution=512, batch_size=4, detect_body=True, detect_hand=True, detect_face=True,
+def run_openpose_batch(images, resolution=0, batch_size=4, detect_body=True, detect_hand=True, detect_face=True,
                        scale_stick=False, *, loader, forward, body_decoder=decode_body,
-                       body_threshold=0.1, hand_threshold=0.05, face_threshold=0.05, limb_threshold=0.05,
+                       body_threshold=0.45, hand_threshold=0.45, face_threshold=0.45, limb_threshold=0.45,
                        limb_support=0.8, min_body_parts=4, min_body_score=0.4,
                        temporal_filter=False, temporal_radius=2, temporal_min_support=2, temporal_max_distance=0.1,
                        temporal_match_iou=0.3):
     if images.ndim != 4 or images.shape[0] < 1 or images.shape[-1] not in (3, 4):
         raise ValueError("OpenPose requires a nonempty IMAGE batch with RGB or RGBA channels.")
-    if batch_size < 1 or resolution < 64:
-        raise ValueError("OpenPose batch_size must be positive and resolution must be at least 64.")
+    if batch_size < 1 or resolution < 0:
+        raise ValueError("OpenPose batch_size must be positive and resolution must be zero or positive.")
     models = {"body": loader("body")}
     if detect_hand:
         models["hand"] = loader("hand")
@@ -572,19 +572,19 @@ def prune_temporal_animal_keypoints(documents, boxes, radius=2, min_support=2, m
             for original, frame in zip(documents, filtered)]
 
 
-def run_dwpose_batch(images, resolution=512, batch_size=5, detect_body=True, detect_hand=True, detect_face=True,
+def run_dwpose_batch(images, resolution=0, batch_size=5, detect_body=True, detect_hand=True, detect_face=True,
                      scale_stick=False, *, loader, forward, animal=False, detection_threshold=0.3, keypoint_threshold=0.3, nms_threshold=0.45,
                      temporal_filter=False, temporal_radius=2, temporal_min_support=2, temporal_max_distance=0.1, temporal_match_iou=0.3):
     if images.ndim != 4 or not len(images) or images.shape[-1] not in (3, 4):
         raise ValueError("DWPose requires a nonempty RGB or RGBA IMAGE batch.")
-    if batch_size < 1 or resolution < 64:
-        raise ValueError("DWPose batch_size must be positive and resolution must be at least 64.")
+    if batch_size < 1 or resolution < 0:
+        raise ValueError("DWPose batch_size must be positive and resolution must be zero or positive.")
     if not all(0 <= value <= 1 for value in (detection_threshold, keypoint_threshold, nms_threshold)):
         raise ValueError("Detection and keypoint thresholds must be between zero and one.")
     if temporal_filter and (temporal_radius < 1 or temporal_min_support < 1 or temporal_max_distance <= 0):
         raise ValueError("Temporal keypoint filtering requires positive radius, support and distance values.")
     models = {"detector": loader("detector")}
-    factor = resolution / min(images.shape[1:3])
+    factor = resolution / min(images.shape[1:3]) if resolution else 1.0
     height, width = (max(1, round(value * factor)) for value in images.shape[1:3])
     output = torch.empty((len(images), height, width, 3), dtype=torch.float32, device="cpu")
     documents, all_boxes = [], []
@@ -658,19 +658,19 @@ def render_densepose_frame(result, height, width, cmap="viridis"):
     return canvas
 
 
-def run_densepose_batch(images, resolution=512, batch_size=2, cmap="viridis", *, loader, forward,
+def run_densepose_batch(images, resolution=0, batch_size=2, cmap="viridis", *, loader, forward,
                         score_threshold=0.05, detection_nms_threshold=0.5, max_detections=100,
                         rpn_pre_nms_topk=1000, rpn_post_nms_topk=1000, rpn_nms_threshold=0.7):
     if images.ndim != 4 or not len(images) or images.shape[-1] not in (3, 4):
         raise ValueError("DensePose requires a nonempty RGB or RGBA IMAGE batch")
-    if resolution < 64 or batch_size < 1 or cmap not in ("viridis", "parula"):
+    if resolution < 0 or batch_size < 1 or cmap not in ("viridis", "parula"):
         raise ValueError("Invalid DensePose resolution, batch size or colormap")
     if not all(0 <= value <= 1 for value in (score_threshold, detection_nms_threshold, rpn_nms_threshold)):
         raise ValueError("DensePose thresholds must be between zero and one")
     if min(max_detections, rpn_pre_nms_topk, rpn_post_nms_topk) < 1:
         raise ValueError("DensePose detection/proposal limits must be positive")
     patcher = loader()
-    scale = resolution / min(images.shape[1:3])
+    scale = resolution / min(images.shape[1:3]) if resolution else 1.0
     height, width = (max(1, round(size * scale)) for size in images.shape[1:3])
     output = torch.empty((len(images), height, width, 3), dtype=torch.float32, device="cpu")
     progress = comfy.utils.ProgressBar(len(images))

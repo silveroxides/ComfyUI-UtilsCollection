@@ -29,6 +29,25 @@ def _body(offset=0):
     return points
 
 
+@pytest.mark.parametrize("resolution,shape", [(0, (73, 119)), (64, (64, 104))])
+def test_pose_resolution_preserves_input_or_sets_shortest_edge(resolution, shape):
+    images = torch.zeros(2, 73, 119, 3)
+    _, _, target = image_helpers.prepare_pose_frames(images, resolution)
+    assert target == shape
+    for animal in (False, True):
+        result, documents = image_helpers.run_dwpose_batch(
+            images, resolution=resolution, animal=animal, loader=lambda kind: object(),
+            forward=lambda model, frames: np.zeros((len(frames), 8400, 85), dtype=np.float32),
+        )
+        assert result.shape == (2, *shape, 3)
+        assert all((doc["canvas_height"], doc["canvas_width"]) == shape for doc in documents)
+    def empty_densepose(model, frames, **kwargs):
+        assert all(frame.shape[:2] == shape for frame in frames)
+        return [(torch.zeros(0, 4), torch.zeros(0, 2, 2, 2), *(torch.zeros(0, 25, 2, 2) for _ in range(3))) for frame in frames]
+    result = image_helpers.run_densepose_batch(images, resolution=resolution, loader=lambda: object(), forward=empty_densepose)
+    assert result.shape == (2, *shape, 3)
+
+
 def test_openpose_batches_frames_and_person_crops_with_tail_and_frame_order():
     calls, loaded = [], []
 

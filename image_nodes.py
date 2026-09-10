@@ -62,13 +62,13 @@ class UC_BatchedOpenPose(io.ComfyNode):
                 io.Boolean.Input("detect_hand", default=True, tooltip="Detect and draw hand joints. Turn off to skip the hand model and reduce processing time; hand keypoints will be omitted."),
                 io.Boolean.Input("detect_body", default=True, tooltip="Draw body skeletons. Body inference still locates hands/faces and produces keypoints."),
                 io.Boolean.Input("detect_face", default=True, tooltip="Detect and draw facial landmarks. Turn off to skip the face model and reduce processing time; face keypoints will be omitted."),
-                io.Int.Input("resolution", default=512, min=64, max=4096, step=64, tooltip="Shortest edge of the output pose map in pixels; aspect ratio is preserved. Larger maps do not increase the body model's fixed processing scale."),
+                io.Int.Input("resolution", default=0, min=0, max=4096, step=1, tooltip="0 preserves the input dimensions. A positive value sets the output's shortest edge in pixels, preserving aspect ratio. Larger maps do not increase the body model's fixed processing scale."),
                 io.Int.Input("batch_size", default=4, min=1, max=64, tooltip="Maximum frames or person crops per network call. Lower this if VRAM is insufficient."),
                 io.Boolean.Input("scale_stick_for_xinsr_cn", default=False, tooltip="Scale body-line thickness with image size for Xinsir-style pose maps. Changes drawing only, not detected coordinates."),
-                io.Float.Input("body_threshold", default=0.1, min=0.0, max=1.0, step=0.01, tooltip="Minimum strength of a body-joint candidate. Raise to reject weak joints; lower to recover faint joints at the risk of false detections."),
-                io.Float.Input("hand_threshold", default=0.05, min=0.0, max=1.0, step=0.01, tooltip="Minimum strength of a hand-joint candidate. Raise to remove uncertain fingers; lower to retain more joints. Only used when hand detection is on."),
-                io.Float.Input("face_threshold", default=0.05, min=0.0, max=1.0, step=0.01, tooltip="Minimum strength of a facial landmark. Raise to remove uncertain points; lower to retain more detail. Only used when face detection is on."),
-                io.Float.Input("limb_threshold", default=0.05, min=0.0, max=1.0, step=0.01, tooltip="Required evidence along the line connecting two body joints. Raise to reject unlikely limb connections; too high can break valid skeletons."),
+                io.Float.Input("body_threshold", default=0.45, min=0.0, max=1.0, step=0.01, tooltip="Minimum strength of a body-joint candidate. Raise to reject weak joints; lower to recover faint joints at the risk of false detections."),
+                io.Float.Input("hand_threshold", default=0.45, min=0.0, max=1.0, step=0.01, tooltip="Minimum strength of a hand-joint candidate. Raise to remove uncertain fingers; lower to retain more joints. Only used when hand detection is on."),
+                io.Float.Input("face_threshold", default=0.45, min=0.0, max=1.0, step=0.01, tooltip="Minimum strength of a facial landmark. Raise to remove uncertain points; lower to retain more detail. Only used when face detection is on."),
+                io.Float.Input("limb_threshold", default=0.45, min=0.0, max=1.0, step=0.01, tooltip="Required evidence along the line connecting two body joints. Raise to reject unlikely limb connections; too high can break valid skeletons."),
                 io.Float.Input("limb_support", default=0.8, min=0.0, max=1.0, step=0.01, tooltip="Fraction of sampled positions along a limb that must pass limb_threshold; the accepted fraction must be strictly greater. Raise for stricter connections; 1 rejects every connection."),
                 io.Int.Input("min_body_parts", default=4, min=1, max=18, tooltip="Minimum connected joints needed to keep a person. Raise to reject tiny false skeletons; lower for partly visible people."),
                 io.Float.Input("min_body_score", default=0.4, min=0.0, max=10.0, step=0.01, tooltip="Minimum average skeleton score, combining joint and connection evidence. Raise to reject weak people; lower for difficult poses. This is not a probability."),
@@ -82,9 +82,9 @@ class UC_BatchedOpenPose(io.ComfyNode):
         )
 
     @classmethod
-    def execute(cls, image, detect_hand=True, detect_body=True, detect_face=True, resolution=512,
-                batch_size=4, scale_stick_for_xinsr_cn=False, body_threshold=0.1, hand_threshold=0.05, face_threshold=0.05,
-                limb_threshold=0.05, limb_support=0.8, min_body_parts=4, min_body_score=0.4,
+    def execute(cls, image, detect_hand=True, detect_body=True, detect_face=True, resolution=0,
+                batch_size=4, scale_stick_for_xinsr_cn=False, body_threshold=0.45, hand_threshold=0.45, face_threshold=0.45,
+                limb_threshold=0.45, limb_support=0.8, min_body_parts=4, min_body_score=0.4,
                 temporal_filter=False, temporal_radius=2, temporal_min_support=2, temporal_max_distance=0.1, temporal_match_iou=0.3):
         result, poses = run_openpose_batch(
             image, resolution, batch_size, detect_body, detect_hand, detect_face, scale_stick_for_xinsr_cn,
@@ -108,12 +108,12 @@ class UC_DWPoseEstimator(io.ComfyNode):
                 io.Boolean.Input("detect_hand", default=True, tooltip="Draw hand joints in the pose map. Turning off only hides the drawing; hand inference and keypoint output remain enabled."),
                 io.Boolean.Input("detect_body", default=True, tooltip="Draw body skeletons in the pose map. Turning off only hides the drawing; body inference and keypoint output remain enabled."),
                 io.Boolean.Input("detect_face", default=True, tooltip="Draw facial landmarks in the pose map. Turning off only hides the drawing; face inference and keypoint output remain enabled."),
-                io.Int.Input("resolution", default=512, min=64, max=4096, step=64, tooltip="Shortest edge of the output pose map in pixels; aspect ratio is preserved. Larger maps do not increase the model's fixed input size."),
+                io.Int.Input("resolution", default=0, min=0, max=4096, step=1, tooltip="0 preserves the input dimensions. A positive value sets the output's shortest edge in pixels, preserving aspect ratio. Larger maps do not increase the model's fixed input size."),
                 io.Int.Input("batch_size", default=5, min=1, max=64, tooltip="Maximum images or person crops processed together. Higher values may improve throughput but use more memory; lower if VRAM runs out. Does not change temporal-filter range."),
                 io.Boolean.Input("scale_stick_for_xinsr_cn", default=False, tooltip="Scale body-line thickness with image size for Xinsir-style pose maps. Changes drawing only, not detected coordinates."),
-                io.Float.Input("detection_threshold", default=0.3, min=0.0, max=1.0, step=0.01,
+                io.Float.Input("detection_threshold", default=0.45, min=0.0, max=1.0, step=0.01,
                                tooltip="Minimum person-detection confidence. Raise to reject weak detections such as shadows; may also remove real people."),
-                io.Float.Input("keypoint_threshold", default=0.3, min=0.0, max=1.0, step=0.01,
+                io.Float.Input("keypoint_threshold", default=0.45, min=0.0, max=1.0, step=0.01,
                                tooltip="Minimum confidence for body, hand, and face keypoints. Raise to hide uncertain joints; this does not track or smooth motion."),
                 io.Boolean.Input("temporal_filter", default=False,
                                  tooltip="Video frames only: remove joints unsupported by nearby frames from both pose maps and keypoints. Keeps person entries; does not smooth or fill missing joints. Leave off for unrelated images."),
@@ -129,8 +129,8 @@ class UC_DWPoseEstimator(io.ComfyNode):
         )
 
     @classmethod
-    def execute(cls, image, detect_hand=True, detect_body=True, detect_face=True, resolution=512,
-                batch_size=5, scale_stick_for_xinsr_cn=False, detection_threshold=0.3, keypoint_threshold=0.3,
+    def execute(cls, image, detect_hand=True, detect_body=True, detect_face=True, resolution=0,
+                batch_size=5, scale_stick_for_xinsr_cn=False, detection_threshold=0.45, keypoint_threshold=0.45,
                 temporal_filter=False, temporal_radius=2, temporal_min_support=2, temporal_max_distance=0.1, temporal_match_iou=0.3, nms_threshold=0.45):
         result, poses = run_dwpose_batch(image, resolution, batch_size, detect_body, detect_hand, detect_face,
                                         scale_stick_for_xinsr_cn, loader=load_dwpose_model, forward=dwpose_forward,
@@ -173,7 +173,7 @@ class UC_AnimalPoseEstimator(io.ComfyNode):
             description="Detect supported animals and draw 17-joint AP10K skeletons. Processes image batches; missing models download on execution to models/controlnet/preprocessors.",
             inputs=[
                 io.Image.Input("image", tooltip="Image or image batch containing animals. Detector categories: bird, cat, dog, horse, sheep, cow, elephant, bear, zebra and giraffe. For temporal filtering, supply consecutive video frames in order."),
-                io.Int.Input("resolution", default=512, min=64, max=4096, step=64, tooltip="Shortest edge of the output pose map in pixels; aspect ratio is preserved. Larger maps do not increase the model's fixed input size."),
+                io.Int.Input("resolution", default=0, min=0, max=4096, step=1, tooltip="0 preserves the input dimensions. A positive value sets the output's shortest edge in pixels, preserving aspect ratio. Larger maps do not increase the model's fixed input size."),
                 io.Int.Input("batch_size", default=5, min=1, max=64, tooltip="Maximum images or animal crops processed together. Higher values may improve throughput but use more memory; lower if VRAM runs out. Does not change temporal-filter range."),
                 io.Float.Input("detection_threshold", default=0.3, min=0.0, max=1.0, step=0.01, tooltip="Minimum confidence for keeping an animal detection. Raise to reject false animals; lower to recover weak detections at the risk of false positives."),
                 io.Float.Input("keypoint_threshold", default=0.3, min=0.0, max=1.0, step=0.01, tooltip="Minimum confidence for each animal joint. Raise to remove uncertain joints from the drawing and keypoint output; lower to retain more of the skeleton."),
@@ -188,7 +188,7 @@ class UC_AnimalPoseEstimator(io.ComfyNode):
         )
 
     @classmethod
-    def execute(cls, image, resolution=512, batch_size=5, detection_threshold=0.3, keypoint_threshold=0.3, nms_threshold=0.45,
+    def execute(cls, image, resolution=0, batch_size=5, detection_threshold=0.3, keypoint_threshold=0.3, nms_threshold=0.45,
                 temporal_filter=False, temporal_radius=2, temporal_min_support=2, temporal_max_distance=0.1, temporal_match_iou=0.3):
         result, poses = run_dwpose_batch(image, resolution, batch_size, loader=load_animal_pose_model, forward=dwpose_forward, animal=True,
                                         detection_threshold=detection_threshold, keypoint_threshold=keypoint_threshold, nms_threshold=nms_threshold,
@@ -206,7 +206,7 @@ class UC_DensePoseEstimator(io.ComfyNode):
             inputs=[
                 io.Image.Input("image", display_name="Images", tooltip="Image or image batch containing people. Each frame is detected independently; this node does not track or smooth motion."),
                 io.Combo.Input("cmap", display_name="Color Palette", options=["viridis", "parula"], default="viridis", tooltip="Body-region color palette: viridis uses a purple background; parula uses black. Changes drawing only. Choose the palette expected by your downstream model."),
-                io.Int.Input("resolution", display_name="Detection Resolution", default=512, min=64, max=4096, step=64, tooltip="Shortest edge used for detection and the output map; aspect ratio is preserved. Higher values can reveal smaller people but increase processing time and memory use."),
+                io.Int.Input("resolution", display_name="Detection Resolution", default=0, min=0, max=4096, step=1, tooltip="0 preserves the input dimensions. A positive value sets the shortest edge for detection and output, preserving aspect ratio. Higher values can reveal smaller people but increase processing time and memory use."),
                 io.Int.Input("batch_size", display_name="Frames per Batch", default=2, min=1, max=64, tooltip="Maximum frames processed together. Higher values may improve throughput but use more memory; lower if VRAM runs out. Does not add tracking between frames."),
                 io.Float.Input("score_threshold", display_name="Minimum Person Confidence", default=0.05, min=0.0, max=1.0, step=0.01, tooltip="Minimum confidence for keeping a person. Raise to reject false detections; lower to recover difficult or partly hidden people."),
                 io.Float.Input("detection_nms_threshold", display_name="Person Overlap Limit", default=0.5, min=0.0, max=1.0, step=0.01, tooltip="Overlap limit for removing duplicate final person boxes. Lower removes more duplicates but can lose overlapping people; higher keeps more overlapping detections."),
@@ -218,7 +218,7 @@ class UC_DensePoseEstimator(io.ComfyNode):
         )
 
     @classmethod
-    def execute(cls, image, cmap="viridis", resolution=512, batch_size=2, score_threshold=0.05,
+    def execute(cls, image, cmap="viridis", resolution=0, batch_size=2, score_threshold=0.05,
                 detection_nms_threshold=0.5, max_detections=100, rpn_pre_nms_topk=1000, rpn_post_nms_topk=1000, rpn_nms_threshold=0.7):
         return io.NodeOutput(run_densepose_batch(
             image, resolution, batch_size, cmap, loader=load_densepose_model, forward=densepose_forward,
