@@ -268,7 +268,8 @@ def test_pose_download_uses_registered_directory_and_reuses_existing_file(monkey
     assert calls == [{"repo_id": "owner/repo", "filename": "detectors/model.safetensors"}]
 
 
-def test_rtmpose_head_matches_exported_gated_attention_math():
+@pytest.mark.parametrize("family", ["human", "animal"])
+def test_rtmpose_head_matches_exported_gated_attention_math(family):
     # Synthetic weights test the exported math without running a trained model.
     def values(shape, amplitude=0.03):
         return torch.sin(torch.arange(int(np.prod(shape)), dtype=torch.float64).reshape(shape)) * amplitude
@@ -303,7 +304,14 @@ def test_rtmpose_head_matches_exported_gated_attention_math():
     attended = gate * torch.einsum("bnm,bmc->bnc", attention, value)
     result = torch.einsum("bnc,cd->bnd", attended, state.onnx_initializer_7) + embedding * state.onnx_initializer_8
     expected = (result @ state.onnx_initializer_9, result @ state.onnx_initializer_10)
-    actual = model_helpers.RTMPoseEstimator._head(head, features)
+    if family == "human":
+        actual = model_helpers.RTMPoseEstimator._head(head, features)
+    else:
+        animal_state = {"onnx_initializer_4": head.Constant_277.value, "onnx_initializer_7": head.Constant_286.value,
+                        "onnx_initializer_12": head.Constant_303.value}
+        for source, target in zip(range(1, 11), (5, 6, 8, 9, 10, 11, 13, 14, 15, 16)):
+            animal_state[f"onnx_initializer_{target}"] = getattr(state, f"onnx_initializer_{source}")
+        actual = model_helpers.AP10KPoseEstimator._head(types.SimpleNamespace(initializers=types.SimpleNamespace(**animal_state)), features)
     for predicted, reference in zip(actual, expected):
         torch.testing.assert_close(predicted, reference, atol=1e-10, rtol=1e-10)
 
@@ -438,3 +446,96 @@ def test_openpose_temporal_filter_spans_chunks_before_rendering(monkeypatch):
     assert outputs[0][1] == outputs[1][1]
     assert not outputs[0][0][3].any()
     assert bool(outputs[0][0][2].all()) and bool(outputs[0][0][4].all())
+
+
+def test_animalpose_batches_only_animal_classes_and_preserves_ap10k_format():
+    calls = []
+    def forward(kind, frames):
+        calls.append((kind, len(frames)))
+        if kind == "detector":
+            result = np.zeros((len(frames), 8400, 85), np.float32)
+            result[:, 1000, 4] = 1
+            result[:, 1000, 5 + 16] = 0.8
+            result[:, 1100, 4:6] = 1
+            return result
+        x, y = np.zeros((len(frames), 17, 512), np.float32), np.zeros((len(frames), 17, 512), np.float32)
+        x[..., 256] = 0.9
+        y[..., 256] = 0.8
+        x[:, 0, 256] = 0.1
+        assert frames[0].shape == (256, 256, 3)
+        return x, y
+    output, poses = image_helpers.run_dwpose_batch(torch.zeros(5, 64, 96, 3), 64, 3,
+                                                 loader=lambda kind: kind, forward=forward, animal=True)
+    assert calls == [("detector", 3), ("pose", 3), ("detector", 2), ("pose", 2)]
+    assert output.shape == (5, 64, 96, 3)
+    assert all(frame["version"] == "ap10k" and len(frame["animals"]) == 1 for frame in poses)
+    assert len(poses[0]["animals"][0]) == 17
+    assert poses[0]["animals"][0][0] == [0, 0, 0]
+    assert poses[0]["animals"][0][1][2] == pytest.approx(0.8)
+
+
+def test_animal_temporal_filter_prunes_joint_without_removing_animal():
+    frames = [{"version": "ap10k", "canvas_width": 100, "canvas_height": 100,
+               "animals": [[[25., 50., 0.8] for _ in range(17)]]} for _ in range(7)]
+    frames[3]["animals"][0][8] = [90., 90., 0.9]
+    filtered = image_helpers.prune_temporal_animal_keypoints(frames, [[[10, 10, 40, 90]]] * 7)
+    assert len(filtered[3]["animals"]) == 1
+    assert filtered[3]["animals"][0][8] == [0, 0, 0]
+    assert filtered[3]["animals"][0][7] == [25, 50, 0.8]
+    assert frames[3]["animals"][0][8] == [90, 90, 0.9]
+
+
+def test_densepose_batches_frames_renders_parts_and_handles_empty_results():
+    calls = []
+    def forward(model, frames, **options):
+        calls.append((len(frames), options))
+        output = []
+        for frame in frames:
+            if frame[0, 0, 0] > 100:
+                output.append((torch.zeros(0, 4), torch.zeros(0, 2, 2, 2), *(torch.zeros(0, 25, 2, 2) for _ in range(3))))
+            else:
+                coarse = torch.zeros(1, 2, 2, 2)
+                fine = torch.zeros(1, 25, 2, 2)
+                coarse[:, 1] = 1
+                fine[:, 4] = 1
+                output.append((torch.tensor([[10., 10., 30., 30.]]), coarse, fine, fine * 0, fine * 0))
+        return output
+    frames = torch.stack([torch.full((64, 96, 3), value) for value in (0., 1., 0.)])
+    output = image_helpers.run_densepose_batch(frames, 64, 2, "viridis", loader=lambda: object(), forward=forward, score_threshold=0.4, max_detections=20)
+    assert [size for size, options in calls] == [2, 1]
+    assert all(options["score_threshold"] == 0.4 and options["max_detections"] == 20 for size, options in calls)
+    background = torch.tensor([68, 1, 84], dtype=torch.float32) / 255
+    torch.testing.assert_close(output[1, 15, 15], background)
+    assert not torch.equal(output[0, 15, 15], background)
+    torch.testing.assert_close(output[0], output[2])
+    blank = (torch.zeros(0, 4), torch.zeros(0, 2, 2, 2), *(torch.zeros(0, 25, 2, 2) for _ in range(3)))
+    assert not image_helpers.render_densepose_frame(blank, 64, 96, "parula").any()
+
+
+@pytest.mark.parametrize("kind,loader", [("animalpose", lambda: model_helpers.load_animal_pose_model("pose")),
+                                         ("densepose_r50", model_helpers.load_densepose_model)])
+def test_new_pose_migrations_load_installed_safetensors_without_inference(monkeypatch, kind, loader):
+    specification = model_helpers.get_model_migration(kind)
+    path = model_helpers.folder_paths.get_full_path(model_helpers.MODEL_FOLDER, specification["filename"])
+    if path is None:
+        pytest.skip("Converted local checkpoint not installed")
+    monkeypatch.setattr(model_helpers.comfy.model_management, "get_torch_device", lambda: torch.device("cpu"))
+    monkeypatch.setattr(model_helpers.comfy.model_management, "unet_offload_device", lambda: torch.device("cpu"))
+    patcher = loader()
+    assert type(patcher.model).__name__ == specification["architecture"]
+    with model_helpers.MemoryEfficientSafeOpen(path, low_memory=True) as source:
+        loaded = patcher.model.state_dict()
+        assert set(loaded) == set(source.keys())
+        last = next(reversed(loaded))
+        assert torch.equal(loaded[last], source.get_tensor(last))
+
+
+def test_animal_and_densepose_node_controls_reach_shared_helpers(monkeypatch):
+    calls = []
+    image = torch.zeros(1, 64, 64, 3)
+    monkeypatch.setattr(image_nodes, "run_dwpose_batch", lambda *args, **kwargs: calls.append(kwargs) or (image, []))
+    monkeypatch.setattr(image_nodes, "run_densepose_batch", lambda *args, **kwargs: calls.append(kwargs) or image)
+    image_nodes.UC_AnimalPoseEstimator.execute(image, detection_threshold=0.6, temporal_filter=True)
+    image_nodes.UC_DensePoseEstimator.execute(image, score_threshold=0.4, rpn_nms_threshold=0.6)
+    assert calls[0]["animal"] is True and calls[0]["detection_threshold"] == 0.6 and calls[0]["temporal_filter"] is True
+    assert calls[1]["score_threshold"] == 0.4 and calls[1]["rpn_nms_threshold"] == 0.6

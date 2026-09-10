@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "UtilsCollection eager-model migration manifest",
+  "type": "object",
+  "required": ["version", "hf_repo", "folder_category", "folder_relative", "models"],
+  "properties": {
+    "$schema": {"type": "string"}, "version": {"const": 1},
+    "hf_repo": {"type": "string"}, "folder_category": {"type": "string"},
+    "folder_relative": {"type": "string", "pattern": "^[a-z][a-z0-9_]*(/[a-z0-9_-]+)*$"},
+    "models": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "required": ["module", "architecture", "source_format", "source_repo", "source_file", "filename", "hf_path", "mapping", "input", "output"],
+        "properties": {
+          "module": {"type": "string", "pattern": "^[a-z][a-z0-9_]*$"},
+          "architecture": {"type": "string", "pattern": "^[A-Za-z][A-Za-z0-9_]*$"},
+          "source_format": {"enum": ["state_dict", "torchscript"]},
+          "source_repo": {"type": "string"}, "source_file": {"type": "string"},
+          "filename": {"type": "string", "pattern": "^[A-Za-z0-9_.-]+\\.safetensors$"},
+          "hf_path": {"type": "string"},
+          "mapping": {"enum": ["strip_model_prefix", "module_maps"]},
+          "map_prefix": {"type": "string"}, "input": {"type": "string"}, "output": {"type": "string"}
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "additionalProperties": false
+}

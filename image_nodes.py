@@ -1,6 +1,6 @@
 import os
 import json
-from .model_helpers import register_openpose_paths, load_openpose_model, openpose_forward, load_dwpose_model, dwpose_forward
+from .model_helpers import register_openpose_paths, load_openpose_model, openpose_forward, load_dwpose_model, dwpose_forward, load_animal_pose_model, load_densepose_model, densepose_forward
 import numpy as np
 import torch
 import torch.nn.functional as F
@@ -22,6 +22,7 @@ from .color_palette_helpers import extract_prevalent_color_outputs
 from .image_helpers import (
     run_openpose_batch,
     run_dwpose_batch,
+    run_densepose_batch,
     VIDEO_FRAME_SAMPLING_STRATEGIES,
     VIDEO_FRAME_TIMESTAMP_FORMATS,
     VIDEO_FRAME_TIMELINE_STYLES,
@@ -120,6 +121,7 @@ class UC_DWPoseEstimator(io.ComfyNode):
                                tooltip="Maximum joint movement as a fraction of the person's box diagonal. Increase for faster motion."),
                 io.Float.Input("temporal_match_iou", default=0.3, min=0.0, max=1.0, step=0.01,
                                tooltip="Minimum detector-box overlap for matching people across neighboring frames."),
+                io.Float.Input("nms_threshold", default=0.45, min=0.0, max=1.0, step=0.01, tooltip="Detector-box overlap above which lower-scoring duplicate detections are suppressed."),
             ],
             outputs=[io.Image.Output("image"), PoseKeypoint.Output("pose_keypoint")],
         )
@@ -127,16 +129,77 @@ class UC_DWPoseEstimator(io.ComfyNode):
     @classmethod
     def execute(cls, image, detect_hand=True, detect_body=True, detect_face=True, resolution=512,
                 batch_size=5, scale_stick_for_xinsr_cn=False, detection_threshold=0.3, keypoint_threshold=0.3,
-                temporal_filter=False, temporal_radius=2, temporal_min_support=2, temporal_max_distance=0.1, temporal_match_iou=0.3):
+                temporal_filter=False, temporal_radius=2, temporal_min_support=2, temporal_max_distance=0.1, temporal_match_iou=0.3, nms_threshold=0.45):
         result, poses = run_dwpose_batch(image, resolution, batch_size, detect_body, detect_hand, detect_face,
                                         scale_stick_for_xinsr_cn, loader=load_dwpose_model, forward=dwpose_forward,
                                         detection_threshold=detection_threshold, keypoint_threshold=keypoint_threshold,
+                                        nms_threshold=nms_threshold,
                                         temporal_filter=temporal_filter, temporal_radius=temporal_radius,
                                         temporal_min_support=temporal_min_support, temporal_max_distance=temporal_max_distance,
                                         temporal_match_iou=temporal_match_iou)
         return io.NodeOutput(result, poses, ui={"openpose_json": [json.dumps(poses)]})
 
 
+class UC_AnimalPoseEstimator(io.ComfyNode):
+    @classmethod
+    def define_schema(cls):
+        return io.Schema(
+            node_id="UC_AnimalPoseEstimator", display_name="AnimalPose Estimator (AP10K)", category="image/pose",
+            description="Batched animal detection and 17-keypoint AP10K poses using eager safetensors models.",
+            inputs=[
+                io.Image.Input("image"),
+                io.Int.Input("resolution", default=512, min=64, max=4096, step=64),
+                io.Int.Input("batch_size", default=5, min=1, max=64),
+                io.Float.Input("detection_threshold", default=0.3, min=0.0, max=1.0, step=0.01),
+                io.Float.Input("keypoint_threshold", default=0.3, min=0.0, max=1.0, step=0.01),
+                io.Float.Input("nms_threshold", default=0.45, min=0.0, max=1.0, step=0.01),
+                io.Boolean.Input("temporal_filter", default=False, tooltip="Prune unsupported individual joints across ordered video frames without deleting animal entries."),
+                io.Int.Input("temporal_radius", default=2, min=1, max=30),
+                io.Int.Input("temporal_min_support", default=2, min=1, max=60),
+                io.Float.Input("temporal_max_distance", default=0.1, min=0.001, max=1.0, step=0.01),
+                io.Float.Input("temporal_match_iou", default=0.3, min=0.0, max=1.0, step=0.01),
+            ],
+            outputs=[io.Image.Output("image"), PoseKeypoint.Output("pose_keypoint")],
+        )
+
+    @classmethod
+    def execute(cls, image, resolution=512, batch_size=5, detection_threshold=0.3, keypoint_threshold=0.3, nms_threshold=0.45,
+                temporal_filter=False, temporal_radius=2, temporal_min_support=2, temporal_max_distance=0.1, temporal_match_iou=0.3):
+        result, poses = run_dwpose_batch(image, resolution, batch_size, loader=load_animal_pose_model, forward=dwpose_forward, animal=True,
+                                        detection_threshold=detection_threshold, keypoint_threshold=keypoint_threshold, nms_threshold=nms_threshold,
+                                        temporal_filter=temporal_filter, temporal_radius=temporal_radius, temporal_min_support=temporal_min_support,
+                                        temporal_max_distance=temporal_max_distance, temporal_match_iou=temporal_match_iou)
+        return io.NodeOutput(result, poses, ui={"openpose_json": [json.dumps(poses)]})
+
+
+class UC_DensePoseEstimator(io.ComfyNode):
+    @classmethod
+    def define_schema(cls):
+        return io.Schema(
+            node_id="UC_DensePoseEstimator", display_name="DensePose Estimator", category="image/pose",
+            description="Batched eager DensePose R50-FPN with shared backbone and ROI processing; no Detectron2 runtime.",
+            inputs=[
+                io.Image.Input("image"),
+                io.Combo.Input("cmap", options=["viridis", "parula"], default="viridis"),
+                io.Int.Input("resolution", default=512, min=64, max=4096, step=64),
+                io.Int.Input("batch_size", default=2, min=1, max=64),
+                io.Float.Input("score_threshold", default=0.05, min=0.0, max=1.0, step=0.01),
+                io.Float.Input("detection_nms_threshold", default=0.5, min=0.0, max=1.0, step=0.01),
+                io.Int.Input("max_detections", default=100, min=1, max=1000),
+                io.Int.Input("rpn_pre_nms_topk", default=1000, min=1, max=10000),
+                io.Int.Input("rpn_post_nms_topk", default=1000, min=1, max=10000),
+                io.Float.Input("rpn_nms_threshold", default=0.7, min=0.0, max=1.0, step=0.01),
+            ], outputs=[io.Image.Output("image")],
+        )
+
+    @classmethod
+    def execute(cls, image, cmap="viridis", resolution=512, batch_size=2, score_threshold=0.05,
+                detection_nms_threshold=0.5, max_detections=100, rpn_pre_nms_topk=1000, rpn_post_nms_topk=1000, rpn_nms_threshold=0.7):
+        return io.NodeOutput(run_densepose_batch(
+            image, resolution, batch_size, cmap, loader=load_densepose_model, forward=densepose_forward,
+            score_threshold=score_threshold, detection_nms_threshold=detection_nms_threshold, max_detections=max_detections,
+            rpn_pre_nms_topk=rpn_pre_nms_topk, rpn_post_nms_topk=rpn_post_nms_topk, rpn_nms_threshold=rpn_nms_threshold,
+        ))
 
 
 class UC_ExtractPrevalentColors(io.ComfyNode):

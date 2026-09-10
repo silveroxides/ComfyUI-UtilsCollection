@@ -177,6 +177,8 @@ class SamplingUtils(ComfyExtension):
             UC_LaMaInpaint,
             UC_BatchedOpenPose,
             UC_DWPoseEstimator,
+            UC_AnimalPoseEstimator,
+            UC_DensePoseEstimator,
             UC_BoldFrakturTextStyle,
             UC_UnBoldFrakturTextStyle,
             UC_WordJoiner,

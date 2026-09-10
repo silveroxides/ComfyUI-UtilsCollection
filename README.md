@@ -175,6 +175,8 @@ the base-resolution conditioning fusion.
 - `UC_LaMaInpaint`
 - `UC_BatchedOpenPose`
 - `UC_DWPoseEstimator`
+- `UC_AnimalPoseEstimator`
+- `UC_DensePoseEstimator`
 
 `UC_BatchedOpenPose` batches video frames for body inference and person crops for hand/face inference. `UC_DWPoseEstimator` batches YOLOX frames and RTMPose person crops, including partial batches without padding. Both return `IMAGE` and `POSE_KEYPOINT`, use ComfyUI's selected device/model management, and expose a batch size to control VRAM use. These are independent eager implementations loaded through UEL; `comfyui_controlnet_aux`, Ultralytics, ONNX Runtime, MMPose, and TorchScript are not runtime dependencies. Speed and prediction parity need real-model validation.
 
@@ -191,6 +193,12 @@ Both nodes share optional `temporal_filter`: it treats the input batch as ordere
 | DWPose pose | `dwpose_ucoco_384.safetensors` | `preprocessors/dwpose/` |
 
 `scripts/convert_pose_models_to_safetensors.py` converts the original trusted `.pth`/TorchScript sources, maps eager tensor names, and verifies shapes, dtypes, and tensor values before accepting the output. Runtime loaders accept the converted safetensors, not the original executable archives.
+
+`UC_AnimalPoseEstimator` reuses YOLOX for COCO animal classes 14–23 and runs AP10K RTMPose crops in batches, returning `IMAGE` and AP10K `POSE_KEYPOINT` records. Detection, keypoint, NMS and temporal-filter controls are exposed. `UC_DensePoseEstimator` runs an eager R50-FPN backbone and ROI heads in batches, with Viridis/Parula rendering and exposed detection/NMS/proposal limits. DensePose uses torchvision's existing ROI/NMS operations, not Detectron2.
+
+Additional files: `animalpose_ap10k_256.safetensors` under HF `preprocessors/animalpose/`, and `densepose_r50_fpn.safetensors` under `preprocessors/densepose/`; both install in the same local preprocessor model directory. Artifact conversion/loading is verified separately from numerical prediction parity and measured speed, which remain unverified for these ports.
+
+For further models, use `MODEL_MIGRATION.md` and the shared `models/migrations.json` manifest/schema rather than inventing a new conversion/loading flow.
 
 `UC_StagedLayeredBackgroundComposite` builds a scene from a background and ordered foreground sockets. Use `run_staging` to retain cutouts and populate the placement editor. Use `run_staged` to composite retained cutouts without loading models or evaluating foreground branches. Use `full_run` to restage and composite in one queue. `foreground_0` is the backmost layer. Retained cutouts are held in server memory and must be recreated after restarting ComfyUI.
 

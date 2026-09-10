@@ -1,3 +1,4 @@
 opencv-python
 typing-extensions
 unifiedefficientloader>=0.5.3
+huggingface_hub

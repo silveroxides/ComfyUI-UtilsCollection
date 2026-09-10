@@ -1,10 +1,11 @@
 import json
 import numpy as np
 import comfy.model_patcher
-from .model_assets import download_huggingface_model
+from .model_assets import download_huggingface_model, get_model_migration, MODEL_MIGRATIONS
 from .models.openpose import BodyPoseModel, HandPoseModel, FacePoseModel
 from .models.yolox import YOLOXDetector
-from .models.rtmpose import RTMPoseEstimator
+from .models.rtmpose import RTMPoseEstimator, AP10KPoseEstimator
+from .models.densepose import DensePoseModel
 import math
 import numbers
 import os
@@ -31,25 +32,32 @@ SAM3_WORKING_SIZE = 1008
 SAM3_EDGE_PADDING = 32
 
 
-MODEL_FOLDER = "controlnet_preprocessors"
-MODEL_REPO = "silveroxides/ComfyUI-UtilsCollection-Models"
+MODEL_FOLDER = MODEL_MIGRATIONS["folder_category"]
+MODEL_REPO = MODEL_MIGRATIONS["hf_repo"]
 CHECKPOINTS = {
-    "body": ("openpose_body.safetensors", BodyPoseModel),
-    "hand": ("openpose_hand.safetensors", HandPoseModel),
-    "face": ("openpose_face.safetensors", FacePoseModel),
+    "body": (get_model_migration("openpose_body")["filename"], BodyPoseModel),
+    "hand": (get_model_migration("openpose_hand")["filename"], HandPoseModel),
+    "face": (get_model_migration("openpose_face")["filename"], FacePoseModel),
 }
 
 
 def register_openpose_paths():
-    for directory in folder_paths.get_folder_paths("controlnet"):
-        folder_paths.add_model_folder_path(MODEL_FOLDER, os.path.join(directory, "preprocessors"))
+    base, *relative = Path(MODEL_MIGRATIONS["folder_relative"]).parts
+    for directory in folder_paths.get_folder_paths(base):
+        folder_paths.add_model_folder_path(MODEL_FOLDER, os.path.join(directory, *relative))
     paths, extensions = folder_paths.folder_names_and_paths[MODEL_FOLDER]
     folder_paths.folder_names_and_paths[MODEL_FOLDER] = (paths, extensions | {".safetensors"})
 
 
 def load_openpose_model(kind):
-    filename, architecture = CHECKPOINTS[kind]
-    path = download_huggingface_model(MODEL_FOLDER, filename, MODEL_REPO, f"preprocessors/openpose/{filename}")
+    return load_migrated_pose_model(f"openpose_{kind}", CHECKPOINTS[kind][1])
+
+
+def load_migrated_pose_model(kind, architecture):
+    specification = get_model_migration(kind)
+    if specification["architecture"] != architecture.__name__:
+        raise ValueError(f"Migration architecture mismatch for {kind}")
+    path = download_huggingface_model(MODEL_FOLDER, specification["filename"], MODEL_REPO, specification["hf_path"])
     return load_pose_safetensors(path, architecture)
 
 
@@ -103,16 +111,13 @@ def openpose_forward(patcher, images):
 
 
 DWPOSE_CHECKPOINTS = {
-    "detector": "dwpose_yolox_l.safetensors",
-    "pose": "dwpose_ucoco_384.safetensors",
+    "detector": get_model_migration("dwpose_detector")["filename"],
+    "pose": get_model_migration("dwpose_pose")["filename"],
 }
 
 
 def load_dwpose_model(kind):
-    filename = DWPOSE_CHECKPOINTS[kind]
-    repo_path = f"detectors/{filename}" if kind == "detector" else f"preprocessors/dwpose/{filename}"
-    path = download_huggingface_model(MODEL_FOLDER, filename, MODEL_REPO, repo_path)
-    return load_pose_safetensors(path, YOLOXDetector if kind == "detector" else RTMPoseEstimator)
+    return load_migrated_pose_model(f"dwpose_{kind}", YOLOXDetector if kind == "detector" else RTMPoseEstimator)
 
 
 def dwpose_forward(patcher, images):
@@ -124,6 +129,23 @@ def dwpose_forward(patcher, images):
     if isinstance(output, (tuple, list)):
         return tuple(value.detach().float().cpu().numpy() for value in output)
     return output.detach().float().cpu().numpy()
+
+
+def load_animal_pose_model(kind):
+    if kind == "detector":
+        return load_dwpose_model("detector")
+    return load_migrated_pose_model("animalpose", AP10KPoseEstimator)
+
+
+def load_densepose_model():
+    return load_migrated_pose_model("densepose_r50", DensePoseModel)
+
+
+def densepose_forward(patcher, images, **options):
+    comfy.model_management.throw_exception_if_processing_interrupted()
+    comfy.model_management.load_models_gpu([patcher])
+    tensor = torch.from_numpy(np.ascontiguousarray(np.stack(images).transpose(0, 3, 1, 2))).to(patcher.load_device)
+    return patcher.model(tensor, **options)
 
 
 def _extract_text_prompts(conditioning, device, dtype):

@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import gc
 import importlib
+import json
 from pathlib import Path
 import sys
 import types
@@ -16,13 +17,8 @@ from unifiedefficientloader import IncrementalSafetensorsWriter
 from convert_big_lama_to_safetensors import sha256_file, verify_output
 
 
-MODELS = {
-    "openpose_body": ("openpose", "BodyPoseModel"),
-    "openpose_hand": ("openpose", "HandPoseModel"),
-    "openpose_face": ("openpose", "FacePoseModel"),
-    "dwpose_detector": ("yolox", "YOLOXDetector"),
-    "dwpose_pose": ("rtmpose", "RTMPoseEstimator"),
-}
+MANIFEST = json.loads((Path(__file__).resolve().parents[1] / "models" / "migrations.json").read_text(encoding="utf-8"))
+MODELS = MANIFEST["models"]
 
 
 def model_type(kind):
@@ -31,8 +27,8 @@ def model_type(kind):
     package = types.ModuleType("_uc_pose_conversion_models")
     package.__path__ = [str(root / "models")]
     sys.modules.setdefault(package.__name__, package)
-    module, name = MODELS[kind]
-    return getattr(importlib.import_module(f"{package.__name__}.{module}"), name)
+    specification = MODELS[kind]
+    return getattr(importlib.import_module(f"{package.__name__}.{specification['module']}"), specification["architecture"])
 
 
 def convert(kind, source, destination):
@@ -42,22 +38,24 @@ def convert(kind, source, destination):
         raise FileExistsError(f"Refusing to overwrite {destination}")
     if destination.suffix.lower() != ".safetensors":
         raise ValueError("Destination must end in .safetensors")
-    if kind.startswith("dwpose"):
+    specification = MODELS[kind]
+    architecture = model_type(kind)
+    if specification["source_format"] == "torchscript":
         scripted = torch.jit.load(str(source), map_location="cpu")
         weights = dict(scripted.state_dict())
         del scripted
     else:
         weights = torch.load(source, map_location="cpu", weights_only=True)
-    architecture = model_type(kind)
     with torch.device("meta"):
         model = architecture()
     expected = model.state_dict()
-    if kind in ("openpose_body", "openpose_hand"):
+    if specification["mapping"] == "strip_model_prefix":
         mapping = {key: ".".join(key.split(".")[1:]) for key in expected}
     else:
         module = sys.modules[architecture.__module__]
-        roots = getattr(module, "TORCHSCRIPT_STATE_DICT_ROOT_MAP", {})
-        key_map = getattr(module, "TORCHSCRIPT_STATE_DICT_KEY_MAP", {})
+        prefix = specification.get("map_prefix", "")
+        roots = getattr(module, f"{prefix}TORCHSCRIPT_STATE_DICT_ROOT_MAP", {})
+        key_map = getattr(module, f"{prefix}TORCHSCRIPT_STATE_DICT_KEY_MAP", {})
         mapping = {}
         for key in weights:
             root, separator, suffix = key.rpartition(".")

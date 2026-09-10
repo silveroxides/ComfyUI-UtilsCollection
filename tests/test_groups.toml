@@ -101,6 +101,8 @@ paths = [
   "models/openpose.py",
   "models/yolox.py",
   "models/rtmpose.py",
+  "models/densepose.py",
+  "models/migrations.json",
   "color_name_data.py",
   "color_palette_helpers.py",
 ]

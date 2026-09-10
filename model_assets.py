@@ -1,9 +1,23 @@
 import os
+import json
+from pathlib import Path
 import shutil
 import tempfile
 from urllib.parse import quote
 import folder_paths
 from huggingface_hub import hf_hub_download
+
+
+MODEL_MIGRATIONS = json.loads((Path(__file__).parent / "models" / "migrations.json").read_text(encoding="utf-8"))
+
+
+def get_model_migration(kind):
+    if MODEL_MIGRATIONS.get("version") != 1:
+        raise ValueError("Unsupported model migration manifest version")
+    try:
+        return MODEL_MIGRATIONS["models"][kind]
+    except KeyError as error:
+        raise ValueError(f"Unknown model migration: {kind}") from error
 
 
 def download_huggingface_model(category, filename, repo_id, repo_path):

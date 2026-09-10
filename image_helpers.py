@@ -363,7 +363,7 @@ def dwpose_detector_input(frame):
     return padded.astype(np.float32), ratio
 
 
-def decode_dwpose_boxes(prediction, ratio, classes=(0,), detection_threshold=0.3):
+def decode_dwpose_boxes(prediction, ratio, classes=(0,), detection_threshold=0.3, nms_threshold=0.45):
     grids, strides = [], []
     for stride in (8, 16, 32):
         y, x = np.mgrid[:640 // stride, :640 // stride]
@@ -381,11 +381,11 @@ def decode_dwpose_boxes(prediction, ratio, classes=(0,), detection_threshold=0.3
         center = (prediction[chosen, :2] + grid[chosen]) * stride[chosen]
         size = np.exp(prediction[chosen, 2:4]) * stride[chosen]
         boxes = np.concatenate((center - size / 2, center + size / 2), axis=-1) / ratio
-        results.append(suppress_pose_boxes(boxes, scores[chosen]))
+        results.append(suppress_pose_boxes(boxes, scores[chosen], nms_threshold))
     return np.concatenate(results) if results else np.empty((0, 4), dtype=np.float32)
 
 
-def suppress_pose_boxes(boxes, scores):
+def suppress_pose_boxes(boxes, scores, nms_threshold=0.45):
     area = (boxes[:, 2] - boxes[:, 0] + 1) * (boxes[:, 3] - boxes[:, 1] + 1)
     order, keep = np.argsort(scores)[::-1], []
     while len(order):
@@ -396,7 +396,7 @@ def suppress_pose_boxes(boxes, scores):
         bottom_right = np.minimum(boxes[current, 2:], boxes[remaining, 2:])
         intersection = np.maximum(bottom_right - top_left + 1, 0).prod(axis=-1)
         overlap = intersection / (area[current] + area[remaining] - intersection)
-        order = remaining[overlap <= 0.45]
+        order = remaining[overlap <= nms_threshold]
     return boxes[keep]
 
 
@@ -444,10 +444,34 @@ def decode_dwpose_person(simcc_x, simcc_y, center, scale, width, height, keypoin
     }
 
 
+def decode_animal_pose(simcc_x, simcc_y, center, scale, keypoint_threshold=0.3):
+    if simcc_x.shape != (17, 512) or simcc_y.shape != (17, 512):
+        raise ValueError(f"Unsupported AP10K SimCC shapes: {simcc_x.shape}, {simcc_y.shape}")
+    coordinates = np.stack((simcc_x.argmax(axis=-1), simcc_y.argmax(axis=-1)), axis=-1).astype(np.float32) / 2
+    coordinates = coordinates / 256 * scale + center - scale / 2
+    scores = np.minimum(simcc_x.max(axis=-1), simcc_y.max(axis=-1)).clip(0, 1)
+    result = np.column_stack((coordinates, scores))
+    result[scores < keypoint_threshold] = 0
+    return result.tolist()
 
 
+AP10K_LIMBS = ((1, 2), (2, 3), (1, 3), (3, 4), (4, 9), (9, 10), (10, 11), (4, 6),
+              (6, 7), (7, 8), (4, 5), (5, 15), (15, 16), (16, 17), (5, 12), (12, 13), (13, 14))
+AP10K_COLORS = ((255, 255, 255), (100, 255, 100), (150, 255, 255), (100, 50, 255), (50, 150, 200),
+               (0, 255, 255), (0, 150, 0), (0, 0, 255), (0, 0, 150), (255, 50, 255), (255, 0, 255),
+               (255, 0, 0), (150, 0, 0), (255, 255, 100), (0, 150, 0), (255, 255, 0), (150, 150, 150))
 
 
+def draw_animal_pose_frame(animals, height, width):
+    output = np.zeros((height, width, 3), dtype=np.uint8)
+    for animal in animals:
+        for (a, b), color in zip(AP10K_LIMBS, AP10K_COLORS):
+            if animal[a - 1][2] <= 0 or animal[b - 1][2] <= 0:
+                continue
+            start = tuple(int(value) for value in animal[a - 1][:2])
+            end = tuple(int(value) for value in animal[b - 1][:2])
+            cv2.line(output, start, end, color, 5)
+    return output
 
 
 def prune_temporal_pose_keypoints(documents, boxes, radius=2, min_support=2, max_distance=0.1, match_iou=0.3):
@@ -508,17 +532,29 @@ def prune_temporal_pose_keypoints(documents, boxes, radius=2, min_support=2, max
     return filtered
 
 
+def prune_temporal_animal_keypoints(documents, boxes, radius=2, min_support=2, max_distance=0.1, match_iou=0.3):
+    normalized = []
+    for frame in documents:
+        dimensions = np.array([frame["canvas_width"], frame["canvas_height"], 1])
+        people = [{"pose_keypoints_2d": (np.asarray(animal) / dimensions).ravel().tolist()} for animal in frame["animals"]]
+        normalized.append({"people": people, "canvas_width": frame["canvas_width"], "canvas_height": frame["canvas_height"]})
+    filtered = prune_temporal_pose_keypoints(normalized, boxes, radius, min_support, max_distance, match_iou)
+    return [{**original, "animals": [(np.asarray(person["pose_keypoints_2d"]).reshape(-1, 3)
+                                      * [frame["canvas_width"], frame["canvas_height"], 1]).tolist() for person in frame["people"]]}
+            for original, frame in zip(documents, filtered)]
+
+
 def run_dwpose_batch(images, resolution=512, batch_size=5, detect_body=True, detect_hand=True, detect_face=True,
-                     scale_stick=False, *, loader, forward, detection_threshold=0.3, keypoint_threshold=0.3,
+                     scale_stick=False, *, loader, forward, animal=False, detection_threshold=0.3, keypoint_threshold=0.3, nms_threshold=0.45,
                      temporal_filter=False, temporal_radius=2, temporal_min_support=2, temporal_max_distance=0.1, temporal_match_iou=0.3):
     if images.ndim != 4 or not len(images) or images.shape[-1] not in (3, 4):
         raise ValueError("DWPose requires a nonempty RGB or RGBA IMAGE batch.")
     if batch_size < 1 or resolution < 64:
         raise ValueError("DWPose batch_size must be positive and resolution must be at least 64.")
-    if not 0 <= detection_threshold <= 1 or not 0 <= keypoint_threshold <= 1:
+    if not all(0 <= value <= 1 for value in (detection_threshold, keypoint_threshold, nms_threshold)):
         raise ValueError("Detection and keypoint thresholds must be between zero and one.")
     if temporal_filter and (temporal_radius < 1 or temporal_min_support < 1 or temporal_max_distance <= 0):
-        raise ValueError("Temporal keypoint filtering requires human poses and positive radius, support and distance values.")
+        raise ValueError("Temporal keypoint filtering requires positive radius, support and distance values.")
     models = {"detector": loader("detector")}
     factor = resolution / min(images.shape[1:3])
     height, width = (max(1, round(value * factor)) for value in images.shape[1:3])
@@ -530,7 +566,7 @@ def run_dwpose_batch(images, resolution=512, batch_size=5, detect_body=True, det
         frames = []
         for image in images[start:start + batch_size]:
             pixels = (image[..., :3].detach().cpu().numpy().clip(0, 1) * 255).astype(np.uint8)
-            model_pixels = pixels[..., ::-1]
+            model_pixels = pixels if animal else pixels[..., ::-1]
             frames.append(cv2.resize(model_pixels, (width, height), interpolation=cv2.INTER_CUBIC if factor > 1 else cv2.INTER_AREA))
         inputs, ratios = zip(*(dwpose_detector_input(frame) for frame in frames))
         detections = forward(models["detector"], inputs)
@@ -539,8 +575,8 @@ def run_dwpose_batch(images, resolution=512, batch_size=5, detect_body=True, det
         jobs, people = [], [[] for frame in frames]
         chunk_boxes = [[] for frame in frames]
         for index, (frame, prediction, ratio) in enumerate(zip(frames, detections, ratios)):
-            for box in decode_dwpose_boxes(prediction, ratio, (0,), detection_threshold):
-                crop, center, scale = prepare_dwpose_crop(frame, box, (288, 384))
+            for box in decode_dwpose_boxes(prediction, ratio, range(14, 24) if animal else (0,), detection_threshold, nms_threshold):
+                crop, center, scale = prepare_dwpose_crop(frame, box, (256, 256) if animal else (288, 384))
                 jobs.append((index, crop, center, scale))
                 chunk_boxes[index].append(box)
         if jobs and "pose" not in models:
@@ -551,20 +587,80 @@ def run_dwpose_batch(images, resolution=512, batch_size=5, detect_body=True, det
             x, y = forward(models["pose"], crops)
             for item, simcc_x, simcc_y in zip(chunk, x, y):
                 frame, _, center, scale = item
-                people[frame].append(decode_dwpose_person(simcc_x, simcc_y, center, scale, width, height, keypoint_threshold))
+                people[frame].append(decode_animal_pose(simcc_x, simcc_y, center, scale, keypoint_threshold) if animal
+                                     else decode_dwpose_person(simcc_x, simcc_y, center, scale, width, height, keypoint_threshold))
         for index, frame_people in enumerate(people):
             document = {"canvas_height": height, "canvas_width": width}
-            document.update({"people": frame_people})
+            document.update({"version": "ap10k", "animals": frame_people} if animal else {"people": frame_people})
             documents.append(document)
             all_boxes.append(chunk_boxes[index])
             progress.update(1)
     if temporal_filter:
-        documents = prune_temporal_pose_keypoints(documents, all_boxes, temporal_radius, temporal_min_support, temporal_max_distance, temporal_match_iou)
+        filter_keypoints = prune_temporal_animal_keypoints if animal else prune_temporal_pose_keypoints
+        documents = filter_keypoints(documents, all_boxes, temporal_radius, temporal_min_support, temporal_max_distance, temporal_match_iou)
     for index, document in enumerate(documents):
         comfy.model_management.throw_exception_if_processing_interrupted()
-        rendered = draw_pose_frame(document["people"], height, width, detect_body, detect_hand, detect_face, scale_stick)
+        rendered = draw_animal_pose_frame(document["animals"], height, width) if animal else draw_pose_frame(document["people"], height, width, detect_body, detect_hand, detect_face, scale_stick)
         output[index] = torch.from_numpy(rendered).float().div_(255)
     return output, documents
+
+
+def render_densepose_frame(result, height, width, cmap="viridis"):
+    if cmap not in ("viridis", "parula"):
+        raise ValueError("DensePose colormap must be viridis or parula")
+    canvas = np.zeros((height, width, 3), dtype=np.uint8)
+    if cmap == "viridis":
+        canvas[:] = [68, 1, 84]
+    boxes, coarse, fine, _, _ = result
+    for index, box in enumerate(boxes.detach().cpu().tolist()):
+        x, y = int(box[0]), int(box[1])
+        box_width, box_height = max(1, int(box[2] - box[0])), max(1, int(box[3] - box[1]))
+        foreground = torch.nn.functional.interpolate(coarse[index:index + 1], (box_height, box_width), mode="bilinear", align_corners=False).argmax(1)[0] > 0
+        labels = torch.nn.functional.interpolate(fine[index:index + 1], (box_height, box_width), mode="bilinear", align_corners=False).argmax(1)[0]
+        labels = (labels * foreground).detach().cpu().numpy()
+        left, top, right, bottom = max(0, x), max(0, y), min(width, x + box_width), min(height, y + box_height)
+        if right <= left or bottom <= top:
+            continue
+        labels = labels[top - y:bottom - y, left - x:right - x]
+        color = cv2.applyColorMap((labels.astype(np.float32) * (255 / 24)).clip(0, 255).astype(np.uint8),
+                                 cv2.COLORMAP_VIRIDIS if cmap == "viridis" else cv2.COLORMAP_PARULA)[..., ::-1]
+        region = canvas[top:bottom, left:right]
+        mask = labels > 0
+        region[mask] = color[mask]
+    return canvas
+
+
+def run_densepose_batch(images, resolution=512, batch_size=2, cmap="viridis", *, loader, forward,
+                        score_threshold=0.05, detection_nms_threshold=0.5, max_detections=100,
+                        rpn_pre_nms_topk=1000, rpn_post_nms_topk=1000, rpn_nms_threshold=0.7):
+    if images.ndim != 4 or not len(images) or images.shape[-1] not in (3, 4):
+        raise ValueError("DensePose requires a nonempty RGB or RGBA IMAGE batch")
+    if resolution < 64 or batch_size < 1 or cmap not in ("viridis", "parula"):
+        raise ValueError("Invalid DensePose resolution, batch size or colormap")
+    if not all(0 <= value <= 1 for value in (score_threshold, detection_nms_threshold, rpn_nms_threshold)):
+        raise ValueError("DensePose thresholds must be between zero and one")
+    if min(max_detections, rpn_pre_nms_topk, rpn_post_nms_topk) < 1:
+        raise ValueError("DensePose detection/proposal limits must be positive")
+    patcher = loader()
+    scale = resolution / min(images.shape[1:3])
+    height, width = (max(1, round(size * scale)) for size in images.shape[1:3])
+    output = torch.empty((len(images), height, width, 3), dtype=torch.float32, device="cpu")
+    progress = comfy.utils.ProgressBar(len(images))
+    for start in range(0, len(images), batch_size):
+        frames = []
+        for image in images[start:start + batch_size]:
+            pixels = (image[..., :3].detach().cpu().numpy().clip(0, 1) * 255).astype(np.uint8)
+            frames.append(cv2.resize(pixels, (width, height), interpolation=cv2.INTER_CUBIC if scale > 1 else cv2.INTER_AREA))
+        predictions = forward(patcher, frames, score_threshold=score_threshold, detection_nms_threshold=detection_nms_threshold,
+                              max_detections=max_detections, rpn_pre_nms_topk=rpn_pre_nms_topk,
+                              rpn_post_nms_topk=rpn_post_nms_topk, rpn_nms_threshold=rpn_nms_threshold)
+        if len(predictions) != len(frames):
+            raise ValueError("DensePose model did not preserve frame batch order")
+        for index, result in enumerate(predictions):
+            comfy.model_management.throw_exception_if_processing_interrupted()
+            output[start + index] = torch.from_numpy(render_densepose_frame(result, height, width, cmap)).float().div_(255)
+            progress.update(1)
+    return output
 
 
 def prepare_h3_reference_video_components(video, megapixels: float, duration_seconds: float = 0.0):

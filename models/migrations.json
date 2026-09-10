@@ -1,0 +1,52 @@
+{
+  "$schema": "migrations.schema.json",
+  "version": 1,
+  "hf_repo": "silveroxides/ComfyUI-UtilsCollection-Models",
+  "folder_category": "controlnet_preprocessors",
+  "folder_relative": "controlnet/preprocessors",
+  "models": {
+    "openpose_body": {
+      "module": "openpose", "architecture": "BodyPoseModel", "source_format": "state_dict",
+      "source_repo": "lllyasviel/Annotators", "source_file": "body_pose_model.pth",
+      "filename": "openpose_body.safetensors", "hf_path": "preprocessors/openpose/openpose_body.safetensors",
+      "mapping": "strip_model_prefix", "input": "NCHW BGR /256-0.5", "output": "PAF N38HW; heatmaps N19HW"
+    },
+    "openpose_hand": {
+      "module": "openpose", "architecture": "HandPoseModel", "source_format": "state_dict",
+      "source_repo": "lllyasviel/Annotators", "source_file": "hand_pose_model.pth",
+      "filename": "openpose_hand.safetensors", "hf_path": "preprocessors/openpose/openpose_hand.safetensors",
+      "mapping": "strip_model_prefix", "input": "NCHW BGR /256-0.5; 184/368/552/736 square", "output": "heatmaps N22HW"
+    },
+    "openpose_face": {
+      "module": "openpose", "architecture": "FacePoseModel", "source_format": "state_dict",
+      "source_repo": "lllyasviel/Annotators", "source_file": "facenet.pth",
+      "filename": "openpose_face.safetensors", "hf_path": "preprocessors/openpose/openpose_face.safetensors",
+      "mapping": "module_maps", "input": "NCHW BGR /256-0.5; 384 square", "output": "heatmaps N71HW"
+    },
+    "dwpose_detector": {
+      "module": "yolox", "architecture": "YOLOXDetector", "source_format": "torchscript",
+      "source_repo": "hr16/yolox-onnx", "source_file": "yolox_l.torchscript.pt",
+      "filename": "dwpose_yolox_l.safetensors", "hf_path": "detectors/dwpose_yolox_l.safetensors",
+      "mapping": "module_maps", "input": "NCHW 0..255; 640 square", "output": "raw YOLOX N8400x85"
+    },
+    "dwpose_pose": {
+      "module": "rtmpose", "architecture": "RTMPoseEstimator", "source_format": "torchscript",
+      "source_repo": "hr16/DWPose-TorchScript-BatchSize5", "source_file": "dw-ll_ucoco_384_bs5.torchscript.pt",
+      "filename": "dwpose_ucoco_384.safetensors", "hf_path": "preprocessors/dwpose/dwpose_ucoco_384.safetensors",
+      "mapping": "module_maps", "input": "NCHW normalized BGR; 384x288", "output": "SimCC N133x576; N133x768"
+    },
+    "animalpose": {
+      "module": "rtmpose", "architecture": "AP10KPoseEstimator", "source_format": "torchscript",
+      "source_repo": "hr16/DWPose-TorchScript-BatchSize5", "source_file": "rtmpose-m_ap10k_256_bs5.torchscript.pt",
+      "filename": "animalpose_ap10k_256.safetensors", "hf_path": "preprocessors/animalpose/animalpose_ap10k_256.safetensors",
+      "mapping": "module_maps", "map_prefix": "AP10K_", "input": "NCHW normalized RGB; 256 square", "output": "SimCC N17x512; N17x512"
+    },
+    "densepose_r50": {
+      "module": "densepose", "architecture": "DensePoseModel", "source_format": "torchscript",
+      "source_repo": "LayerNorm/DensePose-TorchScript-with-hint-image", "source_file": "densepose_r50_fpn_dl.torchscript",
+      "filename": "densepose_r50_fpn.safetensors", "hf_path": "preprocessors/densepose/densepose_r50_fpn.safetensors",
+      "mapping": "module_maps", "input": "NCHW RGB 0..255; model normalizes and pads to stride32",
+      "output": "per-frame (boxes, coarse, fine, u, v), tensors remain on execution device"
+    }
+  }
+}
