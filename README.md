@@ -180,6 +180,10 @@ the base-resolution conditioning fusion.
 
 Checkpoints belong in `ComfyUI/models/controlnet/preprocessors` (also discovered under additional `controlnet` roots registered through `folder_paths`). Executing a pose node downloads missing weights from the pack's HF repository through `huggingface_hub` and reuses existing local files. No model weights are stored in this node repository.
 
+DWPose exposes separate detection and keypoint-confidence thresholds (both default to `0.3`). OpenPose exposes body (`0.1`), hand/face (`0.05`), limb affinity (`0.05`), limb support (`0.8`), minimum connected body parts (`4`), and minimum assembled body score (`0.4`). OpenPose preserves face-landmark slots when points are below threshold so temporal matching cannot shift landmark identities.
+
+Both nodes share optional `temporal_filter`: it treats the input batch as ordered video frames and prunes individual unsupported keypoints before rendering and exporting, without removing person entries or interpolating replacement joints. Defaults inspect two frames on either side, require support from two neighbors where available, allow movement up to `0.1` of the person's box diagonal, and match person boxes at IoU `0.3`. Increase the distance allowance for faster motion; leave filtering disabled for unrelated still images. Matching spans processing-chunk boundaries.
+
 | Node | Checkpoints | Path in `silveroxides/ComfyUI-UtilsCollection-Models` |
 | --- | --- | --- |
 | OpenPose | `openpose_body.safetensors`; `openpose_hand.safetensors` when hands enabled; `openpose_face.safetensors` when face enabled | `preprocessors/openpose/` |

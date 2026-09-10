@@ -62,14 +62,35 @@ class UC_BatchedOpenPose(io.ComfyNode):
                 io.Int.Input("resolution", default=512, min=64, max=4096, step=64, tooltip="Output shortest edge in pixels."),
                 io.Int.Input("batch_size", default=4, min=1, max=64, tooltip="Maximum frames or person crops per network call. Lower this if VRAM is insufficient."),
                 io.Boolean.Input("scale_stick_for_xinsr_cn", default=False),
+                io.Float.Input("body_threshold", default=0.1, min=0.0, max=1.0, step=0.01, tooltip="Minimum body-joint heatmap peak."),
+                io.Float.Input("hand_threshold", default=0.05, min=0.0, max=1.0, step=0.01, tooltip="Minimum hand-joint heatmap response."),
+                io.Float.Input("face_threshold", default=0.05, min=0.0, max=1.0, step=0.01, tooltip="Minimum face-landmark heatmap response."),
+                io.Float.Input("limb_threshold", default=0.05, min=0.0, max=1.0, step=0.01, tooltip="Minimum part-affinity score at sampled limb positions."),
+                io.Float.Input("limb_support", default=0.8, min=0.0, max=1.0, step=0.01, tooltip="More than this fraction of limb samples must exceed the affinity threshold."),
+                io.Int.Input("min_body_parts", default=4, min=1, max=18, tooltip="Minimum connected joints for accepting a person."),
+                io.Float.Input("min_body_score", default=0.4, min=0.0, max=10.0, step=0.01, tooltip="Minimum average assembled person score, including limb affinity scores."),
+                io.Boolean.Input("temporal_filter", default=False, tooltip="Treat the batch as ordered frames and prune unsupported individual joints before rendering; do not use for unrelated images."),
+                io.Int.Input("temporal_radius", default=2, min=1, max=30),
+                io.Int.Input("temporal_min_support", default=2, min=1, max=60),
+                io.Float.Input("temporal_max_distance", default=0.1, min=0.001, max=1.0, step=0.01, tooltip="Maximum joint movement as a fraction of the person's body-box diagonal."),
+                io.Float.Input("temporal_match_iou", default=0.3, min=0.0, max=1.0, step=0.01, tooltip="Minimum body-box overlap for matching people across neighboring frames."),
             ],
             outputs=[io.Image.Output("image"), PoseKeypoint.Output("pose_keypoint")],
         )
 
     @classmethod
     def execute(cls, image, detect_hand=True, detect_body=True, detect_face=True, resolution=512,
-                batch_size=4, scale_stick_for_xinsr_cn=False):
-        result, poses = run_openpose_batch(image, resolution, batch_size, detect_body, detect_hand, detect_face, scale_stick_for_xinsr_cn, loader=load_openpose_model, forward=openpose_forward)
+                batch_size=4, scale_stick_for_xinsr_cn=False, body_threshold=0.1, hand_threshold=0.05, face_threshold=0.05,
+                limb_threshold=0.05, limb_support=0.8, min_body_parts=4, min_body_score=0.4,
+                temporal_filter=False, temporal_radius=2, temporal_min_support=2, temporal_max_distance=0.1, temporal_match_iou=0.3):
+        result, poses = run_openpose_batch(
+            image, resolution, batch_size, detect_body, detect_hand, detect_face, scale_stick_for_xinsr_cn,
+            loader=load_openpose_model, forward=openpose_forward, body_threshold=body_threshold,
+            hand_threshold=hand_threshold, face_threshold=face_threshold, limb_threshold=limb_threshold,
+            limb_support=limb_support, min_body_parts=min_body_parts, min_body_score=min_body_score,
+            temporal_filter=temporal_filter, temporal_radius=temporal_radius, temporal_min_support=temporal_min_support,
+            temporal_max_distance=temporal_max_distance, temporal_match_iou=temporal_match_iou,
+        )
         return io.NodeOutput(result, poses, ui={"openpose_json": [json.dumps(poses)]})
 
 
@@ -87,16 +108,35 @@ class UC_DWPoseEstimator(io.ComfyNode):
                 io.Int.Input("resolution", default=512, min=64, max=4096, step=64),
                 io.Int.Input("batch_size", default=5, min=1, max=64, tooltip="Maximum frames or person crops per model call; partial batches do not need padding."),
                 io.Boolean.Input("scale_stick_for_xinsr_cn", default=False),
+                io.Float.Input("detection_threshold", default=0.3, min=0.0, max=1.0, step=0.01,
+                               tooltip="Minimum person-detection confidence. Raise to reject weak detections such as shadows; may also remove real people."),
+                io.Float.Input("keypoint_threshold", default=0.3, min=0.0, max=1.0, step=0.01,
+                               tooltip="Minimum confidence for body, hand, and face keypoints. Raise to hide uncertain joints; this does not track or smooth motion."),
+                io.Boolean.Input("temporal_filter", default=False,
+                                 tooltip="Treat the IMAGE batch as consecutive frames and prune unsupported individual keypoints before rendering. Person entries are retained."),
+                io.Int.Input("temporal_radius", default=2, min=1, max=30, tooltip="Neighbor frames to inspect on each side; spans processing-chunk boundaries."),
+                io.Int.Input("temporal_min_support", default=2, min=1, max=60, tooltip="Other frames that must support a joint; limited by available neighbors at clip edges."),
+                io.Float.Input("temporal_max_distance", default=0.1, min=0.001, max=1.0, step=0.01,
+                               tooltip="Maximum joint movement as a fraction of the person's box diagonal. Increase for faster motion."),
+                io.Float.Input("temporal_match_iou", default=0.3, min=0.0, max=1.0, step=0.01,
+                               tooltip="Minimum detector-box overlap for matching people across neighboring frames."),
             ],
             outputs=[io.Image.Output("image"), PoseKeypoint.Output("pose_keypoint")],
         )
 
     @classmethod
     def execute(cls, image, detect_hand=True, detect_body=True, detect_face=True, resolution=512,
-                batch_size=5, scale_stick_for_xinsr_cn=False):
+                batch_size=5, scale_stick_for_xinsr_cn=False, detection_threshold=0.3, keypoint_threshold=0.3,
+                temporal_filter=False, temporal_radius=2, temporal_min_support=2, temporal_max_distance=0.1, temporal_match_iou=0.3):
         result, poses = run_dwpose_batch(image, resolution, batch_size, detect_body, detect_hand, detect_face,
-                                        scale_stick_for_xinsr_cn, loader=load_dwpose_model, forward=dwpose_forward)
+                                        scale_stick_for_xinsr_cn, loader=load_dwpose_model, forward=dwpose_forward,
+                                        detection_threshold=detection_threshold, keypoint_threshold=keypoint_threshold,
+                                        temporal_filter=temporal_filter, temporal_radius=temporal_radius,
+                                        temporal_min_support=temporal_min_support, temporal_max_distance=temporal_max_distance,
+                                        temporal_match_iou=temporal_match_iou)
         return io.NodeOutput(result, poses, ui={"openpose_json": [json.dumps(poses)]})
+
+
 
 
 class UC_ExtractPrevalentColors(io.ComfyNode):

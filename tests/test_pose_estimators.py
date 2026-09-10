@@ -50,7 +50,7 @@ def test_openpose_batches_frames_and_person_crops_with_tail_and_frame_order():
     frames = torch.stack([torch.full((128, 192, 3), index / 10) for index in range(5)])
     output, poses = image_helpers.run_openpose_batch(
         frames, resolution=128, batch_size=4, loader=loader, forward=forward,
-        body_decoder=lambda heat, paf: [_body(float(heat[0, 0, 0]) * 10)],
+        body_decoder=lambda heat, paf, **kwargs: [_body(float(heat[0, 0, 0]) * 10)],
     )
     assert output.shape == (5, 128, 192, 3)
     assert loaded == ["body", "hand", "face"]
@@ -96,6 +96,10 @@ def test_vectorized_limb_matching_and_body_assembly_preserve_connections():
     bodies = image_helpers.decode_body(heat, paf)
     assert len(bodies) == 1
     assert bodies[0][1:5] == [(8.0, 20.0), (20.0, 20.0), (32.0, 20.0), (44.0, 20.0)]
+    assert image_helpers.decode_body(heat, paf, body_threshold=0.9) == []
+    assert image_helpers.decode_body(heat, paf, min_body_parts=5) == []
+    assert image_helpers.decode_body(heat, paf, min_body_score=2.0) == []
+    assert image_helpers.decode_body(heat, paf, limb_threshold=1.0) == []
 
 
 def test_model_directory_registration_preserves_custom_paths(monkeypatch, tmp_path):
@@ -127,10 +131,16 @@ def test_openpose_node_exposes_batch_and_pose_keypoint_contract(monkeypatch):
     expected = (torch.zeros(2, 64, 64, 3), [{"people": []}, {"people": []}])
     calls = []
     monkeypatch.setattr(image_nodes, "run_openpose_batch", lambda *args, **kwargs: calls.append((args, kwargs)) or expected)
-    result = image_nodes.UC_BatchedOpenPose.execute(expected[0], batch_size=2)
+    result = image_nodes.UC_BatchedOpenPose.execute(expected[0], batch_size=2, body_threshold=0.2, face_threshold=0.15,
+                                                   hand_threshold=0.12, temporal_filter=True, temporal_match_iou=0.4)
     assert result.result[0] is expected[0] and result.result[1] is expected[1]
     assert calls[0][0][2] == 2
     assert calls[0][1]["loader"] is model_helpers.load_openpose_model
+    assert calls[0][1]["body_threshold"] == 0.2
+    assert calls[0][1]["face_threshold"] == 0.15
+    assert calls[0][1]["hand_threshold"] == 0.12
+    assert calls[0][1]["temporal_filter"] is True
+    assert calls[0][1]["temporal_match_iou"] == 0.4
     assert "openpose_json" in result.ui
 
 
@@ -196,10 +206,32 @@ def test_dwpose_node_uses_shared_output_contract(monkeypatch):
     expected = (torch.zeros(2, 64, 64, 3), [{"people": []}, {"people": []}])
     calls = []
     monkeypatch.setattr(image_nodes, "run_dwpose_batch", lambda *args, **kwargs: calls.append((args, kwargs)) or expected)
-    result = image_nodes.UC_DWPoseEstimator.execute(expected[0], batch_size=2)
+    result = image_nodes.UC_DWPoseEstimator.execute(expected[0], batch_size=2, detection_threshold=0.6, keypoint_threshold=0.5)
     assert result.result[1] is expected[1]
     assert calls[0][1]["forward"] is model_helpers.dwpose_forward
+    assert calls[0][1]["detection_threshold"] == 0.6
+    assert calls[0][1]["keypoint_threshold"] == 0.5
     assert "openpose_json" in result.ui
+
+
+def test_dwpose_thresholds_filter_detections_and_uncertain_joints_independently():
+    prediction = np.zeros((8400, 85), np.float32)
+    prediction[1000, 4:6] = [1, 0.4]
+    prediction[1100, 4:6] = [1, 0.8]
+    assert len(image_helpers.decode_dwpose_boxes(prediction, 1)) == 2
+    assert len(image_helpers.decode_dwpose_boxes(prediction, 1, detection_threshold=0.6)) == 1
+    x, y = np.zeros((133, 576), np.float32), np.zeros((133, 768), np.float32)
+    x[:, 288], y[:, 384] = 0.4, 0.4
+    x[0, 288], y[0, 384] = 0.8, 0.8
+    low = image_helpers.decode_dwpose_person(x, y, np.array([50, 50]), np.array([75, 100]), 100, 100)
+    high = image_helpers.decode_dwpose_person(x, y, np.array([50, 50]), np.array([75, 100]), 100, 100, keypoint_threshold=0.6)
+    assert low["hand_left_keypoints_2d"] is not None
+    assert high["hand_left_keypoints_2d"] is None
+    assert high["face_keypoints_2d"] is None
+    assert high["pose_keypoints_2d"][:3] == [0.5, 0.5, 1.0]
+    assert high["pose_keypoints_2d"][3:6] == [0.0, 0.0, 0.0]
+    empty = image_helpers.decode_dwpose_person(x * 0, y * 0, np.array([50, 50]), np.array([75, 100]), 100, 100, keypoint_threshold=0)
+    assert not any(empty["pose_keypoints_2d"])
 
 
 @pytest.mark.parametrize("family,kind", [("openpose", "body"), ("openpose", "hand"), ("openpose", "face"), ("dwpose", "detector"), ("dwpose", "pose")])
@@ -288,3 +320,121 @@ def test_rtmpose_bottleneck_activates_projection_and_respects_shortcut(shortcut)
         expected = expected + value
     actual = model_helpers.RTMPoseEstimator._residual(block, value, (1, 2, 3), shortcut=shortcut)
     torch.testing.assert_close(actual, expected)
+
+
+def _temporal_person(x):
+    return {"pose_keypoints_2d": [coordinate for _ in range(18) for coordinate in (x, 0.5, 1.0)],
+            "face_keypoints_2d": None, "hand_left_keypoints_2d": None, "hand_right_keypoints_2d": None}
+
+
+def test_temporal_filter_prunes_only_unsupported_joints_not_people():
+    documents = [{"canvas_width": 100, "canvas_height": 100, "people": [_temporal_person(0.25)]} for _ in range(7)]
+    boxes = [[[10, 10, 40, 90]] for _ in documents]
+    documents[3]["people"][0]["pose_keypoints_2d"][30:33] = [0.9, 0.9, 1]
+    documents[3]["people"].append(_temporal_person(0.75))
+    boxes[3].append([60, 10, 90, 90])
+    filtered = image_helpers.prune_temporal_pose_keypoints(documents, boxes)
+    assert len(filtered[3]["people"]) == 2
+    assert filtered[3]["people"][0]["pose_keypoints_2d"][30:33] == [0, 0, 0]
+    assert filtered[3]["people"][0]["pose_keypoints_2d"][27:30] == [0.25, 0.5, 1]
+    assert not any(filtered[3]["people"][1]["pose_keypoints_2d"])
+    assert filtered[0]["people"][0]["pose_keypoints_2d"][30:33] == [0.25, 0.5, 1]
+    assert documents[3]["people"][0]["pose_keypoints_2d"][30:33] == [0.9, 0.9, 1]
+    assert documents[3]["people"][1]["pose_keypoints_2d"][2] == 1
+
+
+def test_temporal_filter_matches_people_one_to_one_when_detection_order_changes():
+    documents, boxes = [], []
+    for index in range(5):
+        people = [_temporal_person(0.25), _temporal_person(0.75)]
+        frame_boxes = [[10, 10, 40, 90], [60, 10, 90, 90]]
+        if index % 2:
+            people.reverse()
+            frame_boxes.reverse()
+        documents.append({"canvas_width": 100, "canvas_height": 100, "people": people})
+        boxes.append(frame_boxes)
+    assert image_helpers.prune_temporal_pose_keypoints(documents, boxes) == documents
+    assert image_helpers.prune_temporal_pose_keypoints(documents[:1], boxes[:1]) == documents[:1]
+
+
+def test_temporal_filter_rejects_isolated_knee_label_jumps_at_person_scale():
+    documents = [{"canvas_width": 1024, "canvas_height": 576, "people": [_temporal_person(0.5)]} for _ in range(7)]
+    for frame in documents:
+        points = frame["people"][0]["pose_keypoints_2d"]
+        points[27:30] = [495 / 1024, 385 / 576, 1]
+        points[30:33] = [487 / 1024, 470 / 576, 1]
+        points[36:39] = [592 / 1024, 300 / 576, 1]
+    middle = documents[3]["people"][0]["pose_keypoints_2d"]
+    middle[27:30] = [591 / 1024, 390 / 576, 1]
+    middle[36:39] = [495 / 1024, 389 / 576, 1]
+    boxes = [[[440, 120, 610, 480]] for _ in documents]
+    filtered = image_helpers.prune_temporal_pose_keypoints(documents, boxes)
+    points = filtered[3]["people"][0]["pose_keypoints_2d"]
+    assert points[27:30] == [0, 0, 0] and points[36:39] == [0, 0, 0]
+    assert points[30:33] == [487 / 1024, 470 / 576, 1]
+    assert filtered[2]["people"][0]["pose_keypoints_2d"][29] == 1
+    assert filtered[4]["people"][0]["pose_keypoints_2d"][38] == 1
+
+
+def test_temporal_filter_runs_before_rendering_and_across_processing_chunks(monkeypatch):
+    sequence = {"index": 0}
+    def decode(*args):
+        index = sequence["index"]
+        sequence["index"] += 1
+        person = _temporal_person(0.25)
+        if index == 3:
+            person["pose_keypoints_2d"][30:33] = [0.9, 0.9, 1]
+        return person
+    def forward(kind, inputs):
+        if kind == "detector":
+            output = np.zeros((len(inputs), 8400, 85), np.float32)
+            output[:, 500, 4:6] = 1
+            return output
+        return np.zeros((len(inputs), 133, 576), np.float32), np.zeros((len(inputs), 133, 768), np.float32)
+    monkeypatch.setattr(image_helpers, "decode_dwpose_person", decode)
+    monkeypatch.setattr(image_helpers, "draw_pose_frame", lambda people, h, w, *args: np.full((h, w, 3), 255 if people[0]["pose_keypoints_2d"][32] else 0, np.uint8))
+    inputs = torch.zeros(7, 64, 64, 3)
+    first_image, first_data = image_helpers.run_dwpose_batch(inputs, 64, 2, loader=lambda kind: kind, forward=forward, temporal_filter=True)
+    sequence["index"] = 0
+    second_image, second_data = image_helpers.run_dwpose_batch(inputs, 64, 5, loader=lambda kind: kind, forward=forward, temporal_filter=True)
+    assert first_data == second_data
+    assert torch.equal(first_image, second_image)
+    assert not first_image[3].any()
+    assert bool(first_image[2].all()) and bool(first_image[4].all())
+
+
+def test_openpose_face_threshold_preserves_landmark_slots_for_temporal_matching():
+    heatmap = np.zeros((16, 16, 3), np.float32)
+    heatmap[4, 5, 0] = 0.1
+    heatmap[7, 8, 1] = 0.8
+    low = image_helpers.decode_face(heatmap, (10, 10, 32), 100, 100)
+    high = image_helpers.decode_face(heatmap, (10, 10, 32), 100, 100, threshold=0.5)
+    assert len(low) == len(high) == 9
+    assert low[:3] == [0.2, 0.18, 1]
+    assert high[:3] == [0, 0, 0]
+    assert high[3:6] == low[3:6]
+    assert high[6:] == [0, 0, 0]
+
+
+def test_openpose_temporal_filter_spans_chunks_before_rendering(monkeypatch):
+    sequence = {"index": 0}
+    def decode(heat, paf, **kwargs):
+        body = _body()
+        body[9], body[10] = (65, 110), (65, 124)
+        if sequence["index"] == 3:
+            body[9] = (170, 110)
+        sequence["index"] += 1
+        return [body]
+    def forward(kind, images):
+        return np.zeros((len(images), 23, 32, 38), np.float32), np.zeros((len(images), 23, 32, 19), np.float32)
+    monkeypatch.setattr(image_helpers, "draw_pose_frame", lambda people, h, w, *args: np.full((h, w, 3), 255 if people[0]["pose_keypoints_2d"][29] else 0, np.uint8))
+    frames = torch.zeros(7, 128, 192, 3)
+    outputs = []
+    for batch_size in (2, 5):
+        sequence["index"] = 0
+        outputs.append(image_helpers.run_openpose_batch(frames, 128, batch_size, detect_hand=False, detect_face=False,
+                                                       loader=lambda kind: kind, forward=forward, body_decoder=decode, temporal_filter=True))
+    assert torch.equal(outputs[0][0], outputs[1][0])
+    assert outputs[0][1] == outputs[1][1]
+    assert not outputs[0][0][3].any()
+    assert bool(outputs[0][0][2].all()) and bool(outputs[0][0][4].all())
