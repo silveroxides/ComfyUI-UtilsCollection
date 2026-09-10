@@ -318,6 +318,7 @@ class UC_VisualFusionConfig(io.ComfyNode):
                 io.Combo.Input("dither_secondary_pattern", options=["checkerboard", "block-interleave", "dither-random-reverse", "dither-random-forward"], default="checkerboard", tooltip="How images 2+ participate in spatial-dither-random. Reverse starts with the last pair and works toward image 1; forward starts with images 1 and 2 and accumulates later images."),
                 io.Boolean.Input("dither_mask_cleanup", default=False, tooltip="Swap paired one-token image-1 islands and holes with a deterministic 3x3 pass while preserving every source's token count."),
                 io.Float.Input("spatial_perturbation", default=0.0, min=0.0, max=1.0, step=0.01, tooltip="Seeded spatial variation for hard fusion methods. Exchanges cells between sources without changing any source's token count; higher values may reduce spatial coherence."),
+                io.Boolean.Input("combine_video_embeds", default=True, tooltip="Save all MiniMax H3 video visual blocks as one ordered embedding. Disable to save one embedding per two-frame video block."),
             ],
             outputs=[
                 VisualFusionConfig.Output("visual_fusion_config", display_name="Fusion Config")
@@ -337,6 +338,7 @@ class UC_VisualFusionConfig(io.ComfyNode):
         dither_secondary_pattern: str = "checkerboard",
         dither_mask_cleanup: bool = False,
         spatial_perturbation: float = 0.0,
+        combine_video_embeds: bool = True,
     ) -> io.NodeOutput:
         config = {
             "visual_fusion_method": visual_fusion_method,
@@ -347,6 +349,7 @@ class UC_VisualFusionConfig(io.ComfyNode):
             "dither_secondary_pattern": dither_secondary_pattern,
             "dither_mask_cleanup": dither_mask_cleanup,
             "spatial_perturbation": spatial_perturbation,
+            "combine_video_embeds": combine_video_embeds,
             "save_blended_embeds": save_blended_embeds,
             "save_path": save_path
         }

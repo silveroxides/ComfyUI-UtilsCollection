@@ -2153,7 +2153,7 @@ def save_blended_visual_embeddings(
 
 
 def _visual_token_embedding_blocks(clip, tokens, device: str, cache=None) -> list[dict]:
-    """Return validated Qwen visual blocks from one already-tokenized source."""
+    """Return validated Qwen image and MiniMax H3 video visual blocks."""
     if cache is not None:
         clip.load_model(tokens)
     cond_stage = clip.cond_stage_model
@@ -2188,6 +2188,10 @@ def _visual_token_embedding_blocks(clip, tokens, device: str, cache=None) -> lis
         blocks.append({
             "interior": embeds[:, start:end, :],
             "block": embeds[:, start - 1:end + 1, :],
+            "is_video": bool(
+                isinstance(tokens_only[0][placeholder], dict)
+                and tokens_only[0][placeholder].get("minimax_video_block", False)
+            ),
         })
     return blocks
 
@@ -2207,20 +2211,49 @@ def save_source_visual_embeddings(
     embedding_key: str,
     device: str,
     visual_indices: list[int] | None = None,
+    include_video_blocks: bool = False,
+    combine_video_blocks: bool = False,
+    output_index_offset: int = 0,
     cache=None,
 ) -> None:
-    """Save one or more unfused complete visual prompt blocks."""
+    """Save selected unfused image blocks and, optionally, one MiniMax H3 video sequence."""
     blocks = _visual_token_embedding_blocks(clip, tokens, device, cache=cache)
-    for output_index, visual_index in enumerate(visual_indices or [0]):
+    indices = [0] if visual_indices is None else list(visual_indices)
+    if include_video_blocks:
+        indices.extend(
+            index for index, block in enumerate(blocks)
+            if block["is_video"] and index not in indices
+        )
+    if combine_video_blocks:
+        video_indices = [index for index in indices if blocks[index]["is_video"]]
+        if not video_indices:
+            return
+        config = visual_fusion_config
+        if output_index_offset:
+            config = dict(visual_fusion_config)
+            save_name = config.get("save_path", "blended_visual_embeds")
+            stem, suffix = os.path.splitext(save_name)
+            config["save_path"] = f"{stem}_{output_index_offset + 1}{suffix}"
+        save_blended_visual_embeddings(
+            [
+                torch.cat([blocks[index]["block"][batch] for index in video_indices], dim=0).detach()
+                for batch in range(blocks[video_indices[0]]["block"].shape[0])
+            ],
+            config,
+            embedding_key,
+        )
+        return
+    for output_index, visual_index in enumerate(indices):
         if not 0 <= visual_index < len(blocks):
             raise ValueError("Visual embedding export could not locate the requested visual block.")
         visual_block = blocks[visual_index]["block"]
         config = visual_fusion_config
-        if output_index:
+        saved_index = output_index + output_index_offset
+        if saved_index:
             config = dict(visual_fusion_config)
             save_name = config.get("save_path", "blended_visual_embeds")
             stem, suffix = os.path.splitext(save_name)
-            config["save_path"] = f"{stem}_{output_index + 1}{suffix}"
+            config["save_path"] = f"{stem}_{saved_index + 1}{suffix}"
         save_blended_visual_embeddings(
             [visual_block[batch].detach() for batch in range(visual_block.shape[0])],
             config,
@@ -3529,6 +3562,8 @@ def execute_advanced_minimax_h3_image_to_video(
             )
     config = dict(visual_fusion_config or {})
     visual_method = config.get("visual_fusion_method", "off")
+    video_export_tokens = None
+    video_export_offset = 0
     fusion_vlm_images = [
         prepare_vlm_image(image, vlm_resolution) for image in flat_fusion_images
     ]
@@ -3692,6 +3727,8 @@ def execute_advanced_minimax_h3_image_to_video(
             conditioning = encode_token_fused_visual_slots(
                 clip, canonical_tokens, slot_sources, config, visual_encoder_path, cache=cache
             )
+            video_export_tokens = canonical_tokens
+            video_export_offset = len(slot_sources)
         else:
             conditioning = encode_embedding_classical_scaled_bias(
                 clip,
@@ -3744,6 +3781,9 @@ def execute_advanced_minimax_h3_image_to_video(
                 base_range = branches[0]["visual_range"]
                 fused_tensor[:, base_range[0]:base_range[1], :] = slot_tensor[:, base_range[0]:base_range[1], :]
             conditioning = [[fused_tensor, base_metadata]]
+        if video_frames is not None and video_export_tokens is None:
+            video_export_tokens = tokenize_callback(prompt)
+            video_export_offset = len(fusion_slot_batches)
     elif fusion_active:
         if token_fusion:
             canonical_images = [*base_vlm_images, fusion_vlm_images[0]]
@@ -3761,6 +3801,8 @@ def execute_advanced_minimax_h3_image_to_video(
                 visual_encoder_path,
                 cache=cache,
             )
+            video_export_tokens = canonical_tokens
+            video_export_offset = 1
         else:
             branches = []
             for index, image in enumerate(fusion_vlm_images):
@@ -3790,6 +3832,11 @@ def execute_advanced_minimax_h3_image_to_video(
                     "raw_visual_index": len(branch_images) - 1,
                 })
             conditioning = _spatially_fuse_visual_consensus_sources(branches, config, clip, allow_export=True, cache=cache)
+        if video_frames is not None and video_export_tokens is None:
+            video_export_tokens = tokenize_presentation(
+                prompt, [*base_vlm_images, fusion_vlm_images[0]]
+            )
+            video_export_offset = 1
     else:
         presentation_images = [*base_vlm_images, *fusion_vlm_images]
         tokenize_callback = lambda text: tokenize_presentation(
@@ -3816,8 +3863,40 @@ def execute_advanced_minimax_h3_image_to_video(
                 visual_embedding_key(clip, tokens),
                 comfy.model_management.get_torch_device(),
                 list(range(len(presentation_images))),
-                cache,
+                cache=cache,
             )
+        if config.get("save_blended_embeds", False) and video_frames is not None:
+            tokens = tokenize_callback(prompt)
+            save_source_visual_embeddings(
+                clip,
+                tokens,
+                config,
+                visual_embedding_key(clip, tokens),
+                comfy.model_management.get_torch_device(),
+                [],
+                include_video_blocks=True,
+                combine_video_blocks=config.get("combine_video_embeds", True),
+                output_index_offset=len(presentation_images),
+                cache=cache,
+            )
+
+    if (
+        config.get("save_blended_embeds", False)
+        and video_export_tokens is not None
+        and video_frames is not None
+    ):
+        save_source_visual_embeddings(
+            clip,
+            video_export_tokens,
+            config,
+            visual_embedding_key(clip, video_export_tokens),
+            comfy.model_management.get_torch_device(),
+            [],
+            include_video_blocks=True,
+            combine_video_blocks=config.get("combine_video_embeds", True),
+            output_index_offset=video_export_offset,
+            cache=cache,
+        )
 
     layout_conditioning = []
     for tensor, metadata in conditioning:
