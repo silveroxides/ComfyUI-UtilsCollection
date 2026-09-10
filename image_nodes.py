@@ -23,6 +23,8 @@ from .image_helpers import (
     run_openpose_batch,
     run_dwpose_batch,
     run_densepose_batch,
+    pose_overlay_mask,
+    overlay_pose_keypoints,
     VIDEO_FRAME_SAMPLING_STRATEGIES,
     VIDEO_FRAME_TIMESTAMP_FORMATS,
     VIDEO_FRAME_TIMELINE_STYLES,
@@ -54,29 +56,29 @@ class UC_BatchedOpenPose(io.ComfyNode):
     def define_schema(cls):
         return io.Schema(
             node_id="UC_BatchedOpenPose", display_name="Batched OpenPose Pose", category="image/pose",
-            description="Batches body frames and hand/face crops on ComfyUI's selected device. Models belong in models/controlnet/preprocessors.",
+            description="Detect human body, hand and face keypoints and draw pose maps. Processes image batches on ComfyUI's selected device. Missing models download on execution to models/controlnet/preprocessors.",
             inputs=[
-                io.Image.Input("image"),
-                io.Boolean.Input("detect_hand", default=True),
+                io.Image.Input("image", tooltip="Image or image batch to process. For temporal filtering, supply consecutive video frames in order, not unrelated images."),
+                io.Boolean.Input("detect_hand", default=True, tooltip="Detect and draw hand joints. Turn off to skip the hand model and reduce processing time; hand keypoints will be omitted."),
                 io.Boolean.Input("detect_body", default=True, tooltip="Draw body skeletons. Body inference still locates hands/faces and produces keypoints."),
-                io.Boolean.Input("detect_face", default=True),
-                io.Int.Input("resolution", default=512, min=64, max=4096, step=64, tooltip="Output shortest edge in pixels."),
+                io.Boolean.Input("detect_face", default=True, tooltip="Detect and draw facial landmarks. Turn off to skip the face model and reduce processing time; face keypoints will be omitted."),
+                io.Int.Input("resolution", default=512, min=64, max=4096, step=64, tooltip="Shortest edge of the output pose map in pixels; aspect ratio is preserved. Larger maps do not increase the body model's fixed processing scale."),
                 io.Int.Input("batch_size", default=4, min=1, max=64, tooltip="Maximum frames or person crops per network call. Lower this if VRAM is insufficient."),
-                io.Boolean.Input("scale_stick_for_xinsr_cn", default=False),
-                io.Float.Input("body_threshold", default=0.1, min=0.0, max=1.0, step=0.01, tooltip="Minimum body-joint heatmap peak."),
-                io.Float.Input("hand_threshold", default=0.05, min=0.0, max=1.0, step=0.01, tooltip="Minimum hand-joint heatmap response."),
-                io.Float.Input("face_threshold", default=0.05, min=0.0, max=1.0, step=0.01, tooltip="Minimum face-landmark heatmap response."),
-                io.Float.Input("limb_threshold", default=0.05, min=0.0, max=1.0, step=0.01, tooltip="Minimum part-affinity score at sampled limb positions."),
-                io.Float.Input("limb_support", default=0.8, min=0.0, max=1.0, step=0.01, tooltip="More than this fraction of limb samples must exceed the affinity threshold."),
-                io.Int.Input("min_body_parts", default=4, min=1, max=18, tooltip="Minimum connected joints for accepting a person."),
-                io.Float.Input("min_body_score", default=0.4, min=0.0, max=10.0, step=0.01, tooltip="Minimum average assembled person score, including limb affinity scores."),
-                io.Boolean.Input("temporal_filter", default=False, tooltip="Treat the batch as ordered frames and prune unsupported individual joints before rendering; do not use for unrelated images."),
-                io.Int.Input("temporal_radius", default=2, min=1, max=30),
-                io.Int.Input("temporal_min_support", default=2, min=1, max=60),
-                io.Float.Input("temporal_max_distance", default=0.1, min=0.001, max=1.0, step=0.01, tooltip="Maximum joint movement as a fraction of the person's body-box diagonal."),
-                io.Float.Input("temporal_match_iou", default=0.3, min=0.0, max=1.0, step=0.01, tooltip="Minimum body-box overlap for matching people across neighboring frames."),
+                io.Boolean.Input("scale_stick_for_xinsr_cn", default=False, tooltip="Scale body-line thickness with image size for Xinsir-style pose maps. Changes drawing only, not detected coordinates."),
+                io.Float.Input("body_threshold", default=0.1, min=0.0, max=1.0, step=0.01, tooltip="Minimum strength of a body-joint candidate. Raise to reject weak joints; lower to recover faint joints at the risk of false detections."),
+                io.Float.Input("hand_threshold", default=0.05, min=0.0, max=1.0, step=0.01, tooltip="Minimum strength of a hand-joint candidate. Raise to remove uncertain fingers; lower to retain more joints. Only used when hand detection is on."),
+                io.Float.Input("face_threshold", default=0.05, min=0.0, max=1.0, step=0.01, tooltip="Minimum strength of a facial landmark. Raise to remove uncertain points; lower to retain more detail. Only used when face detection is on."),
+                io.Float.Input("limb_threshold", default=0.05, min=0.0, max=1.0, step=0.01, tooltip="Required evidence along the line connecting two body joints. Raise to reject unlikely limb connections; too high can break valid skeletons."),
+                io.Float.Input("limb_support", default=0.8, min=0.0, max=1.0, step=0.01, tooltip="Fraction of sampled positions along a limb that must pass limb_threshold; the accepted fraction must be strictly greater. Raise for stricter connections; 1 rejects every connection."),
+                io.Int.Input("min_body_parts", default=4, min=1, max=18, tooltip="Minimum connected joints needed to keep a person. Raise to reject tiny false skeletons; lower for partly visible people."),
+                io.Float.Input("min_body_score", default=0.4, min=0.0, max=10.0, step=0.01, tooltip="Minimum average skeleton score, combining joint and connection evidence. Raise to reject weak people; lower for difficult poses. This is not a probability."),
+                io.Boolean.Input("temporal_filter", default=False, tooltip="Video frames only: remove joints unsupported by nearby frames from both pose maps and keypoints. Keeps person entries; does not smooth or fill missing joints. Leave off for unrelated images."),
+                io.Int.Input("temporal_radius", default=2, min=1, max=30, tooltip="Temporal filter only: frames to inspect before and after each frame. 2 checks up to four neighbors, across batch_size chunks. Larger windows cost more and may reject fast motion."),
+                io.Int.Input("temporal_min_support", default=2, min=1, max=60, tooltip="Temporal filter only: neighboring frames that must confirm a joint. Raise to remove more flicker; lower to retain brief poses. Limited to available neighbors, including at clip edges."),
+                io.Float.Input("temporal_max_distance", default=0.1, min=0.001, max=1.0, step=0.01, tooltip="Temporal filter only: allowed joint displacement relative to the person's body-box diagonal; 0.1 means 10%. Raise for faster motion; lower to reject sudden jumps."),
+                io.Float.Input("temporal_match_iou", default=0.3, min=0.0, max=1.0, step=0.01, tooltip="Temporal filter only: required overlap between body boxes to match a person across frames. Raise to avoid mixing people; lower for faster movement or changing boxes."),
             ],
-            outputs=[io.Image.Output("image"), PoseKeypoint.Output("pose_keypoint")],
+            outputs=[io.Image.Output("image", tooltip="Pose maps in input-frame order, showing the enabled body, hand and face drawings."), PoseKeypoint.Output("pose_keypoint", tooltip="Per-frame OpenPose-format keypoints after thresholding and optional temporal filtering. Disabled hand/face detectors omit those landmarks."), io.Mask.Output("mask", display_name="Pose Overlay Mask", tooltip="White on rendered pose lines and points; black elsewhere. Use to composite the pose map over an image or video. Matches pose-map size and frame order; not a person silhouette.")],
         )
 
     @classmethod
@@ -92,7 +94,7 @@ class UC_BatchedOpenPose(io.ComfyNode):
             temporal_filter=temporal_filter, temporal_radius=temporal_radius, temporal_min_support=temporal_min_support,
             temporal_max_distance=temporal_max_distance, temporal_match_iou=temporal_match_iou,
         )
-        return io.NodeOutput(result, poses, ui={"openpose_json": [json.dumps(poses)]})
+        return io.NodeOutput(result, poses, pose_overlay_mask(result), ui={"openpose_json": [json.dumps(poses)]})
 
 
 class UC_DWPoseEstimator(io.ComfyNode):
@@ -100,30 +102,30 @@ class UC_DWPoseEstimator(io.ComfyNode):
     def define_schema(cls):
         return io.Schema(
             node_id="UC_DWPoseEstimator", display_name="DWPose Estimator", category="image/pose",
-            description="Batches eager YOLOX frames and DWPose person crops using safetensors models in models/controlnet/preprocessors.",
+            description="Detect people and draw body, hand and face pose maps. Processes image batches; missing models download on execution to models/controlnet/preprocessors.",
             inputs=[
-                io.Image.Input("image"),
-                io.Boolean.Input("detect_hand", default=True),
-                io.Boolean.Input("detect_body", default=True),
-                io.Boolean.Input("detect_face", default=True),
-                io.Int.Input("resolution", default=512, min=64, max=4096, step=64),
-                io.Int.Input("batch_size", default=5, min=1, max=64, tooltip="Maximum frames or person crops per model call; partial batches do not need padding."),
-                io.Boolean.Input("scale_stick_for_xinsr_cn", default=False),
+                io.Image.Input("image", tooltip="Image or image batch to process. For temporal filtering, supply consecutive video frames in order, not unrelated images."),
+                io.Boolean.Input("detect_hand", default=True, tooltip="Draw hand joints in the pose map. Turning off only hides the drawing; hand inference and keypoint output remain enabled."),
+                io.Boolean.Input("detect_body", default=True, tooltip="Draw body skeletons in the pose map. Turning off only hides the drawing; body inference and keypoint output remain enabled."),
+                io.Boolean.Input("detect_face", default=True, tooltip="Draw facial landmarks in the pose map. Turning off only hides the drawing; face inference and keypoint output remain enabled."),
+                io.Int.Input("resolution", default=512, min=64, max=4096, step=64, tooltip="Shortest edge of the output pose map in pixels; aspect ratio is preserved. Larger maps do not increase the model's fixed input size."),
+                io.Int.Input("batch_size", default=5, min=1, max=64, tooltip="Maximum images or person crops processed together. Higher values may improve throughput but use more memory; lower if VRAM runs out. Does not change temporal-filter range."),
+                io.Boolean.Input("scale_stick_for_xinsr_cn", default=False, tooltip="Scale body-line thickness with image size for Xinsir-style pose maps. Changes drawing only, not detected coordinates."),
                 io.Float.Input("detection_threshold", default=0.3, min=0.0, max=1.0, step=0.01,
                                tooltip="Minimum person-detection confidence. Raise to reject weak detections such as shadows; may also remove real people."),
                 io.Float.Input("keypoint_threshold", default=0.3, min=0.0, max=1.0, step=0.01,
                                tooltip="Minimum confidence for body, hand, and face keypoints. Raise to hide uncertain joints; this does not track or smooth motion."),
                 io.Boolean.Input("temporal_filter", default=False,
-                                 tooltip="Treat the IMAGE batch as consecutive frames and prune unsupported individual keypoints before rendering. Person entries are retained."),
-                io.Int.Input("temporal_radius", default=2, min=1, max=30, tooltip="Neighbor frames to inspect on each side; spans processing-chunk boundaries."),
-                io.Int.Input("temporal_min_support", default=2, min=1, max=60, tooltip="Other frames that must support a joint; limited by available neighbors at clip edges."),
+                                 tooltip="Video frames only: remove joints unsupported by nearby frames from both pose maps and keypoints. Keeps person entries; does not smooth or fill missing joints. Leave off for unrelated images."),
+                io.Int.Input("temporal_radius", default=2, min=1, max=30, tooltip="Temporal filter only: frames to inspect before and after each frame. 2 checks up to four neighbors, across batch_size chunks. Larger windows cost more and may reject fast motion."),
+                io.Int.Input("temporal_min_support", default=2, min=1, max=60, tooltip="Temporal filter only: neighboring frames that must confirm a joint. Raise to remove more flicker; lower to retain brief poses. Limited to available neighbors, including at clip edges."),
                 io.Float.Input("temporal_max_distance", default=0.1, min=0.001, max=1.0, step=0.01,
-                               tooltip="Maximum joint movement as a fraction of the person's box diagonal. Increase for faster motion."),
+                               tooltip="Temporal filter only: allowed joint displacement relative to the person's box diagonal; 0.1 means 10%. Raise for faster motion; lower to reject sudden jumps."),
                 io.Float.Input("temporal_match_iou", default=0.3, min=0.0, max=1.0, step=0.01,
-                               tooltip="Minimum detector-box overlap for matching people across neighboring frames."),
-                io.Float.Input("nms_threshold", default=0.45, min=0.0, max=1.0, step=0.01, tooltip="Detector-box overlap above which lower-scoring duplicate detections are suppressed."),
+                               tooltip="Temporal filter only: required overlap between detection boxes to match a person across frames. Raise to avoid mixing people; lower for faster movement or changing boxes."),
+                io.Float.Input("nms_threshold", default=0.45, min=0.0, max=1.0, step=0.01, tooltip="Overlap limit for removing duplicate person boxes. Lower removes more overlapping detections but can lose nearby people; higher keeps more and may leave duplicates."),
             ],
-            outputs=[io.Image.Output("image"), PoseKeypoint.Output("pose_keypoint")],
+            outputs=[io.Image.Output("image", tooltip="Pose maps in input-frame order, showing the enabled body, hand and face drawings."), PoseKeypoint.Output("pose_keypoint", tooltip="Per-frame OpenPose-format keypoints after thresholding and optional temporal filtering. Drawing toggles do not remove body, hand or face keypoints."), io.Mask.Output("mask", display_name="Pose Overlay Mask", tooltip="White on rendered pose lines and points; black elsewhere. Use to composite the pose map over an image or video. Matches pose-map size and frame order; not a person silhouette.")],
         )
 
     @classmethod
@@ -137,7 +139,30 @@ class UC_DWPoseEstimator(io.ComfyNode):
                                         temporal_filter=temporal_filter, temporal_radius=temporal_radius,
                                         temporal_min_support=temporal_min_support, temporal_max_distance=temporal_max_distance,
                                         temporal_match_iou=temporal_match_iou)
-        return io.NodeOutput(result, poses, ui={"openpose_json": [json.dumps(poses)]})
+        return io.NodeOutput(result, poses, pose_overlay_mask(result), ui={"openpose_json": [json.dumps(poses)]})
+
+
+class UC_OverlayPoseKeypoints(io.ComfyNode):
+    @classmethod
+    def define_schema(cls):
+        return io.Schema(
+            node_id="UC_OverlayPoseKeypoints", display_name="Overlay Pose Keypoints", category="image/pose",
+            description="Draw human OpenPose or DWPose keypoints directly over images or video frames. No model inference. Uses normalized keypoints from this pack's pose estimators.",
+            inputs=[
+                io.Image.Input("image", display_name="Background Images", tooltip="Image or ordered video-frame batch to draw over. Output keeps its dimensions, frame order and alpha channel."),
+                PoseKeypoint.Input("pose_keypoint", display_name="Pose Keypoints", tooltip="Connect this pack's OpenPose or DWPose keypoints. Supply one pose frame to reuse on all images, or exactly one pose frame per image. Coordinates scale to the background dimensions."),
+                io.Boolean.Input("draw_body", display_name="Draw Body", default=True, tooltip="Draw body joints and limb connections. Does not alter the input keypoints."),
+                io.Boolean.Input("draw_hands", display_name="Draw Hands", default=True, tooltip="Draw available finger and hand joints. Missing or filtered joints remain absent."),
+                io.Boolean.Input("draw_face", display_name="Draw Face", default=True, tooltip="Draw available facial landmarks. Missing or filtered landmarks remain absent."),
+                io.Float.Input("opacity", display_name="Pose Opacity", default=1.0, min=0.0, max=1.0, step=0.05, tooltip="Opacity of the drawing: 0 leaves the background unchanged, 1 fully covers drawn pixels."),
+                io.Float.Input("drawing_scale", display_name="Line and Point Size", default=1.0, min=0.1, max=10.0, step=0.1, tooltip="Multiplier for line thickness and point radius. 1 uses standard pose styling; 2 doubles drawing size without moving joints."),
+            ],
+            outputs=[io.Image.Output("image", tooltip="Background images with the selected pose drawings overlaid."), io.Mask.Output("mask", display_name="Pose Overlay Mask", tooltip="Drawing coverage multiplied by pose opacity. Black outside the visible pose; same dimensions and frame order as the background.")],
+        )
+
+    @classmethod
+    def execute(cls, image, pose_keypoint, draw_body=True, draw_hands=True, draw_face=True, opacity=1.0, drawing_scale=1.0):
+        return io.NodeOutput(*overlay_pose_keypoints(image, pose_keypoint, draw_body, draw_hands, draw_face, opacity, drawing_scale))
 
 
 class UC_AnimalPoseEstimator(io.ComfyNode):
@@ -145,21 +170,21 @@ class UC_AnimalPoseEstimator(io.ComfyNode):
     def define_schema(cls):
         return io.Schema(
             node_id="UC_AnimalPoseEstimator", display_name="AnimalPose Estimator (AP10K)", category="image/pose",
-            description="Batched animal detection and 17-keypoint AP10K poses using eager safetensors models.",
+            description="Detect supported animals and draw 17-joint AP10K skeletons. Processes image batches; missing models download on execution to models/controlnet/preprocessors.",
             inputs=[
-                io.Image.Input("image"),
-                io.Int.Input("resolution", default=512, min=64, max=4096, step=64),
-                io.Int.Input("batch_size", default=5, min=1, max=64),
-                io.Float.Input("detection_threshold", default=0.3, min=0.0, max=1.0, step=0.01),
-                io.Float.Input("keypoint_threshold", default=0.3, min=0.0, max=1.0, step=0.01),
-                io.Float.Input("nms_threshold", default=0.45, min=0.0, max=1.0, step=0.01),
-                io.Boolean.Input("temporal_filter", default=False, tooltip="Prune unsupported individual joints across ordered video frames without deleting animal entries."),
-                io.Int.Input("temporal_radius", default=2, min=1, max=30),
-                io.Int.Input("temporal_min_support", default=2, min=1, max=60),
-                io.Float.Input("temporal_max_distance", default=0.1, min=0.001, max=1.0, step=0.01),
-                io.Float.Input("temporal_match_iou", default=0.3, min=0.0, max=1.0, step=0.01),
+                io.Image.Input("image", tooltip="Image or image batch containing animals. Detector categories: bird, cat, dog, horse, sheep, cow, elephant, bear, zebra and giraffe. For temporal filtering, supply consecutive video frames in order."),
+                io.Int.Input("resolution", default=512, min=64, max=4096, step=64, tooltip="Shortest edge of the output pose map in pixels; aspect ratio is preserved. Larger maps do not increase the model's fixed input size."),
+                io.Int.Input("batch_size", default=5, min=1, max=64, tooltip="Maximum images or animal crops processed together. Higher values may improve throughput but use more memory; lower if VRAM runs out. Does not change temporal-filter range."),
+                io.Float.Input("detection_threshold", default=0.3, min=0.0, max=1.0, step=0.01, tooltip="Minimum confidence for keeping an animal detection. Raise to reject false animals; lower to recover weak detections at the risk of false positives."),
+                io.Float.Input("keypoint_threshold", default=0.3, min=0.0, max=1.0, step=0.01, tooltip="Minimum confidence for each animal joint. Raise to remove uncertain joints from the drawing and keypoint output; lower to retain more of the skeleton."),
+                io.Float.Input("nms_threshold", default=0.45, min=0.0, max=1.0, step=0.01, tooltip="Overlap limit for removing duplicate animal boxes. Lower removes more overlapping detections but can lose nearby animals; higher keeps more and may leave duplicates."),
+                io.Boolean.Input("temporal_filter", default=False, tooltip="Video frames only: remove joints unsupported by nearby frames from both pose maps and keypoints. Keeps animal entries; does not smooth or fill missing joints. Leave off for unrelated images."),
+                io.Int.Input("temporal_radius", default=2, min=1, max=30, tooltip="Temporal filter only: frames to inspect before and after each frame. 2 checks up to four neighbors, across batch_size chunks. Larger windows cost more and may reject fast motion."),
+                io.Int.Input("temporal_min_support", default=2, min=1, max=60, tooltip="Temporal filter only: neighboring frames that must confirm a joint. Raise to remove more flicker; lower to retain brief poses. Limited to available neighbors, including at clip edges."),
+                io.Float.Input("temporal_max_distance", default=0.1, min=0.001, max=1.0, step=0.01, tooltip="Temporal filter only: allowed joint displacement relative to the animal's box diagonal; 0.1 means 10%. Raise for faster motion; lower to reject sudden jumps."),
+                io.Float.Input("temporal_match_iou", default=0.3, min=0.0, max=1.0, step=0.01, tooltip="Temporal filter only: required overlap between detection boxes to match an animal across frames. Raise to avoid mixing animals; lower for faster movement or changing boxes."),
             ],
-            outputs=[io.Image.Output("image"), PoseKeypoint.Output("pose_keypoint")],
+            outputs=[io.Image.Output("image", tooltip="Animal skeleton maps in input-frame order."), PoseKeypoint.Output("pose_keypoint", tooltip="Per-frame AP10K animal keypoints: 17 joints with pixel coordinates and confidence, after thresholding and optional temporal filtering. Not the human OpenPose joint layout.")],
         )
 
     @classmethod
@@ -177,19 +202,19 @@ class UC_DensePoseEstimator(io.ComfyNode):
     def define_schema(cls):
         return io.Schema(
             node_id="UC_DensePoseEstimator", display_name="DensePose Estimator", category="image/pose",
-            description="Batched eager DensePose R50-FPN with shared backbone and ROI processing; no Detectron2 runtime.",
+            description="Detect people and color their visible body regions, rather than drawing joint skeletons. Processes image batches; missing models download on execution to models/controlnet/preprocessors.",
             inputs=[
-                io.Image.Input("image"),
-                io.Combo.Input("cmap", options=["viridis", "parula"], default="viridis"),
-                io.Int.Input("resolution", default=512, min=64, max=4096, step=64),
-                io.Int.Input("batch_size", default=2, min=1, max=64),
-                io.Float.Input("score_threshold", default=0.05, min=0.0, max=1.0, step=0.01),
-                io.Float.Input("detection_nms_threshold", default=0.5, min=0.0, max=1.0, step=0.01),
-                io.Int.Input("max_detections", default=100, min=1, max=1000),
-                io.Int.Input("rpn_pre_nms_topk", default=1000, min=1, max=10000),
-                io.Int.Input("rpn_post_nms_topk", default=1000, min=1, max=10000),
-                io.Float.Input("rpn_nms_threshold", default=0.7, min=0.0, max=1.0, step=0.01),
-            ], outputs=[io.Image.Output("image")],
+                io.Image.Input("image", display_name="Images", tooltip="Image or image batch containing people. Each frame is detected independently; this node does not track or smooth motion."),
+                io.Combo.Input("cmap", display_name="Color Palette", options=["viridis", "parula"], default="viridis", tooltip="Body-region color palette: viridis uses a purple background; parula uses black. Changes drawing only. Choose the palette expected by your downstream model."),
+                io.Int.Input("resolution", display_name="Detection Resolution", default=512, min=64, max=4096, step=64, tooltip="Shortest edge used for detection and the output map; aspect ratio is preserved. Higher values can reveal smaller people but increase processing time and memory use."),
+                io.Int.Input("batch_size", display_name="Frames per Batch", default=2, min=1, max=64, tooltip="Maximum frames processed together. Higher values may improve throughput but use more memory; lower if VRAM runs out. Does not add tracking between frames."),
+                io.Float.Input("score_threshold", display_name="Minimum Person Confidence", default=0.05, min=0.0, max=1.0, step=0.01, tooltip="Minimum confidence for keeping a person. Raise to reject false detections; lower to recover difficult or partly hidden people."),
+                io.Float.Input("detection_nms_threshold", display_name="Person Overlap Limit", default=0.5, min=0.0, max=1.0, step=0.01, tooltip="Overlap limit for removing duplicate final person boxes. Lower removes more duplicates but can lose overlapping people; higher keeps more overlapping detections."),
+                io.Int.Input("max_detections", display_name="Maximum People per Frame", default=100, min=1, max=1000, tooltip="Maximum people kept per frame, highest scores first. Lower to limit body-region processing; too low drops people in crowds. This does not track the same person over time."),
+                io.Int.Input("rpn_pre_nms_topk", display_name="Candidates per Scale (Before Filtering)", default=1000, min=1, max=10000, tooltip="Advanced: candidate boxes kept per detection scale before duplicate removal. Lower reduces proposal processing; too low can miss people. Usually leave at the default."),
+                io.Int.Input("rpn_post_nms_topk", display_name="Candidates per Frame (After Filtering)", default=1000, min=1, max=10000, tooltip="Advanced: candidate boxes per frame sent to the person classifier after duplicate removal. Lower reduces work and memory; too low can miss people. Usually leave at the default."),
+                io.Float.Input("rpn_nms_threshold", display_name="Candidate Overlap Limit", default=0.7, min=0.0, max=1.0, step=0.01, tooltip="Advanced: overlap limit for removing duplicate candidate boxes within each detection scale. Lower prunes more candidates; higher retains more alternatives. Separate from final-person duplicate removal."),
+            ], outputs=[io.Image.Output("image", tooltip="One colored body-region map per input frame, in input order. Background only when no person is detected.")],
         )
 
     @classmethod

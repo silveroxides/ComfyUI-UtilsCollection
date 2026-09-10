@@ -215,6 +215,40 @@ def test_dwpose_node_uses_shared_output_contract(monkeypatch):
     assert "openpose_json" in result.ui
 
 
+@pytest.mark.parametrize("node,runner", [(image_nodes.UC_BatchedOpenPose, "run_openpose_batch"), (image_nodes.UC_DWPoseEstimator, "run_dwpose_batch")])
+def test_pose_overlay_mask_composites_rendered_pixels_and_preserves_empty_frames(monkeypatch, node, runner):
+    maps = torch.zeros(2, 8, 8, 3)
+    maps[0, 2, 3] = torch.tensor([0.0, 0.01, 0.0])
+    maps[0, 3, 3] = torch.tensor([1.0, 0.0, 0.0])
+    poses = [{"people": []}, {"people": []}]
+    monkeypatch.setattr(image_nodes, runner, lambda *args, **kwargs: (maps, poses))
+    result = node.execute(torch.ones_like(maps)).result
+    assert result[0] is maps and result[1] is poses
+    mask = result[2]
+    assert mask.shape == (2, 8, 8) and mask.dtype == torch.float32
+    background = torch.full_like(maps, 0.5)
+    composite = maps * mask[..., None] + background * (1 - mask[..., None])
+    assert torch.equal(composite[0, 2:4, 3], maps[0, 2:4, 3])
+    assert torch.equal(composite[1], background[1])
+    assert mask.sum() == 2
+
+
+def test_keypoint_overlay_resizes_pose_and_preserves_background_alpha_and_order():
+    background = torch.full((2, 32, 48, 4), 0.4)
+    person = {"pose_keypoints_2d": [0.5, 0.5, 1.0] + [0.0] * 51}
+    documents = [{"people": [person]}, {"people": []}]
+    image, mask = image_helpers.overlay_pose_keypoints(background, documents, opacity=0.5)
+    assert mask[0, 16, 24] == 0.5 and mask[1].sum() == 0
+    assert torch.equal(image[1], background[1])
+    assert torch.equal(image[..., 3], background[..., 3])
+    hidden, hidden_mask = image_helpers.overlay_pose_keypoints(background, documents, draw_body=False)
+    assert torch.equal(hidden, background) and hidden_mask.sum() == 0
+    repeated, repeated_mask = image_helpers.overlay_pose_keypoints(background, documents[:1])
+    assert torch.equal(repeated[0], repeated[1]) and torch.equal(repeated_mask[0], repeated_mask[1])
+    with pytest.raises(ValueError, match="one pose frame"):
+        image_helpers.overlay_pose_keypoints(background, documents * 2)
+
+
 def test_dwpose_thresholds_filter_detections_and_uncertain_joints_independently():
     prediction = np.zeros((8400, 85), np.float32)
     prediction[1000, 4:6] = [1, 0.4]
@@ -486,6 +520,17 @@ def test_animal_temporal_filter_prunes_joint_without_removing_animal():
     assert filtered[3]["animals"][0][8] == [0, 0, 0]
     assert filtered[3]["animals"][0][7] == [25, 50, 0.8]
     assert frames[3]["animals"][0][8] == [90, 90, 0.9]
+
+
+@pytest.mark.parametrize("cmap", ["viridis", "parula"])
+def test_densepose_renderer_keeps_all_24_part_labels_distinct(cmap):
+    coarse = torch.zeros(1, 2, 1, 24)
+    coarse[:, 1] = 1
+    fine = torch.zeros(1, 25, 1, 24)
+    for index in range(24):
+        fine[0, index + 1, 0, index] = 1
+    rendered = image_helpers.render_densepose_frame((torch.tensor([[0., 0., 24., 1.]]), coarse, fine, fine, fine), 1, 24, cmap)
+    assert np.unique(rendered.reshape(-1, 3), axis=0).shape[0] == 24
 
 
 def test_densepose_batches_frames_renders_parts_and_handles_empty_results():

@@ -187,7 +187,12 @@ def encode_body(body, width, height):
             ((float(point[0]) / width, float(point[1]) / height, 1.0) if point is not None else (0.0, 0.0, 0.0))]
 
 
-def draw_pose_frame(people, height, width, draw_body=True, draw_hands=True, draw_face=True, scale_stick=False):
+def pose_overlay_mask(pose_maps):
+    """Select rendered pose pixels, not person boxes or body silhouettes."""
+    return torch.any(pose_maps != 0, dim=-1).to(dtype=torch.float32)
+
+
+def draw_pose_frame(people, height, width, draw_body=True, draw_hands=True, draw_face=True, scale_stick=False, drawing_scale=1.0):
     canvas = np.zeros((height, width, 3), dtype=np.uint8)
     stick_scale = (1 if max(height, width) < 500 else min(2 + max(height, width) // 1000, 7)) if scale_stick else 1
     for person in people:
@@ -199,12 +204,12 @@ def draw_pose_frame(people, height, width, draw_body=True, draw_hands=True, draw
                 start, end = points[[a, b], :2] * [width, height]
                 center = (start + end) / 2
                 delta = start - end
-                polygon = cv2.ellipse2Poly(tuple(center.astype(int)), (int(np.linalg.norm(delta) / 2), 4 * stick_scale),
+                polygon = cv2.ellipse2Poly(tuple(center.astype(int)), (int(np.linalg.norm(delta) / 2), max(1, round(4 * stick_scale * drawing_scale))),
                                           int(math.degrees(math.atan2(delta[1], delta[0]))), 0, 360, 1)
                 cv2.fillConvexPoly(canvas, polygon, tuple(int(channel * 0.6) for channel in color))
             for point, color in zip(points, BODY_COLORS):
                 if point[2]:
-                    cv2.circle(canvas, tuple((point[:2] * [width, height]).astype(int)), 4, color, -1)
+                    cv2.circle(canvas, tuple((point[:2] * [width, height]).astype(int)), max(1, round(4 * drawing_scale)), color, -1)
         if draw_hands:
             for name in ("hand_left_keypoints_2d", "hand_right_keypoints_2d"):
                 if not person.get(name):
@@ -214,17 +219,40 @@ def draw_pose_frame(people, height, width, draw_body=True, draw_hands=True, draw
                 for index, (a, b) in enumerate(HAND_LIMBS):
                     if np.all(pixels[[a, b]] > 0):
                         color = tuple(channel * 255 for channel in colorsys.hsv_to_rgb(index / 20, 1, 1))
-                        cv2.line(canvas, tuple(pixels[a]), tuple(pixels[b]), color, 2)
+                        cv2.line(canvas, tuple(pixels[a]), tuple(pixels[b]), color, max(1, round(2 * drawing_scale)))
                 for point in pixels:
                     if np.all(point > 0):
-                        cv2.circle(canvas, tuple(point), 4, (0, 0, 255), -1)
+                        cv2.circle(canvas, tuple(point), max(1, round(4 * drawing_scale)), (0, 0, 255), -1)
         if draw_face and person.get("face_keypoints_2d"):
             points = np.asarray(person["face_keypoints_2d"]).reshape(-1, 3)
             for point in points:
                 pixel = (point[:2] * [width, height]).astype(int)
                 if np.all(pixel > 0):
-                    cv2.circle(canvas, tuple(pixel), 3, (255, 255, 255), -1)
+                    cv2.circle(canvas, tuple(pixel), max(1, round(3 * drawing_scale)), (255, 255, 255), -1)
     return canvas
+
+
+def overlay_pose_keypoints(images, documents, draw_body=True, draw_hands=True, draw_face=True, opacity=1.0, drawing_scale=1.0):
+    if images.ndim != 4 or images.shape[-1] not in (3, 4) or not len(images):
+        raise ValueError("Pose overlay requires a nonempty RGB or RGBA image batch.")
+    if not isinstance(documents, list) or len(documents) not in (1, len(images)):
+        raise ValueError("Supply one pose frame to reuse, or one pose frame per image.")
+    if not 0 <= opacity <= 1 or drawing_scale <= 0:
+        raise ValueError("Pose opacity must be 0–1 and drawing size must be positive.")
+    height, width = images.shape[1:3]
+    output = images.clone()
+    masks = torch.empty((len(images), height, width), dtype=torch.float32, device=images.device)
+    for index in range(len(images)):
+        comfy.model_management.throw_exception_if_processing_interrupted()
+        document = documents[0 if len(documents) == 1 else index]
+        if "people" not in document:
+            raise ValueError("Pose overlay requires human OpenPose/DWPose keypoints, not animal keypoints.")
+        canvas = draw_pose_frame(document["people"], height, width, draw_body, draw_hands, draw_face, drawing_scale=drawing_scale)
+        pose = torch.from_numpy(canvas).to(device=images.device, dtype=images.dtype).div_(255)
+        masks[index] = pose_overlay_mask(pose) * opacity
+        alpha = masks[index].unsqueeze(-1)
+        output[index, ..., :3] = images[index, ..., :3] * (1 - alpha) + pose * alpha
+    return output, masks
 
 
 def prepare_pose_frames(images, resolution):
