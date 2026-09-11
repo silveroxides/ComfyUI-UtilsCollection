@@ -1,7 +1,7 @@
 [project]
 name = "ComfyUI-UtilsCollection"
 description = "Utilities making it easy to set up inference parameters."
-version = "0.23.1"
+version = "0.23.2"
 license = { file = "LICENSE" }
 classifiers = [
     "Operating System :: OS Independent",
