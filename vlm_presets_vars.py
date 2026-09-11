@@ -3821,7 +3821,13 @@ one to three English sentences or N/A
 
 #### Newdebug Video Reference, Subject Transfer, and Audio Reuse Template
 
-Use the following template as guideline for constructing proper prompt and timeline and everything within curly brace `{}` contains elements to replace and `N` in `{N}` is replaced by corresponding number. Do NOT include lyrics or dialogue as [SPEECH] unless the subject in focus is the one singing or speaking. Completely leave out lyrics for theme music. Do NOT invent sounds. Do NOT add nonsensical lyrics. If uncertain, omit lyrics entirely. Do NOT add to [SOUNDS] unles there is actual sound effects that is verifiably coming from a subject. [SOUNDS] is not for music or instruments.:
+Use the following template as guideline for constructing proper prompt and timeline and everything within curly brace `{}` contains elements to replace and `N` in `{N}` is replaced by corresponding number. 
+Timestamps in the Timeline must be adjusted for accurate syncronization to movement, actions and/or dialogue or lyrics. 
+Do NOT include lyrics or dialogue as [SPEECH] unless the subject in focus is the one singing or speaking. Completely leave out lyrics for theme music. 
+Do NOT invent sounds. Do NOT add nonsensical lyrics. If uncertain, omit lyrics entirely. 
+Do NOT add to [SOUNDS] unles there is actual sound effects that is verifiably coming from a subject. [SOUNDS] is not for music or instruments.
+
+Template:
 
 subject_definitions:
 <Subject {N}> is a {visual description of the subject that will be used in the video}, referenced from <Picture {N}.
@@ -3838,109 +3844,109 @@ retention_analysis:
 
 detailed_description:
 Timeline:
-[00.000s-{MM.SSS}s]:
+[00.00s-{MM.SS}s]:
 [VISUAL]: [Shot 1] {Composition Shot}. <Subject {N}> {establishing shot and description of initial motion start to end of segment.}
 [SPEECH]: <Subject {N}> (S{N}) <d>[{Language}] {optional lyrics or dialogue. exclude entire row if no lyrics} /d>
 [SOUNDS]: {completely optional 3-6 words for the sounds only if sounds effects are in video. Do NOT put music or instruments here}
 [MUSIC]: <Audio 1>
 
-[{MM.SSS}s-{MM.SSS}s]:
+[{MM.SS}s-{MM.SS}s]:
 [VISUAL]: [Shot 2] <Subject {N}> {short single sentence description of motion start to end of segment.}
 [SPEECH]: <Subject {N}> (S{N}) <d>[{Language}] {optional lyrics or dialogue. exclude entire row if no lyrics} /d>
 [SOUNDS]: {completely optional 3-6 words for the sounds only if sounds effects are in video. Do NOT put music or instruments here}
 [MUSIC]: <Audio 1>
 
-[{MM.SSS}s-{MM.SSS}s]:
+[{MM.SS}s-{MM.SS}s]:
 [VISUAL]: [Shot 3] <Subject {N}> {short single sentence description of motion start to end of segment.}
 [SPEECH]: <Subject {N}> (S{N}) <d>[{Language}] {optional lyrics or dialogue. exclude entire row if no lyrics} /d>
 [SOUNDS]: {completely optional 3-6 words for the sounds only if sounds effects are in video. Do NOT put music or instruments here}
 [MUSIC]: <Audio 1>
 
-[{MM.SSS}s-{MM.SSS}s]:
+[{MM.SS}s-{MM.SS}s]:
 [VISUAL]: [Shot 4] <Subject {N}> {short single sentence description of motion start to end of segment.}
 [SPEECH]: <Subject {N}> (S{N}) <d>[{Language}] {optional lyrics or dialogue. exclude entire row if no lyrics} /d>
 [SOUNDS]: {completely optional 3-6 words for the sounds only if sounds effects are in video. Do NOT put music or instruments here}
 [MUSIC]: <Audio 1>
 
-[{MM.SSS}s-{MM.SSS}s]:
+[{MM.SS}s-{MM.SS}s]:
 [VISUAL]: [Shot 5] <Subject {N}> {short single sentence description of motion start to end of segment.}
 [SPEECH]: <Subject {N}> (S{N}) <d>[{Language}] {optional lyrics or dialogue. exclude entire row if no lyrics} /d>
 [SOUNDS]: {completely optional 3-6 words for the sounds only if sounds effects are in video. Do NOT put music or instruments here}
 [MUSIC]: <Audio 1>
 
-[{MM.SSS}s-{MM.SSS}s]:
+[{MM.SS}s-{MM.SS}s]:
 [VISUAL]: [Shot 6] <Subject {N}> {short single sentence description of motion start to end of segment.}
 [SPEECH]: <Subject {N}> (S{N}) <d>[{Language}] {optional lyrics or dialogue. exclude entire row if no lyrics} /d>
 [SOUNDS]: {completely optional 3-6 words for the sounds only if sounds effects are in video. Do NOT put music or instruments here}
 [MUSIC]: <Audio 1>
 
-[{MM.SSS}s-{MM.SSS}s]:
+[{MM.SS}s-{MM.SS}s]:
 [VISUAL]: [Shot 7] <Subject {N}> {short single sentence description of motion start to end of segment.}
 [SPEECH]: <Subject {N}> (S{N}) <d>[{Language}] {optional lyrics or dialogue. exclude entire row if no lyrics} /d>
 [SOUNDS]: {completely optional 3-6 words for the sounds only if sounds effects are in video. Do NOT put music or instruments here}
 [MUSIC]: <Audio 1>
 
-[{MM.SSS}s-{MM.SSS}s]:
+[{MM.SS}s-{MM.SS}s]:
 [VISUAL]: [Shot 8] <Subject {N}> {short single sentence description of motion start to end of segment.}
 [SPEECH]: <Subject {N}> (S{N}) <d>[{Language}] {optional lyrics or dialogue. exclude entire row if no lyrics} /d>
 [SOUNDS]: {completely optional 3-6 words for the sounds only if sounds effects are in video. Do NOT put music or instruments here}
 [MUSIC]: <Audio 1>
 
-[{MM.SSS}s-{MM.SSS}s]:
+[{MM.SS}s-{MM.SS}s]:
 [VISUAL]: [Shot 9] <Subject {N}> {short single sentence description of motion start to end of segment.}
 [SPEECH]: <Subject {N}> (S{N}) <d>[{Language}] {optional lyrics or dialogue. exclude entire row if no lyrics} /d>
 [SOUNDS]: {completely optional 3-6 words for the sounds only if sounds effects are in video. Do NOT put music or instruments here}
 [MUSIC]: <Audio 1>
 
-[{MM.SSS}s-{MM.SSS}s]:
+[{MM.SS}s-{MM.SS}s]:
 [VISUAL]: [Shot 10] <Subject {N}> {short single sentence description of motion start to end of segment.}
 [SPEECH]: <Subject {N}> (S{N}) <d>[{Language}] {optional lyrics or dialogue. exclude entire row if no lyrics} /d>
 [SOUNDS]: {completely optional 3-6 words for the sounds only if sounds effects are in video. Do NOT put music or instruments here}
 [MUSIC]: <Audio 1>
 
-[{MM.SSS}s-{MM.SSS}s]:
+[{MM.SS}s-{MM.SS}s]:
 [VISUAL]: [Shot 11] <Subject {N}> {short single sentence description of motion start to end of segment.}
 [SPEECH]: <Subject {N}> (S{N}) <d>[{Language}] {optional lyrics or dialogue. exclude entire row if no lyrics} /d>
 [SOUNDS]: {completely optional 3-6 words for the sounds only if sounds effects are in video. Do NOT put music or instruments here}
 [MUSIC]: <Audio 1>
 
-[{MM.SSS}s-{MM.SSS}s]:
+[{MM.SS}s-{MM.SS}s]:
 [VISUAL]: [Shot 12] <Subject {N}> {short single sentence description of motion start to end of segment.}
 [SPEECH]: <Subject {N}> (S{N}) <d>[{Language}] {optional lyrics or dialogue. exclude entire row if no lyrics} /d>
 [SOUNDS]: {completely optional 3-6 words for the sounds only if sounds effects are in video. Do NOT put music or instruments here}
 [MUSIC]: <Audio 1>
 
-[{MM.SSS}s-{MM.SSS}s]:
+[{MM.SS}s-{MM.SS}s]:
 [VISUAL]: [Shot 13] <Subject {N}> {short single sentence description of motion start to end of segment.}
 [SPEECH]: <Subject {N}> (S{N}) <d>[{Language}] {optional lyrics or dialogue. exclude entire row if no lyrics} /d>
 [SOUNDS]: {completely optional 3-6 words for the sounds only if sounds effects are in video. Do NOT put music or instruments here}
 [MUSIC]: <Audio 1>
 
-[{MM.SSS}s-{MM.SSS}s]:
+[{MM.SS}s-{MM.SS}s]:
 [VISUAL]: [Shot 14] <Subject {N}> {short single sentence description of motion start to end of segment.}
 [SPEECH]: <Subject {N}> (S{N}) <d>[{Language}] {optional lyrics or dialogue. exclude entire row if no lyrics} /d>
 [SOUNDS]: {completely optional 3-6 words for the sounds only if sounds effects are in video. Do NOT put music or instruments here}
 [MUSIC]: <Audio 1>
 
-[{MM.SSS}s-{MM.SSS}s]:
+[{MM.SS}s-{MM.SS}s]:
 [VISUAL]: [Shot 15] <Subject {N}> {short single sentence description of motion start to end of segment.}
 [SPEECH]: <Subject {N}> (S{N}) <d>[{Language}] {optional lyrics or dialogue. exclude entire row if no lyrics} /d>
 [SOUNDS]: {completely optional 3-6 words for the sounds only if sounds effects are in video. Do NOT put music or instruments here}
 [MUSIC]: <Audio 1>
 
-[{MM.SSS}s-{MM.SSS}s]:
+[{MM.SS}s-{MM.SS}s]:
 [VISUAL]: [Shot 16] <Subject {N}> {short single sentence description of motion start to end of segment.}
 [SPEECH]: <Subject {N}> (S{N}) <d>[{Language}] {optional lyrics or dialogue. exclude entire row if no lyrics} /d>
 [SOUNDS]: {completely optional 3-6 words for the sounds only if sounds effects are in video. Do NOT put music or instruments here}
 [MUSIC]: <Audio 1>
 
-[{MM.SSS}s-{MM.SSS}s]:
+[{MM.SS}s-{MM.SS}s]:
 [VISUAL]: [Shot 17] <Subject {N}> {short single sentence description of motion start to end of segment.}
 [SPEECH]: <Subject {N}> (S{N}) <d>[{Language}] {optional lyrics or dialogue. exclude entire row if no lyrics} /d>
 [SOUNDS]: {completely optional 3-6 words for the sounds only if sounds effects are in video. Do NOT put music or instruments here}
 [MUSIC]: <Audio 1>
 
-[{MM.SSS}s-{MM.SSS}s]:
+[{MM.SS}s-{MM.SS}s]:
 [VISUAL]: [Shot 18] <Subject {N}> {short single sentence description of motion start to end of segment.}
 [SPEECH]: <Subject {N}> (S{N}) <d>[{Language}] {optional lyrics or dialogue. exclude entire row if no lyrics} /d>
 [SOUNDS]: {completely optional 3-6 words for the sounds only if sounds effects are in video. Do NOT put music or instruments here}
