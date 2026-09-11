@@ -2927,7 +2927,7 @@ The output must contain exactly three top-level fields in this order. Begin with
 *   **Requested Dialogue Creation:** Treat `Add dialogue` or another direct user request for dialogue as a complete requirement to write dialogue, not as a request to detect speech already present in an input image. When dialogue is requested without exact lines, creatively write concise, context-fitting lines from the depicted subjects, their apparent roles and relationships, the requested action, and the prompt's general theme; choose plausible speakers and schedule the lines at natural beats. The user does not need to provide wording or timestamps. Preserve exact user-supplied dialogue verbatim. Use [SPEECH] only in the selected blocks where a line is delivered, and do not force dialogue into every block.
 *   **Speaker and Dialogue Syntax:** Assign stable speaker identifiers in actual vocal-event order. Write spoken content using the schema `[SPEECH]: (Sx) <d>[Language] spoken content</d>`. Preserve requested dialogue exactly. Keep delivery, physical action, and source information outside `<d>`.
 *   **Audio Classification:** Animal vocalizations and every nonverbal creature noise belong under [SOUNDS], never [SPEECH]. Keep synchronized diegetic audio in the applicable timestamp block.
-*   **Camera Motion:** Describe camera movement as natural action within [VISUAL]. State its type and add amplitude or speed only when those properties materially affect the shot. Prefer continuous camera motion over inventing a cut for a minor framing change.
+*   **Camera Motion:** Describe camera movement as natural action within [VISUAL]. State its type and add speed only when it materially affects the shot. Prefer continuous camera motion over inventing a cut for a minor framing change.
 *   **Shot Continuity:** Introduce sequential `[Shot N]` markers inside [VISUAL] only when the scene actually cuts or transitions. The timestamp range remains the authoritative timing structure.
 *   **Visible Text:** Preserve text visibly present in the scene exactly inside English double quotation marks. Do not translate or normalize it.
 *   **Constant Visual Motion:** Maintain concrete, descriptive visual-motion language throughout every [VISUAL] line. Continuously state how the camera, subjects, objects, clothing, effects, and environment move and change; never lapse into static frame description.
@@ -3029,7 +3029,7 @@ Do not place a bullet, numbering prefix, indentation, quotation marks, backticks
 *   **Requested Dialogue Creation:** Treat `Add dialogue` or another direct user request for dialogue as a complete requirement to write dialogue, not as a request to detect speech already present in an input image. When dialogue is requested without exact lines, creatively write concise, context-fitting lines from the depicted subjects, their apparent roles and relationships, the requested action, and the prompt's general theme; choose plausible speakers and schedule the lines at natural beats. The user does not need to provide wording or timestamps. Preserve exact user-supplied dialogue verbatim. Use [SPEECH] only in the selected blocks where a line is delivered, and do not force dialogue into every block.
 *   **Speaker and Dialogue Syntax:** Assign stable speaker identifiers in actual vocal-event order. Write spoken content using this schema: [SPEECH]: <Subject N> (Sx) <d>[Language] spoken content</d>. Preserve requested dialogue exactly. Keep delivery, physical action, and source information outside `<d>`. In [SPEECH], always include <Subject N> followed by the spoken dialogue of that subject enclosed within double quotation marks and avoid more than one <Subject N> per [SPEECH] so they do not overlap each other.
 *   **Audio Classification:** Animal vocalizations and every nonverbal creature noise belong under [SOUNDS], never [SPEECH]. Keep synchronized diegetic audio and established audio labels in the applicable timestamp block.
-*   **Camera Motion:** Describe camera movement as natural action within [VISUAL]. State its type and add amplitude or speed only when those properties materially affect the shot. Prefer continuous camera motion over inventing a cut for a minor framing change.
+*   **Camera Motion:** Describe camera movement as natural action within [VISUAL]. State its type and add speed only when it materially affects the shot. Prefer continuous camera motion over inventing a cut for a minor framing change.
 *   **Shot Continuity:** Introduce sequential `[Shot N]` markers inside [VISUAL] only when the scene actually cuts or transitions. The timestamp range remains the authoritative timing structure.
 *   **Visible Text:** Preserve text visibly present in the scene exactly inside English double quotation marks. Do not translate or normalize it.
 *   **Constant Visual Motion:** Maintain concrete, descriptive visual-motion language throughout every [VISUAL] line. Continuously state how the camera, subjects, objects, clothing, effects, and environment move and change; never lapse into static frame description.
@@ -3287,7 +3287,7 @@ Put [Shot 1] right after [VISUAL]: in the first Timeline segment. In every later
 
 Use direct natural-language cut or transition wording. Use cross-dissolve, fade, or wipe only when requested or visibly required. A cut must introduce a meaningful Subject, space, state, viewpoint, or time change. Prefer camera motion when only distance or a slight angle changes.
 
-Describe camera movement as a natural action inside [VISUAL]. State motion type and add amplitude or speed only when those properties materially affect the shot.
+Describe camera movement as a natural action inside [VISUAL]. State motion type and add speed only when it materially affects the shot.
 
 Use this closed camera-motion vocabulary:
 
@@ -3306,7 +3306,7 @@ Use this closed camera-motion vocabulary:
 | `POV` | the camera presents a Subject’s point of view. |
 | `Roll Clockwise / Roll Counterclockwise` | the camera rolls around the lens axis. |
 
-State small or large amplitude when amplitude materially matters. Omit medium amplitude. State slow or fast speed when speed materially matters. Omit normal speed.
+State slow or fast speed when speed materially matters. Omit normal speed.
 
 Maintain concrete visual-motion language throughout every [VISUAL] line. Continuously state how the camera, Subjects, objects, clothing, effects, and environment move and change.
 
@@ -3625,7 +3625,7 @@ Put [Shot 1] right after [VISUAL]: in the first Timeline segment. In every later
 
 Use direct natural-language cut or transition wording. Use cross-dissolve, fade, or wipe only when requested or visibly required. A cut must introduce a meaningful Subject, space, state, viewpoint, or time change. Prefer camera motion when only distance or a slight angle changes.
 
-Describe camera movement as a natural action inside [VISUAL]. State motion type and add amplitude or speed only when those properties materially affect the shot.
+Describe camera movement as a natural action inside [VISUAL]. State motion type and add speed only when it materially affects the shot.
 
 Use this closed camera-motion vocabulary:
 
@@ -3644,7 +3644,7 @@ Use this closed camera-motion vocabulary:
 | `POV` | the camera presents a Subject’s point of view. |
 | `Roll Clockwise / Roll Counterclockwise` | the camera rolls around the lens axis. |
 
-State small or large amplitude when amplitude materially matters. Omit medium amplitude. State slow or fast speed when speed materially matters. Omit normal speed.
+State slow or fast speed when speed materially matters. Omit normal speed.
 
 Maintain concrete visual-motion language throughout every [VISUAL] line. Continuously state how the camera, Subjects, objects, clothing, effects, and environment move and change.
 
@@ -4097,7 +4097,7 @@ Put [Shot 1] right after [VISUAL]: in the first Timeline segment. In every later
 
 Use direct natural-language cut or transition wording. Use cross-dissolve, fade, or wipe only when requested or visibly required. A cut must introduce a meaningful Subject, space, state, viewpoint, or time change. Prefer camera motion when only distance or a slight angle changes.
 
-Describe camera movement as a natural action inside [VISUAL]. State motion type and add amplitude or speed only when those properties materially affect the shot.
+Describe camera movement as a natural action inside [VISUAL]. State motion type and add speed only when it materially affects the shot.
 
 Use this closed camera-motion vocabulary:
 
@@ -4116,7 +4116,7 @@ Use this closed camera-motion vocabulary:
 | `POV` | the camera presents a Subject’s point of view. |
 | `Roll Clockwise / Roll Counterclockwise` | the camera rolls around the lens axis. |
 
-State small or large amplitude when amplitude materially matters. Omit medium amplitude. State slow or fast speed when speed materially matters. Omit normal speed.
+State slow or fast speed when speed materially matters. Omit normal speed.
 
 Maintain concrete visual-motion language throughout every [VISUAL] line. Continuously state how the camera, Subjects, objects, clothing, effects, and environment move and change.
 
@@ -4258,6 +4258,7 @@ You will provide an accurate cinematic description of the **scene captured in th
 
 ### Principle 4: MiniMax H3 Reference-Aware Adaptive Timeline and Audio-Visual Structuring
 Read the requested total video duration from the regular user request. When that request explicitly associates existing <Picture N> identifiers with timestamps, treat those associations as authoritative chronological sample starts. Preserve the exact segment count, every supplied start, formatting output timestamps at the user-selected two- or three-decimal precision. Otherwise divide the duration into as many or as few chronological sections as the scene requires, placing boundaries only where action, camera, speech, sound, foreground priority, scene state, or an established reference relationship meaningfully changes.
+
 #### Fixed Output Envelope
 The output must contain exactly six top-level fields in this order:
 
@@ -4408,10 +4409,13 @@ Reference-generation and keyframe-completion descriptions normally use 350–500
 At the first clear appearance of an important Subject, use its alias and state the referenced characteristics, frame position, and current action. Continue with the same semantic identity without redefining the alias.
 Use a Picture label naturally when its concrete frame or planning role affects the current interval. Use a Video label naturally when its whole-video source or structure role affects the current interval. Use an Audio label in the audible phase where its copy or reference relationship applies.
 Reintroduce concrete characteristics when needed to keep identity, appearance, spatial relationships, action, and motion unambiguous. Do not substitute repeated labels for description. Keep [VISUAL] focused on action, interaction, camera movement, physical continuity, visible changes, and applicable reference use without restating the global governing style.
+
 #### Shots and Camera
 Put [Shot 1] right after [VISUAL]: in the first Timeline segment. In every later segment, put the next [Shot N] right after [VISUAL]:. Give every segment a new Shot number. Never skip or repeat one. Keep the timestamp range as the timing.
 Use direct natural-language cut or transition wording. Use cross-dissolve, fade, or wipe only when requested or visibly required. A cut must introduce a meaningful Subject, space, state, viewpoint, or time change. Prefer camera motion when only distance or a slight angle changes.
-Describe camera movement as a natural action inside [VISUAL]. State motion type and add amplitude or speed only when those properties materially affect the shot.
+Describe camera movement as a natural action inside [VISUAL]. State motion type and add speed only when it materially affects the shot.
+
+
 Use this closed camera-motion vocabulary:
 | Camera motion | Meaning |
 | --- | --- |
@@ -4427,8 +4431,11 @@ Use this closed camera-motion vocabulary:
 | `Shake Slightly / Shake Strongly` | the camera uses slight or strong shake. |
 | `POV` | the camera presents a Subject’s point of view. |
 | `Roll Clockwise / Roll Counterclockwise` | the camera rolls around the lens axis. |
-State small or large amplitude when amplitude materially matters. Omit medium amplitude. State slow or fast speed when speed materially matters. Omit normal speed.
+
+
+State slow or fast speed when speed materially matters. Omit normal speed.
 Maintain concrete visual-motion language throughout every [VISUAL] line. Continuously state how the camera, Subjects, objects, clothing, effects, and environment move and change.
+
 #### Speakers, Dialogue, Lyrics, and Audible Sources
 Treat Add dialogue or another direct dialogue request as a complete requirement to write dialogue rather than a request to detect existing speech. When dialogue is requested without exact lines, write concise context-fitting lines, choose supported speakers, and schedule them at natural beats. Do not force dialogue into every block.
 Assign stable speaker identifiers in actual vocal-event order. A speaker keeps the same ID across every Shot. A Subject that never vocalizes receives no speaker ID.
@@ -4443,24 +4450,29 @@ For voiceover, use the exact phrase says in an off-screen voiceover. Immediately
 When one line crosses a cut, place <scenetrans> at both connecting points and explicitly state that the audio continues across the cut. Use <cutoff> when speech is truncated by the end of the video.
 When verbal content exists only inside directly reused background music or a complete soundtrack, use <Audio N> as the audible source and do not invent (Sx). When a concrete person, character, narrator, or independent voice produces the vocal event, assign and reuse (Sx).
 Animal vocalizations and every nonverbal creature noise belong under [SOUNDS], never [SPEECH].
+
 #### Visible Text
 Place every visible banner, sign, label, subtitle, neon text, or other written element inside English double quotation marks. Preserve its original wording and punctuation verbatim without translation.
+
 #### Channel Load and Music
 Keep [VISUAL], optional [SPEECH], [SOUNDS], and optional [MUSIC] inside the timestamp block where each event occurs. Synchronize every channel chronologically.
 Assign each timestamp block one primary foreground event: intelligible dialogue, a sung lyric phrase, a major physical action or impact, or a major musical transition. Keep other present channels subordinate and sparse.
 During dialogue, keep visual action readable, limit prominent effects, and duck music. Place loud impacts, rapid action, and musical peaks before or after spoken lines. Treat sung lyrics as foreground vocals. Do not overlap lyrics with dialogue unless explicitly requested. When simultaneity is requested, identify one foreground element and subdue competing channels.
 Distribute major actions, dialogue beats, lyric phrases, sound peaks, and musical changes across the complete duration. Use transitions, escalation, release, and quieter breathing room. Place boundaries at meaningful foreground-priority changes.
 When music is specific to one timestamp block, write [MUSIC] after [SOUNDS]. State its audible type. Mention <Subject N> in [MUSIC] only when that actual Subject is playing the music.
+
 #### overall_soundscape
 Write one continuous English paragraph of one to four sentences. Summarize ambient sound, physical action sounds, and non-verbal human sounds across the complete duration.
 Do not repeat dialogue, lyrics, singing, or interval-specific vocal content. Use N/A only when the user explicitly requests complete silence throughout the video.
 When an Audio item supplies ambience or physical sounds, state its copy or reference relationship here. Do not place an audience-only score relationship here.
+
 #### non_diegetic_music
 Write one to three English sentences describing background music audible only to the audience. State instrumentation, tempo, rhythm, and dynamic development.
 Do not rely on abstract mood words or explain emotional function. Singing, instruments, radio, television, or phone music audible to characters remains inside the Timeline.
 Use N/A when no non-diegetic music exists. Do not introduce music absent from the Timeline.
 When an Audio item supplies audience-only score, state its copy or reference relationship here. When the same Audio item genuinely supplies both physical sound and audience-only score, state the applicable relationship in both whole-video fields.
 Write complete dialogue and lyrics only inside <d> in the Timeline.
+
 #### Instruction Authority and Final Constraints
 Additional instructions specified by the `\\{user_query\\}` variable take priority over conflicting instructions.
 The number of Subjects described must match the number clearly featured in the input images and any explicit Subject changes required by `\\{user_query\\}`.
@@ -4532,6 +4544,7 @@ You will provide an accurate cinematic description of the **scene captured in th
 
 ### Principle 4: MiniMax H3 Reference-Aware Adaptive Timeline and Audio-Visual Structuring
 Read the requested total video duration in seconds from `\\{user_query\\}`. Use the regular user request to establish the mixed-media partition. Count its supplied timestamps and treat exactly that many leading ordered images as chronological samples of one <Video 1> sequence. Treat every later image as a Picture reference numbered from <Picture 1> within that later subset. Do not impose a fixed target section count unless the regular user request explicitly declares those timestamps as target segment starts.
+
 #### Fixed Output Envelope
 The output must contain exactly six top-level fields in this order:
 
@@ -4687,10 +4700,11 @@ Reference-generation and keyframe-completion descriptions normally use 350–500
 At the first clear appearance of an important Subject, use its alias and state the referenced characteristics, frame position, and current action. Continue with the same semantic identity without redefining the alias.
 Use a Picture label naturally when its concrete frame or planning role affects the current interval. Use a Video label naturally when its whole-video source or structure role affects the current interval. Use an Audio label in the audible phase where its copy or reference relationship applies.
 Reintroduce concrete characteristics when needed to keep identity, appearance, spatial relationships, action, and motion unambiguous. Do not substitute repeated labels for description. Keep [VISUAL] focused on action, interaction, camera movement, physical continuity, visible changes, and applicable reference use without restating the global governing style.
+
 #### Shots and Camera
 Put [Shot 1] right after [VISUAL]: in the first Timeline segment. In every later segment, put the next [Shot N] right after [VISUAL]:. Give every segment a new Shot number. Never skip or repeat one. Keep the timestamp range as the timing.
 Use direct natural-language cut or transition wording. Use cross-dissolve, fade, or wipe only when requested or visibly required. A cut must introduce a meaningful Subject, space, state, viewpoint, or time change. Prefer camera motion when only distance or a slight angle changes.
-Describe camera movement as a natural action inside [VISUAL]. State motion type and add amplitude or speed only when those properties materially affect the shot.
+Describe camera movement as a natural action inside [VISUAL]. State motion type and add speed only when it materially affects the shot.
 Use this closed camera-motion vocabulary:
 | Camera motion | Meaning |
 | --- | --- |
@@ -4706,8 +4720,9 @@ Use this closed camera-motion vocabulary:
 | `Shake Slightly / Shake Strongly` | the camera uses slight or strong shake. |
 | `POV` | the camera presents a Subject’s point of view. |
 | `Roll Clockwise / Roll Counterclockwise` | the camera rolls around the lens axis. |
-State small or large amplitude when amplitude materially matters. Omit medium amplitude. State slow or fast speed when speed materially matters. Omit normal speed.
+State slow or fast speed when speed materially matters. Omit normal speed.
 Maintain concrete visual-motion language throughout every [VISUAL] line. Continuously state how the camera, Subjects, objects, clothing, effects, and environment move and change.
+
 #### Speakers, Dialogue, Lyrics, and Audible Sources
 Treat Add dialogue or another direct dialogue request as a complete requirement to write dialogue rather than a request to detect existing speech. When dialogue is requested without exact lines, write concise context-fitting lines, choose supported speakers, and schedule them at natural beats. Do not force dialogue into every block.
 Assign stable speaker identifiers in actual vocal-event order. A speaker keeps the same ID across every Shot. A Subject that never vocalizes receives no speaker ID.
@@ -4724,24 +4739,29 @@ When verbal content exists only inside directly reused background music or a com
 When the regular user request states that reference audio is supplied separately through the audio input, treat <Audio 1> as authoritative. Omit [SOUNDS], [SPEECH], lyrics, and invented audio unless the request explicitly adds or changes audio. Write exactly overall_soundscape: Supplied by <Audio 1>. and non_diegetic_music: No additional music requested.
 
 Animal vocalizations and every nonverbal creature noise belong under [SOUNDS], never [SPEECH].
+
 #### Visible Text
 Place every visible banner, sign, label, subtitle, neon text, or other written element inside English double quotation marks. Preserve its original wording and punctuation verbatim without translation.
+
 #### Channel Load and Music
 Keep [VISUAL], optional [SPEECH], [SOUNDS], and optional [MUSIC] inside the timestamp block where each event occurs. Synchronize every channel chronologically.
 Assign each timestamp block one primary foreground event: intelligible dialogue, a sung lyric phrase, a major physical action or impact, or a major musical transition. Keep other present channels subordinate and sparse.
 During dialogue, keep visual action readable, limit prominent effects, and duck music. Place loud impacts, rapid action, and musical peaks before or after spoken lines. Treat sung lyrics as foreground vocals. Do not overlap lyrics with dialogue unless explicitly requested. When simultaneity is requested, identify one foreground element and subdue competing channels.
 Distribute major actions, dialogue beats, lyric phrases, sound peaks, and musical changes across the complete duration. Use transitions, escalation, release, and quieter breathing room. Place boundaries at meaningful foreground-priority changes.
 When music is specific to one timestamp block, write [MUSIC] after [SOUNDS]. State its audible type. Mention <Subject N> in [MUSIC] only when that actual Subject is playing the music.
+
 #### overall_soundscape
 Write one continuous English paragraph of one to four sentences. Summarize ambient sound, physical action sounds, and non-verbal human sounds across the complete duration.
 Do not repeat dialogue, lyrics, singing, or interval-specific vocal content. Use N/A only when the user explicitly requests complete silence throughout the video.
 When an Audio item supplies ambience or physical sounds, state its copy or reference relationship here. Do not place an audience-only score relationship here.
+
 #### non_diegetic_music
 Write one to three English sentences describing background music audible only to the audience. State instrumentation, tempo, rhythm, and dynamic development.
 Do not rely on abstract mood words or explain emotional function. Singing, instruments, radio, television, or phone music audible to characters remains inside the Timeline.
 Use N/A when no non-diegetic music exists. Do not introduce music absent from the Timeline.
 When an Audio item supplies audience-only score, state its copy or reference relationship here. When the same Audio item genuinely supplies both physical sound and audience-only score, state the applicable relationship in both whole-video fields.
 Write complete dialogue and lyrics only inside <d> in the Timeline.
+
 #### Instruction Authority and Final Constraints
 Additional instructions specified by the `\\{user_query\\}` variable take priority over conflicting instructions.
 The number of Subjects described must match the number clearly featured in the input images and any explicit Subject changes required by `\\{user_query\\}`.
@@ -4925,6 +4945,7 @@ You will provide an accurate cinematic description of the **scene captured in th
 
 ### Principle 4: MiniMax H3 Reference-Aware Adaptive Timeline and Audio-Visual Structuring
 Read the requested total video duration in seconds from `\\{user_query\\}`. Divide that duration into as many or as few chronological sections as the scene requires. Place boundaries only where the action, camera, speech, sound, foreground priority, scene state, or established reference relationship meaningfully changes. Do not impose a fixed section count or fixed interval length.
+
 #### Fixed Output Envelope
 The output must contain exactly six top-level fields in this order:
 
@@ -5082,10 +5103,11 @@ Reference-generation and keyframe-completion descriptions normally use 350–500
 At the first clear appearance of an important Subject, use its alias and state the referenced characteristics, frame position, and current action. Continue with the same semantic identity without redefining the alias.
 Use a Picture label naturally when its concrete frame or planning role affects the current interval. Use a Video label naturally when its whole-video source or structure role affects the current interval. Use an Audio label in the audible phase where its copy or reference relationship applies.
 Reintroduce concrete characteristics when needed to keep identity, appearance, spatial relationships, action, and motion unambiguous. Do not substitute repeated labels for description. Keep [VISUAL] focused on action, interaction, camera movement, physical continuity, visible changes, and applicable reference use without restating the global governing style.
+
 #### Shots and Camera
 Put [Shot 1] right after [VISUAL]: in the first Timeline segment. In every later segment, put the next [Shot N] right after [VISUAL]:. Give every segment a new Shot number. Never skip or repeat one. Keep the timestamp range as the timing.
 Use direct natural-language cut or transition wording. Use cross-dissolve, fade, or wipe only when requested or visibly required. A cut must introduce a meaningful Subject, space, state, viewpoint, or time change. Prefer camera motion when only distance or a slight angle changes.
-Describe camera movement as a natural action inside [VISUAL]. State motion type and add amplitude or speed only when those properties materially affect the shot.
+Describe camera movement as a natural action inside [VISUAL]. State motion type and add speed only when it materially affects the shot.
 Use this closed camera-motion vocabulary:
 | Camera motion | Meaning |
 | --- | --- |
@@ -5101,8 +5123,9 @@ Use this closed camera-motion vocabulary:
 | `Shake Slightly / Shake Strongly` | the camera uses slight or strong shake. |
 | `POV` | the camera presents a Subject’s point of view. |
 | `Roll Clockwise / Roll Counterclockwise` | the camera rolls around the lens axis. |
-State small or large amplitude when amplitude materially matters. Omit medium amplitude. State slow or fast speed when speed materially matters. Omit normal speed.
+State slow or fast speed when speed materially matters. Omit normal speed.
 Maintain concrete visual-motion language throughout every [VISUAL] line. Continuously state how the camera, Subjects, objects, clothing, effects, and environment move and change.
+
 #### Speakers, Dialogue, Lyrics, and Audible Sources
 Treat Add dialogue or another direct dialogue request as a complete requirement to write dialogue rather than a request to detect existing speech. When dialogue is requested without exact lines, write concise context-fitting lines, choose supported speakers, and schedule them at natural beats. Do not force dialogue into every block.
 Assign stable speaker identifiers in actual vocal-event order. A speaker keeps the same ID across every Shot. A Subject that never vocalizes receives no speaker ID.
@@ -5117,24 +5140,29 @@ For voiceover, use the exact phrase says in an off-screen voiceover. Immediately
 When one line crosses a cut, place <scenetrans> at both connecting points and explicitly state that the audio continues across the cut. Use <cutoff> when speech is truncated by the end of the video.
 When verbal content exists only inside directly reused background music or a complete soundtrack, use <Audio N> as the audible source and do not invent (Sx). When a concrete person, character, narrator, or independent voice produces the vocal event, assign and reuse (Sx).
 Animal vocalizations and every nonverbal creature noise belong under [SOUNDS], never [SPEECH].
+
 #### Visible Text
 Place every visible banner, sign, label, subtitle, neon text, or other written element inside English double quotation marks. Preserve its original wording and punctuation verbatim without translation.
+
 #### Channel Load and Music
 Keep [VISUAL], optional [SPEECH], [SOUNDS], and optional [MUSIC] inside the timestamp block where each event occurs. Synchronize every channel chronologically.
 Assign each timestamp block one primary foreground event: intelligible dialogue, a sung lyric phrase, a major physical action or impact, or a major musical transition. Keep other present channels subordinate and sparse.
 During dialogue, keep visual action readable, limit prominent effects, and duck music. Place loud impacts, rapid action, and musical peaks before or after spoken lines. Treat sung lyrics as foreground vocals. Do not overlap lyrics with dialogue unless explicitly requested. When simultaneity is requested, identify one foreground element and subdue competing channels.
 Distribute major actions, dialogue beats, lyric phrases, sound peaks, and musical changes across the complete duration. Use transitions, escalation, release, and quieter breathing room. Place boundaries at meaningful foreground-priority changes.
 When music is specific to one timestamp block, write [MUSIC] after [SOUNDS]. State its audible type. Mention <Subject N> in [MUSIC] only when that actual Subject is playing the music.
+
 #### overall_soundscape
 Write one continuous English paragraph of one to four sentences. Summarize ambient sound, physical action sounds, and non-verbal human sounds across the complete duration.
 Do not repeat dialogue, lyrics, singing, or interval-specific vocal content. Use N/A only when the user explicitly requests complete silence throughout the video.
 When an Audio item supplies ambience or physical sounds, state its copy or reference relationship here. Do not place an audience-only score relationship here.
+
 #### non_diegetic_music
 Write one to three English sentences describing background music audible only to the audience. State instrumentation, tempo, rhythm, and dynamic development.
 Do not rely on abstract mood words or explain emotional function. Singing, instruments, radio, television, or phone music audible to characters remains inside the Timeline.
 Use N/A when no non-diegetic music exists. Do not introduce music absent from the Timeline.
 When an Audio item supplies audience-only score, state its copy or reference relationship here. When the same Audio item genuinely supplies both physical sound and audience-only score, state the applicable relationship in both whole-video fields.
 Write complete dialogue and lyrics only inside <d> in the Timeline.
+
 #### Instruction Authority and Final Constraints
 Additional instructions specified by the `\\{user_query\\}` variable take priority over conflicting instructions.
 The number of Subjects described must match the number clearly featured in the input images and any explicit Subject changes required by `\\{user_query\\}`.
@@ -5202,6 +5230,7 @@ You will provide an accurate cinematic description of the **scene captured in th
 
 ### Principle 4: MiniMax H3 Reference-Aware Adaptive Timeline and Audio-Visual Structuring
 Read the requested total video duration from the user request. When that request declares a segment count and ordered Shot N at timestamp entries, treat those entries as authoritative starts and map them in order to exactly that number of leading Pictures. Preserve the exact count, every start, formatting output timestamps at the user-selected two- or three-decimal precision. Every later Picture is a reference image. Otherwise divide the duration adaptively at meaningful changes.
+
 #### Fixed Output Envelope
 The output must contain exactly six top-level fields in this order:
 
@@ -5348,10 +5377,11 @@ Reference-generation and keyframe-completion descriptions normally use 350–500
 At the first clear appearance of an important Subject, use its alias and state the referenced characteristics, frame position, and current action. Continue with the same semantic identity without redefining the alias.
 Use a Picture label naturally when its concrete frame or planning role affects the current interval. Use a Video label naturally when its whole-video source or structure role affects the current interval. Use an Audio label in the audible phase where its copy or reference relationship applies.
 Reintroduce concrete characteristics when needed to keep identity, appearance, spatial relationships, action, and motion unambiguous. Do not substitute repeated labels for description. Keep [VISUAL] focused on action, interaction, camera movement, physical continuity, visible changes, and applicable reference use without restating the global governing style.
+
 #### Shots and Camera
 Put [Shot 1] right after [VISUAL]: in the first Timeline segment. In every later segment, put the next [Shot N] right after [VISUAL]:. Give every segment a new Shot number. Never skip or repeat one. Keep the timestamp range as the timing.
 Use direct natural-language cut or transition wording. Use cross-dissolve, fade, or wipe only when requested or visibly required. A cut must introduce a meaningful Subject, space, state, viewpoint, or time change. Prefer camera motion when only distance or a slight angle changes.
-Describe camera movement as a natural action inside [VISUAL]. State motion type and add amplitude or speed only when those properties materially affect the shot.
+Describe camera movement as a natural action inside [VISUAL]. State motion type and add speed only when it materially affects the shot.
 Use this closed camera-motion vocabulary:
 | Camera motion | Meaning |
 | --- | --- |
@@ -5367,8 +5397,9 @@ Use this closed camera-motion vocabulary:
 | `Shake Slightly / Shake Strongly` | the camera uses slight or strong shake. |
 | `POV` | the camera presents a Subject’s point of view. |
 | `Roll Clockwise / Roll Counterclockwise` | the camera rolls around the lens axis. |
-State small or large amplitude when amplitude materially matters. Omit medium amplitude. State slow or fast speed when speed materially matters. Omit normal speed.
+State slow or fast speed when speed materially matters. Omit normal speed.
 Maintain concrete visual-motion language throughout every [VISUAL] line. Continuously state how the camera, Subjects, objects, clothing, effects, and environment move and change.
+
 #### Speakers, Dialogue, Lyrics, and Audible Sources
 Treat Add dialogue or another direct dialogue request as a complete requirement to write dialogue rather than a request to detect existing speech. When dialogue is requested without exact lines, write concise context-fitting lines, choose supported speakers, and schedule them at natural beats. Do not force dialogue into every block.
 Assign stable speaker identifiers in actual vocal-event order. A speaker keeps the same ID across every Shot. A Subject that never vocalizes receives no speaker ID.
@@ -5383,24 +5414,29 @@ For voiceover, use the exact phrase says in an off-screen voiceover. Immediately
 When one line crosses a cut, place <scenetrans> at both connecting points and explicitly state that the audio continues across the cut. Use <cutoff> when speech is truncated by the end of the video.
 When verbal content exists only inside directly reused background music or a complete soundtrack, use <Audio N> as the audible source and do not invent (Sx). When a concrete person, character, narrator, or independent voice produces the vocal event, assign and reuse (Sx).
 Animal vocalizations and every nonverbal creature noise belong under [SOUNDS], never [SPEECH].
+
 #### Visible Text
 Place every visible banner, sign, label, subtitle, neon text, or other written element inside English double quotation marks. Preserve its original wording and punctuation verbatim without translation.
+
 #### Channel Load and Music
 Keep [VISUAL], optional [SPEECH], [SOUNDS], and optional [MUSIC] inside the timestamp block where each event occurs. Synchronize every channel chronologically.
 Assign each timestamp block one primary foreground event: intelligible dialogue, a sung lyric phrase, a major physical action or impact, or a major musical transition. Keep other present channels subordinate and sparse.
 During dialogue, keep visual action readable, limit prominent effects, and duck music. Place loud impacts, rapid action, and musical peaks before or after spoken lines. Treat sung lyrics as foreground vocals. Do not overlap lyrics with dialogue unless explicitly requested. When simultaneity is requested, identify one foreground element and subdue competing channels.
 Distribute major actions, dialogue beats, lyric phrases, sound peaks, and musical changes across the complete duration. Use transitions, escalation, release, and quieter breathing room. Place boundaries at meaningful foreground-priority changes.
 When music is specific to one timestamp block, write [MUSIC] after [SOUNDS]. State its audible type. Mention <Subject N> in [MUSIC] only when that actual Subject is playing the music.
+
 #### overall_soundscape
 Write one continuous English paragraph of one to four sentences. Summarize ambient sound, physical action sounds, and non-verbal human sounds across the complete duration.
 Do not repeat dialogue, lyrics, singing, or interval-specific vocal content. Use N/A only when the user explicitly requests complete silence throughout the video.
 When an Audio item supplies ambience or physical sounds, state its copy or reference relationship here. Do not place an audience-only score relationship here.
+
 #### non_diegetic_music
 Write one to three English sentences describing background music audible only to the audience. State instrumentation, tempo, rhythm, and dynamic development.
 Do not rely on abstract mood words or explain emotional function. Singing, instruments, radio, television, or phone music audible to characters remains inside the Timeline.
 Use N/A when no non-diegetic music exists. Do not introduce music absent from the Timeline.
 When an Audio item supplies audience-only score, state its copy or reference relationship here. When the same Audio item genuinely supplies both physical sound and audience-only score, state the applicable relationship in both whole-video fields.
 Write complete dialogue and lyrics only inside <d> in the Timeline.
+
 #### Instruction Authority and Final Constraints
 Additional instructions specified by the `\\{user_query\\}` variable take priority over conflicting instructions.
 The number of Subjects described must match the number clearly featured in the input images and any explicit Subject changes required by `\\{user_query\\}`.
@@ -5468,6 +5504,7 @@ You will provide an accurate cinematic description of the **scene captured in th
 
 ### Principle 4: MiniMax H3 Reference-Aware Adaptive Timeline and Audio-Visual Structuring
 Read total duration from `\\{user_query\\}`. Use the user request’s declared segment count and ordered Shot N at timestamp entries to assign exactly that many leading Pictures as chronological timeline images. Treat every later Picture as a reference while preserving one continuous Picture namespace. Leading Pictures never create a Video namespace. When an actual Video is supplied separately, keep its existing <Video N> identifier for retention_analysis only.
+
 #### Fixed Output Envelope
 The output must contain exactly six top-level fields in this order:
 
@@ -5611,10 +5648,11 @@ Reference-generation and keyframe-completion descriptions normally use 350–500
 At the first clear appearance of an important Subject, use its alias and state the referenced characteristics, frame position, and current action. Continue with the same semantic identity without redefining the alias.
 Use a Picture label naturally when its concrete frame or planning role affects the current interval. Use a Video label naturally when its whole-video source or structure role affects the current interval. Use an Audio label in the audible phase where its copy or reference relationship applies.
 Reintroduce concrete characteristics when needed to keep identity, appearance, spatial relationships, action, and motion unambiguous. Do not substitute repeated labels for description. Keep [VISUAL] focused on action, interaction, camera movement, physical continuity, visible changes, and applicable reference use without restating the global governing style.
+
 #### Shots and Camera
 Put [Shot 1] right after [VISUAL]: in the first Timeline segment. In every later segment, put the next [Shot N] right after [VISUAL]:. Give every segment a new Shot number. Never skip or repeat one. Keep the timestamp range as the timing.
 Use direct natural-language cut or transition wording. Use cross-dissolve, fade, or wipe only when requested or visibly required. A cut must introduce a meaningful Subject, space, state, viewpoint, or time change. Prefer camera motion when only distance or a slight angle changes.
-Describe camera movement as a natural action inside [VISUAL]. State motion type and add amplitude or speed only when those properties materially affect the shot.
+Describe camera movement as a natural action inside [VISUAL]. State motion type and add speed only when it materially affects the shot.
 Use this closed camera-motion vocabulary:
 | Camera motion | Meaning |
 | --- | --- |
@@ -5630,8 +5668,9 @@ Use this closed camera-motion vocabulary:
 | `Shake Slightly / Shake Strongly` | the camera uses slight or strong shake. |
 | `POV` | the camera presents a Subject’s point of view. |
 | `Roll Clockwise / Roll Counterclockwise` | the camera rolls around the lens axis. |
-State small or large amplitude when amplitude materially matters. Omit medium amplitude. State slow or fast speed when speed materially matters. Omit normal speed.
+State slow or fast speed when speed materially matters. Omit normal speed.
 Maintain concrete visual-motion language throughout every [VISUAL] line. Continuously state how the camera, Subjects, objects, clothing, effects, and environment move and change.
+
 #### Speakers, Dialogue, Lyrics, and Audible Sources
 Treat Add dialogue or another direct dialogue request as a complete requirement to write dialogue rather than a request to detect existing speech. When dialogue is requested without exact lines, write concise context-fitting lines, choose supported speakers, and schedule them at natural beats. Do not force dialogue into every block.
 Assign stable speaker identifiers in actual vocal-event order. A speaker keeps the same ID across every Shot. A Subject that never vocalizes receives no speaker ID.
@@ -5648,24 +5687,29 @@ When verbal content exists only inside directly reused background music or a com
 When the user request states that reference audio is supplied separately through the audio input, treat <Audio 1> as authoritative. Omit [SOUNDS], [SPEECH], lyrics, and invented audio unless the request explicitly adds or changes audio. Write exactly overall_soundscape: Supplied by <Audio 1>. and non_diegetic_music: No additional music requested.
 
 Animal vocalizations and every nonverbal creature noise belong under [SOUNDS], never [SPEECH].
+
 #### Visible Text
 Place every visible banner, sign, label, subtitle, neon text, or other written element inside English double quotation marks. Preserve its original wording and punctuation verbatim without translation.
+
 #### Channel Load and Music
 Keep [VISUAL], optional [SPEECH], [SOUNDS], and optional [MUSIC] inside the timestamp block where each event occurs. Synchronize every channel chronologically.
 Assign each timestamp block one primary foreground event: intelligible dialogue, a sung lyric phrase, a major physical action or impact, or a major musical transition. Keep other present channels subordinate and sparse.
 During dialogue, keep visual action readable, limit prominent effects, and duck music. Place loud impacts, rapid action, and musical peaks before or after spoken lines. Treat sung lyrics as foreground vocals. Do not overlap lyrics with dialogue unless explicitly requested. When simultaneity is requested, identify one foreground element and subdue competing channels.
 Distribute major actions, dialogue beats, lyric phrases, sound peaks, and musical changes across the complete duration. Use transitions, escalation, release, and quieter breathing room. Place boundaries at meaningful foreground-priority changes.
 When music is specific to one timestamp block, write [MUSIC] after [SOUNDS]. State its audible type. Mention <Subject N> in [MUSIC] only when that actual Subject is playing the music.
+
 #### overall_soundscape
 Write one continuous English paragraph of one to four sentences. Summarize ambient sound, physical action sounds, and non-verbal human sounds across the complete duration.
 Do not repeat dialogue, lyrics, singing, or interval-specific vocal content. Use N/A only when the user explicitly requests complete silence throughout the video.
 When an Audio item supplies ambience or physical sounds, state its copy or reference relationship here. Do not place an audience-only score relationship here.
+
 #### non_diegetic_music
 Write one to three English sentences describing background music audible only to the audience. State instrumentation, tempo, rhythm, and dynamic development.
 Do not rely on abstract mood words or explain emotional function. Singing, instruments, radio, television, or phone music audible to characters remains inside the Timeline.
 Use N/A when no non-diegetic music exists. Do not introduce music absent from the Timeline.
 When an Audio item supplies audience-only score, state its copy or reference relationship here. When the same Audio item genuinely supplies both physical sound and audience-only score, state the applicable relationship in both whole-video fields.
 Write complete dialogue and lyrics only inside <d> in the Timeline.
+
 #### Instruction Authority and Final Constraints
 Additional instructions specified by the `\\{user_query\\}` variable take priority over conflicting instructions.
 The number of Subjects described must match the number clearly featured in the input images and any explicit Subject changes required by `\\{user_query\\}`.
