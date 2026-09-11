@@ -1,2 +1,9 @@
 # Development-only files
 tests/
+/scripts/
+/.github/
+/.agents/
+/agent_prompts/
+/AGENTS.md
+/AGENTS-LOCAL.md
+/skills-lock.json
