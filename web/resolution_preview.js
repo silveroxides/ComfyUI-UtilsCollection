@@ -114,6 +114,16 @@ function videoResolution(ratioWidth, ratioHeight, megapixels, multiple, minimum)
   return best;
 }
 
+const PREVIEW_FONT = "12px sans-serif";
+const previewMeasureContext = document.createElement("canvas").getContext("2d");
+previewMeasureContext.font = PREVIEW_FONT;
+
+function fitPreview(node) {
+  const minimum = node.computeSize();
+  if (node.size[0] < minimum[0]) node.setSize([minimum[0], node.size[1]]);
+  node.setDirtyCanvas(true, true);
+}
+
 function updatePreview(node, backendValue) {
   if (node.__ucH3ReferenceVideo) {
     const range = backendValue ?? h3ReferenceFrameRange(
@@ -122,7 +132,7 @@ function updatePreview(node, backendValue) {
       node.__ucH3SourceSeconds ?? null,
     );
     node.__ucResolutionPreview = `start frame ${range.start ?? "…"} · end frame ${range.end ?? "…"} · ${range.length ?? "…"} frames`;
-    node.setDirtyCanvas(true, true);
+    fitPreview(node);
     return;
   }
   if (backendValue !== undefined) {
@@ -143,7 +153,7 @@ function updatePreview(node, backendValue) {
       ? `${width}×${height}`
       : `${width}×${height} · ${length} frames`;
   }
-  node.setDirtyCanvas(true, true);
+  fitPreview(node);
 }
 
 app.registerExtension({
@@ -154,9 +164,8 @@ app.registerExtension({
     const computeSize = nodeType.prototype.computeSize;
     nodeType.prototype.computeSize = function (out) {
       const baseSize = computeSize?.call(this, out ? [...out] : undefined) || [...(out || this.size || [0, 0])];
-      const size = resolutionPreviewMinimumSize(baseSize);
-      if (nodeData.name === "UC_MiniMaxH3RefVid") size[0] = Math.max(size[0], 380);
-      return size;
+      const textWidth = previewMeasureContext.measureText(this.__ucResolutionPreview || "").width;
+      return resolutionPreviewMinimumSize(baseSize, textWidth);
     };
 
     const onResize = nodeType.prototype.onResize;
@@ -186,7 +195,7 @@ app.registerExtension({
       if (this.flags.collapsed || !this.__ucResolutionPreview) return;
       ctx.save();
       ctx.fillStyle = "#bbb";
-      ctx.font = "12px sans-serif";
+      ctx.font = PREVIEW_FONT;
       ctx.textAlign = "center";
       ctx.fillText(this.__ucResolutionPreview, this.size[0] / 2, this.size[1] - 9);
       ctx.restore();

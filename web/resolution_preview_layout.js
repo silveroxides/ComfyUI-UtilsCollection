@@ -1,9 +1,9 @@
 export const RESOLUTION_PREVIEW_HEIGHT = 26;
-export const RESOLUTION_PREVIEW_MIN_WIDTH = 220;
+export const RESOLUTION_PREVIEW_SIDE_PADDING = 8;
 
-export function resolutionPreviewMinimumSize(baseSize) {
+export function resolutionPreviewMinimumSize(baseSize, textWidth = 0) {
   return [
-    Math.max(Number(baseSize?.[0]) || 0, RESOLUTION_PREVIEW_MIN_WIDTH),
+    Math.max(Number(baseSize?.[0]) || 0, textWidth > 0 ? Math.ceil(textWidth) + 2 * RESOLUTION_PREVIEW_SIDE_PADDING : 0),
     (Number(baseSize?.[1]) || 0) + RESOLUTION_PREVIEW_HEIGHT,
   ];
 }

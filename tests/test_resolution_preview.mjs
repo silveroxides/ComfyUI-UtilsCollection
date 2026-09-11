@@ -19,9 +19,11 @@ import {
 } from "../web/resolution_preview_layout.js";
 
 
-test("resolution preview reserves a bottom band in computed minimum size", () => {
-  assert.deepEqual(resolutionPreviewMinimumSize([180, 220]), [220, 246]);
-  assert.deepEqual(resolutionPreviewMinimumSize([320, 180]), [320, 206]);
+test("resolution preview reserves height and expands only for measured text", () => {
+  assert.deepEqual(resolutionPreviewMinimumSize([180, 220]), [180, 246]);
+  assert.deepEqual(resolutionPreviewMinimumSize([180, 220], 100), [180, 246]);
+  assert.deepEqual(resolutionPreviewMinimumSize([180, 220], 200.5), [217, 246]);
+  assert.deepEqual(resolutionPreviewMinimumSize([320, 180], 200), [320, 206]);
 });
 
 
