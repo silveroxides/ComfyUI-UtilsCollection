@@ -358,9 +358,9 @@ def test_visual_fusion_consumers_use_aligned_integer_resolution():
 def test_vlm_resolution_boundaries_and_original_sentinels():
     assert encoder_helpers.resolve_vlm_resolution(256) == 256
     assert 256 * 256 == 65_536
-    assert encoder_helpers.resolve_vlm_resolution(3584) == 3584
+    assert encoder_helpers.resolve_vlm_resolution(4096) == 4096
     assert encoder_helpers.resolve_vlm_resolution(255) is None
-    assert encoder_helpers.resolve_vlm_resolution(3585) is None
+    assert encoder_helpers.resolve_vlm_resolution(4097) is None
     assert encoder_helpers.resolve_vlm_resolution(0) is None
 
 

@@ -40,6 +40,75 @@ finally:
     cli_args.cpu = prior_cpu
 
 
+@pytest.mark.parametrize("side,expected_grid", [(128, 16), (4096, 256), (4352, 256)])
+def test_h3_native_image_preprocessing_limits(side, expected_grid):
+    from utils_collection_encoder_test.minimax_h3_preprocessing_helpers import preprocess_h3_embed
+
+    seen = []
+    def visual(image, grid):
+        seen.append(image.shape[0])
+        return "merged", ["deepstack"]
+
+    model = types.SimpleNamespace(visual=visual)
+    result, extra = preprocess_h3_embed(
+        model, {"type": "image", "data": torch.empty(1, side, side, 3, device="meta")}, "meta",
+    )
+    assert seen == [expected_grid * expected_grid]
+    assert result == "merged"
+    assert extra["deepstack"] == ["deepstack"]
+
+
+def test_h3_rgba_preprocessing_preserves_rgb():
+    from utils_collection_encoder_test.minimax_h3_preprocessing_helpers import preprocess_h3_embed
+
+    rgb = torch.rand(1, 256, 256, 3)
+    rgba = torch.cat((rgb, torch.zeros(1, 256, 256, 1)), dim=-1)
+    seen = []
+    def visual(image, grid):
+        # Exercise the actual RGB-only patch reshape that failed for RGBA.
+        seen.append(image.reshape(-1, 3, 2, 16, 16))
+        return image, {"grid": grid}
+
+    model = types.SimpleNamespace(visual=visual)
+    for source in (rgb, rgba):
+        preprocess_h3_embed(model, {"type": "image", "data": source}, "cpu")
+    torch.testing.assert_close(seen[0], seen[1])
+    assert rgba.shape[-1] == 4
+    assert torch.count_nonzero(rgba[..., 3]) == 0
+
+
+def test_h3_preprocessing_patch_is_clone_owned():
+    from utils_collection_encoder_test.minimax_h3_preprocessing_helpers import (
+        MiniMaxQwen3VL, prepare_h3_preprocessing_clip,
+    )
+
+    model = MiniMaxQwen3VL.__new__(MiniMaxQwen3VL)
+    torch.nn.Module.__init__(model)
+    original = model.preprocess_embed
+    patches = {}
+    clone = types.SimpleNamespace(patcher=types.SimpleNamespace(add_object_patch=patches.__setitem__))
+    clip = types.SimpleNamespace(
+        cond_stage_model=types.SimpleNamespace(qwen3vl_32b=types.SimpleNamespace(transformer=model)),
+        clone=lambda: clone,
+    )
+    assert prepare_h3_preprocessing_clip(clip) is clone
+    assert model.preprocess_embed == original
+    assert patches["qwen3vl_32b.transformer.preprocess_embed"].__self__ is model
+
+
+def test_h3_native_image_token_spans_match_preprocessing():
+    from utils_collection_encoder_test.minimax_h3_preprocessing_helpers import tokenize_h3_images
+
+    image = torch.empty(1, 4096, 4096, 3, device="meta")
+    class Clip:
+        def tokenize(self):
+            return {"qwen3vl_32b": [[({"type": "image", "data": image}, 1.0)]]}
+
+    token = tokenize_h3_images(Clip())["qwen3vl_32b"][0][0]
+    assert encoder_helpers._qwen3vl_image_span(token) == 16384
+    assert encoder_helpers.visual_fusion_grid(image, 16384) == (128, 128)
+
+
 VAE_MULTIPLE_ENCODERS = (
     "UC_ScaledBiasTextEncodeLtxv2SystemPrompt",
     "TextEncodeSystemEditPlus",

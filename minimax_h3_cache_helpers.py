@@ -26,6 +26,7 @@ from unifiedefficientloader import (
 
 import folder_paths
 import comfy.model_management
+from .minimax_h3_preprocessing_helpers import prepare_h3_preprocessing_clip
 
 
 _IDENTITIES = {}
@@ -434,6 +435,7 @@ class H3EncoderCache:
         return value
 
     def prepare_clip(self, clip):
+        clip = prepare_h3_preprocessing_clip(clip)
         if self.enable_caching != "disabled":
             self._clip_identity = clip_description(clip)
         return clip

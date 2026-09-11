@@ -66,7 +66,7 @@ def test_encoder_guide_covers_current_visual_fusion_contract():
         value in resolution
         for value in (
             "256",
-            "3584",
+            "4096",
             "1` through `15",
             "UC_AdvancedVisualConditioningEncode",
             "encode only the selected base VLM resolution",

@@ -937,12 +937,10 @@ def _released_qwen3vl_prefix_end(token_list, expanded_length: int) -> int:
     return template_end
 
 
-def _qwen3vl_resized_dimensions(height: int, width: int) -> tuple[int, int]:
+def _qwen3vl_resized_dimensions(height: int, width: int, min_pixels=3136, max_pixels=12845056) -> tuple[int, int]:
     """Replicate released Core's Qwen3-VL resize arithmetic locally."""
     patch_size = 16
     merge_size = 2
-    min_pixels = 3136
-    max_pixels = 12845056
     factor = patch_size * merge_size
     resized_height = round(height / factor) * factor
     resized_width = round(width / factor) * factor
@@ -960,7 +958,7 @@ def _qwen3vl_resized_dimensions(height: int, width: int) -> tuple[int, int]:
 
 
 VLM_RESOLUTION_MIN = 256
-VLM_RESOLUTION_MAX = 3584
+VLM_RESOLUTION_MAX = 4096
 VLM_RESOLUTION_STEP = 32
 
 
@@ -1073,7 +1071,9 @@ def _qwen3vl_image_span(token) -> int | None:
     if not torch.is_tensor(image) or image.ndim != 4:
         return None
     height, width = image.shape[1:3]
-    resized_height, resized_width = _qwen3vl_resized_dimensions(height, width)
+    resized_height, resized_width = _qwen3vl_resized_dimensions(
+        height, width, *value.get("h3_image_pixel_limits", (3136, 12845056))
+    )
     return (resized_height // 16) * (resized_width // 16) // 4
 
 
@@ -1112,6 +1112,9 @@ def visual_fusion_grid(image, visual_length: int, legacy_flat: bool = False) -> 
     if legacy_flat:
         return 1, visual_length
     grid = qwen3vl_visual_grid(image)
+    if grid[0] * grid[1] != visual_length:
+        height, width = _qwen3vl_resized_dimensions(*image.shape[1:3], 65536, 16777216)
+        grid = height // 32, width // 32
     if grid[0] * grid[1] != visual_length:
         raise ValueError(f"Visual token layout error: grid {grid} does not match range length {visual_length}.")
     return grid

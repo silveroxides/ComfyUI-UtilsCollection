@@ -2011,7 +2011,7 @@ class UC_AdvancedVisualConditioningEncode(io.ComfyNode):
                     min=0,
                     max=4096,
                     step=32,
-                    tooltip="Equivalent-square VLM target from 256 to 3584. Values outside that range preserve original resolution.",
+                    tooltip="Equivalent-square VLM target from 256 to 4096. Values outside that range preserve original resolution.",
                 ),
 
                 # --- Modular Configurations ---
@@ -2389,7 +2389,7 @@ class TextEncodeEditScaledAdv(io.ComfyNode):
                     min=0,
                     max=4096,
                     step=32,
-                    tooltip="Equivalent-square VLM target from 256 to 3584. Values outside that range preserve original resolution.",
+                    tooltip="Equivalent-square VLM target from 256 to 4096. Values outside that range preserve original resolution.",
                 ),
 
                 # --- Modular Configurations ---
@@ -2991,7 +2991,7 @@ class UC_Krea2TokenAttentionWeight(io.ComfyNode):
                     min=0,
                     max=4096,
                     step=32,
-                    tooltip="Equivalent-square VLM target from 256 to 3584. Values outside that range preserve original resolution.",
+                    tooltip="Equivalent-square VLM target from 256 to 4096. Values outside that range preserve original resolution.",
                 ),
                 io.Float.Input("strength", default=1.0, min=0.0, max=4.0, step=0.05, tooltip="Global multiplier on the weighting effect. Effect compounds over all blocks."),
 
@@ -3393,7 +3393,7 @@ class UC_MiniMaxH3VLMGuide(io.ComfyNode):
                 io.Clip.Input("clip"),
                 io.Image.Input("image"),
                 io.Float.Input("timestamp", default=0.0, min=0.0, step=0.1, tooltip="Guide time in seconds."),
-                io.Int.Input("vlm_resolution", default=384, min=0, max=4096, step=32, tooltip="Equivalent-square Qwen target from 256 to 3584. Values outside that range preserve original resolution."),
+                io.Int.Input("vlm_resolution", default=384, min=0, max=4096, step=32, tooltip="Equivalent-square Qwen target from 256 to 4096. Values outside that range preserve original resolution."),
                 io.Combo.Input("enable_caching", options=list(H3_CACHE_MODES), default="all", tooltip="Disk caching for this independently encoded image Guide. Images only/all cache its final guide section; video only does not."),
             ],
             outputs=[io.Conditioning.Output()],
@@ -3504,7 +3504,7 @@ class UC_AdvancedMiniMaxH3ImageToVideo(io.ComfyNode):
                     max=4096,
                     step=32,
                     tooltip=(
-                        "Equivalent-square Qwen3-VL target from 256 to 3584. Values outside that range preserve "
+                        "Equivalent-square Qwen3-VL target from 256 to 4096. Values outside that range preserve "
                         "the original image resolution. This is independent of VAE frame and reference sizing."
                     ),
                 ),
@@ -3516,7 +3516,7 @@ class UC_AdvancedMiniMaxH3ImageToVideo(io.ComfyNode):
                     step=32,
                     tooltip=(
                         "Qwen3-VL resolution for Video frames. Higher values use more visual tokens. "
-                        "Values outside 256 to 3584 preserve the input resolution."
+                        "Values outside 256 to 4096 preserve the input resolution."
                     ),
                 ),
                 io.Combo.Input("enable_caching", options=list(H3_CACHE_MODES), default="all", tooltip='All modes preserve joint Qwen encoding. Enabled modes cache the complete encoded presentation; prompt or media changes invalidate it. Images/video modes select matching VAE outputs; all includes audio VAE outputs. Raw tokens and DeepStack are never saved.'),
@@ -3637,7 +3637,7 @@ class UC_AdvancedVisConEncoder(io.ComfyNode):
                     min=0,
                     max=4096,
                     step=32,
-                    tooltip="Equivalent-square VLM target. Values outside 256-3584 preserve Original resolution.",
+                    tooltip="Equivalent-square VLM target. Values outside 256-4096 preserve Original resolution.",
                 ),
                 VisualConsensusConfig.Input(
                     "visual_consensus_config",
