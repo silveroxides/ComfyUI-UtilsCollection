@@ -23,6 +23,7 @@ from .model_helpers import (
 _MAX_SEED = 0xFFFFFFFFFFFFFFFF
 SeedClusterType = io.Custom("UC_SEED_CLUSTER")
 MiniMaxH3ClipContinuationMedia = io.Custom("MINIMAX_H3_CLIP_CONTINUATION_MEDIA")
+_MINIMAX_H3_CLIP_ACCUMULATION = {}
 
 
 class UC_MiniMaxH3RefVid(io.ComfyNode):
@@ -153,11 +154,6 @@ class UC_MiniMaxH3ClipContinuationTrim(io.ComfyNode):
 
 
 class UC_MiniMaxH3ClipContinuationAccumulate(io.ComfyNode):
-    def __init__(self):
-        self._image_batches = []
-        self._audio_batches = []
-        self._reset_counter = None
-
     @classmethod
     def define_schema(cls):
         return io.Schema(
@@ -173,44 +169,46 @@ class UC_MiniMaxH3ClipContinuationAccumulate(io.ComfyNode):
                 io.Int.Input("reset_counter", default=0, min=0, max=99999, step=1, tooltip="Change this number to discard clips collected so far and start again."),
             ],
             outputs=[io.Image.Output("images"), io.Audio.Output("audio")],
+            hidden=[io.Hidden.unique_id],
         )
 
     @classmethod
     def IS_CHANGED(cls, **kwargs):
         return float("nan")
 
-    def execute(self, images, audio=None, target_batches=2, overlap_threshold=224, reset_counter=0):
-        if self._reset_counter != reset_counter:
-            self._image_batches = []
-            self._audio_batches = []
-            self._reset_counter = reset_counter
+    @classmethod
+    def execute(cls, images, audio=None, target_batches=2, overlap_threshold=224, reset_counter=0, unique_id=None):
+        state_key = str(unique_id)
+        state = _MINIMAX_H3_CLIP_ACCUMULATION.get(state_key)
+        if state is None or state["reset_counter"] != reset_counter:
+            state = {"image_batches": [], "audio_batches": [], "reset_counter": reset_counter}
+            _MINIMAX_H3_CLIP_ACCUMULATION[state_key] = state
         images = images.detach().cpu().clone()
-        if self._image_batches:
+        if state["image_batches"]:
             overlap = find_minimax_h3_clip_continuation_overlap(
-                torch.cat(self._image_batches, dim=0), images, int(overlap_threshold)
+                torch.cat(state["image_batches"], dim=0), images, int(overlap_threshold)
             )
             if overlap:
                 images, audio = trim_minimax_h3_clip_continuation(images, audio, overlap)
-        self._image_batches.append(images)
+        state["image_batches"].append(images)
         if audio is not None and (
             not isinstance(audio, dict)
             or not torch.is_tensor(audio.get("waveform"))
             or not isinstance(audio.get("sample_rate"), int)
         ):
             raise ValueError("MiniMax H3 Clip Continuation accumulated audio must contain a waveform and sample rate.")
-        self._audio_batches.append(
+        state["audio_batches"].append(
             None if audio is None else {
                 "waveform": audio["waveform"].detach().cpu().clone(),
                 "sample_rate": audio.get("sample_rate"),
             }
         )
-        if len(self._image_batches) < target_batches:
+        if len(state["image_batches"]) < target_batches:
             return io.NodeOutput(ExecutionBlocker(None), ExecutionBlocker(None))
         output = accumulate_minimax_h3_clip_continuations(
-            self._image_batches, self._audio_batches
+            state["image_batches"], state["audio_batches"]
         )
-        self._image_batches = []
-        self._audio_batches = []
+        del _MINIMAX_H3_CLIP_ACCUMULATION[state_key]
         return io.NodeOutput(*output)
 
 
