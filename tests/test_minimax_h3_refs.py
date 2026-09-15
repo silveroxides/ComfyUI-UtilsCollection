@@ -234,12 +234,28 @@ def test_clip_continuation_accumulate_trims_detected_visual_overlap_and_audio():
     torch.testing.assert_close(output.args[1]["waveform"], torch.cat((first_audio["waveform"], second_audio["waveform"]), dim=-1))
 
 
-def test_clip_continuation_overlap_requires_every_frame_to_match():
+def test_clip_continuation_overlap_rejects_an_inconsistent_sequence():
     previous = torch.zeros(4, 8, 8, 3)
     current = torch.zeros(5, 8, 8, 3)
     current[2] = 1
 
     assert model_helpers.find_minimax_h3_clip_continuation_overlap(previous, current, threshold=70, maximum_frames=4) == 2
+
+
+def test_clip_continuation_overlap_selects_the_strongest_alignment():
+    previous = torch.tensor((0.0, 0.1, 0.2, 0.3)).view(4, 1, 1, 1).expand(4, 8, 8, 3)
+    current = torch.tensor((0.2, 0.3, 0.5, 0.6, 0.7)).view(5, 1, 1, 1).expand(5, 8, 8, 3)
+
+    assert model_helpers.find_minimax_h3_clip_continuation_overlap(previous, current, threshold=70, maximum_frames=4) == 2
+
+
+def test_clip_continuation_overlap_prioritizes_motion_over_static_scenery():
+    previous = torch.full((4, 32, 32, 3), 0.5)
+    current = torch.full((5, 32, 32, 3), 0.5)
+    previous[:, 12:20, 12:20] = torch.tensor((0.0, 0.1, 0.2, 0.3)).view(4, 1, 1, 1)
+    current[:, 12:20, 12:20] = torch.tensor((0.2, 0.3, 0.4, 0.5, 0.6)).view(5, 1, 1, 1)
+
+    assert model_helpers.find_minimax_h3_clip_continuation_overlap(previous, current, threshold=90, maximum_frames=4) == 2
 
 
 def test_refined_compression_can_create_gradients_inside_inference_mode():
