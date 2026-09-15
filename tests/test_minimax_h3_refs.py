@@ -178,7 +178,8 @@ def test_clip_continuation_accumulate_blocks_then_joins_and_resets():
     node = utils_nodes.UC_MiniMaxH3ClipContinuationAccumulate
     schema = node.define_schema()
     inputs = {value.id: value for value in schema.inputs}
-    assert inputs["overlap_threshold"].display_name == "Remove frames when similarity >= (%)"
+    assert inputs["overlap_threshold"].display_name == "Duplicate boundary threshold (%)"
+    assert inputs["overlap_threshold"].advanced is True
     assert inputs["overlap_threshold"].default == 88.0
     assert inputs["overlap_threshold"].min == 0.0
     assert inputs["overlap_threshold"].max == 100.0

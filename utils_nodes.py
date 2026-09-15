@@ -165,7 +165,7 @@ class UC_MiniMaxH3ClipContinuationAccumulate(io.ComfyNode):
                 io.Image.Input("images", tooltip="Frames from the clip you just made."),
                 io.Audio.Input("audio", optional=True, tooltip="Optional audio from the same clip."),
                 io.Int.Input("target_batches", default=2, min=1, max=99999, step=1, tooltip="How many clips to collect before making one combined clip."),
-                io.Float.Input("overlap_threshold", display_name="Remove frames when similarity >= (%)", default=88.0, min=0.0, max=100.0, step=0.1, tooltip="When the average similarity between the previous clip's end and the current clip's start reaches this percentage, those repeated starting frames are removed. Higher values require a closer match."),
+                io.Float.Input("overlap_threshold", display_name="Duplicate boundary threshold (%)", default=88.0, min=0.0, max=100.0, step=0.1, tooltip="Advanced: similarity needed to classify the end of the collected clip and start of the new clip as duplicate frames. Keep the default unless the automatic join removes too much or too little.", advanced=True),
                 io.Int.Input("maximum_overlap_frames", default=56, min=1, max=99999, step=1, tooltip="Maximum number of previous-tail and current-head frames to compare for repeated overlap."),
                 io.Boolean.Input(
                     "first_batch_reset",
