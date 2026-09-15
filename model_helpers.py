@@ -448,8 +448,8 @@ def find_minimax_h3_clip_continuation_overlap(
     previous: torch.Tensor, current: torch.Tensor, threshold: int, maximum_frames: int = 56,
 ) -> int:
     """Return the longest perceptually matching previous-tail/current-head overlap."""
-    if isinstance(threshold, bool) or not isinstance(threshold, numbers.Integral) or not 0 <= threshold <= 255:
-        raise ValueError("MiniMax H3 Clip Continuation overlap threshold must be an integer from 0 to 255.")
+    if isinstance(threshold, bool) or not isinstance(threshold, numbers.Integral) or not 0 <= threshold <= 100:
+        raise ValueError("MiniMax H3 Clip Continuation overlap threshold must be an integer from 0 to 100.")
     if not torch.is_tensor(previous) or not torch.is_tensor(current) or previous.ndim != 4 or current.ndim != 4 or tuple(previous.shape[1:]) != tuple(current.shape[1:]):
         raise ValueError("MiniMax H3 Clip Continuation overlap matching requires image batches with matching geometry.")
     limit = min(int(maximum_frames), previous.shape[0], current.shape[0] - 1)
@@ -466,7 +466,7 @@ def find_minimax_h3_clip_continuation_overlap(
         second_var = F.avg_pool2d(second.square(), 7, stride=1, padding=3) - second_mean.square()
         covariance = F.avg_pool2d(first * second, 7, stride=1, padding=3) - first_mean * second_mean
         similarity = ((2 * first_mean * second_mean + 0.01 ** 2) * (2 * covariance + 0.03 ** 2)) / ((first_mean.square() + second_mean.square() + 0.01 ** 2) * (first_var + second_var + 0.03 ** 2))
-        if similarity.mean() * 255 >= threshold:
+        if similarity.mean() * 100 >= threshold:
             return overlap
     return 0
 

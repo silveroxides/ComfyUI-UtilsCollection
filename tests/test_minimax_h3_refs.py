@@ -181,27 +181,27 @@ def test_clip_continuation_accumulate_blocks_then_joins_and_resets():
     first_audio = {"waveform": torch.zeros(1, 1, 20), "sample_rate": 240}
     second_audio = {"waveform": torch.ones(1, 1, 30), "sample_rate": 240}
 
-    blocked = node.execute(first_images, first_audio, target_batches=2, overlap_threshold=224, reset_counter=0, unique_id="accumulate-main")
+    blocked = node.execute(first_images, first_audio, target_batches=2, overlap_threshold=88, reset_counter=0, unique_id="accumulate-main")
     assert isinstance(blocked.args[0], ExecutionBlocker)
-    output = node.execute(second_images, second_audio, target_batches=2, overlap_threshold=224, reset_counter=0, unique_id="accumulate-main")
+    output = node.execute(second_images, second_audio, target_batches=2, overlap_threshold=88, reset_counter=0, unique_id="accumulate-main")
     torch.testing.assert_close(output.args[0], torch.cat((first_images, second_images)))
     torch.testing.assert_close(output.args[1]["waveform"], torch.cat((first_audio["waveform"], second_audio["waveform"]), dim=-1))
 
-    assert isinstance(node.execute(first_images, None, target_batches=2, overlap_threshold=224, reset_counter=1, unique_id="accumulate-main").args[0], ExecutionBlocker)
-    output = node.execute(second_images, None, target_batches=2, overlap_threshold=224, reset_counter=1, unique_id="accumulate-main")
+    assert isinstance(node.execute(first_images, None, target_batches=2, overlap_threshold=88, reset_counter=1, unique_id="accumulate-main").args[0], ExecutionBlocker)
+    output = node.execute(second_images, None, target_batches=2, overlap_threshold=88, reset_counter=1, unique_id="accumulate-main")
     torch.testing.assert_close(output.args[0], torch.cat((first_images, second_images)))
     assert output.args[1] is None
 
 
 def test_clip_continuation_accumulate_rejects_mixed_audio_and_geometry():
     node = utils_nodes.UC_MiniMaxH3ClipContinuationAccumulate
-    node.execute(torch.zeros(1, 8, 8, 3), None, target_batches=2, overlap_threshold=224, reset_counter=0, unique_id="accumulate-audio")
+    node.execute(torch.zeros(1, 8, 8, 3), None, target_batches=2, overlap_threshold=88, reset_counter=0, unique_id="accumulate-audio")
     with pytest.raises(ValueError, match="all include audio or all omit"):
-        node.execute(torch.zeros(1, 8, 8, 3), {"waveform": torch.zeros(1, 1, 4), "sample_rate": 240}, target_batches=2, overlap_threshold=224, reset_counter=0, unique_id="accumulate-audio")
+        node.execute(torch.zeros(1, 8, 8, 3), {"waveform": torch.zeros(1, 1, 4), "sample_rate": 240}, target_batches=2, overlap_threshold=88, reset_counter=0, unique_id="accumulate-audio")
 
-    node.execute(torch.zeros(1, 8, 8, 3), None, target_batches=2, overlap_threshold=224, reset_counter=0, unique_id="accumulate-geometry")
+    node.execute(torch.zeros(1, 8, 8, 3), None, target_batches=2, overlap_threshold=88, reset_counter=0, unique_id="accumulate-geometry")
     with pytest.raises(ValueError, match="matching geometry"):
-        node.execute(torch.zeros(1, 9, 8, 3), None, target_batches=2, overlap_threshold=224, reset_counter=0, unique_id="accumulate-geometry")
+        node.execute(torch.zeros(1, 9, 8, 3), None, target_batches=2, overlap_threshold=88, reset_counter=0, unique_id="accumulate-geometry")
 
 
 def test_clip_continuation_accumulate_trims_detected_visual_overlap_and_audio():
@@ -212,8 +212,8 @@ def test_clip_continuation_accumulate_trims_detected_visual_overlap_and_audio():
     second_audio = {"waveform": torch.arange(320, dtype=torch.float32).view(1, 1, 320), "sample_rate": 240}
     node = utils_nodes.UC_MiniMaxH3ClipContinuationAccumulate
 
-    node.execute(first_images, first_audio, target_batches=2, overlap_threshold=250, reset_counter=0, unique_id="accumulate-overlap")
-    output = node.execute(second_images, second_audio, target_batches=2, overlap_threshold=250, reset_counter=0, unique_id="accumulate-overlap")
+    node.execute(first_images, first_audio, target_batches=2, overlap_threshold=98, reset_counter=0, unique_id="accumulate-overlap")
+    output = node.execute(second_images, second_audio, target_batches=2, overlap_threshold=98, reset_counter=0, unique_id="accumulate-overlap")
 
     torch.testing.assert_close(output.args[0], torch.cat((first_images, second_images[22:])))
     torch.testing.assert_close(output.args[1]["waveform"], torch.cat((first_audio["waveform"], second_audio["waveform"][..., 220:]), dim=-1))
