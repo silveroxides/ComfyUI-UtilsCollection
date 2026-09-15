@@ -234,6 +234,14 @@ def test_clip_continuation_accumulate_trims_detected_visual_overlap_and_audio():
     torch.testing.assert_close(output.args[1]["waveform"], torch.cat((first_audio["waveform"], second_audio["waveform"]), dim=-1))
 
 
+def test_clip_continuation_overlap_requires_every_frame_to_match():
+    previous = torch.zeros(4, 8, 8, 3)
+    current = torch.zeros(5, 8, 8, 3)
+    current[2] = 1
+
+    assert model_helpers.find_minimax_h3_clip_continuation_overlap(previous, current, threshold=70, maximum_frames=4) == 2
+
+
 def test_refined_compression_can_create_gradients_inside_inference_mode():
     previous_grad = torch.is_grad_enabled()
     with torch.inference_mode(True):

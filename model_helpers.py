@@ -466,7 +466,8 @@ def find_minimax_h3_clip_continuation_overlap(
         second_var = F.avg_pool2d(second.square(), 7, stride=1, padding=3) - second_mean.square()
         covariance = F.avg_pool2d(first * second, 7, stride=1, padding=3) - first_mean * second_mean
         similarity = ((2 * first_mean * second_mean + 0.01 ** 2) * (2 * covariance + 0.03 ** 2)) / ((first_mean.square() + second_mean.square() + 0.01 ** 2) * (first_var + second_var + 0.03 ** 2))
-        if similarity.mean() * 100 >= float(threshold):
+        frame_similarity = similarity.flatten(1).mean(dim=1)
+        if frame_similarity.min() * 100 >= float(threshold):
             return overlap
     return 0
 
