@@ -182,6 +182,7 @@ def test_clip_continuation_accumulate_blocks_then_joins_and_resets():
     assert inputs["overlap_threshold"].min == 0.0
     assert inputs["overlap_threshold"].max == 100.0
     assert inputs["overlap_threshold"].step == 0.1
+    assert inputs["maximum_overlap_frames"].default == 56
     assert inputs["first_batch_reset"].default is False
     first_images = torch.zeros(2, 8, 8, 3)
     second_images = torch.ones(3, 8, 8, 3)
@@ -224,11 +225,11 @@ def test_clip_continuation_accumulate_trims_detected_visual_overlap_and_audio():
     second_audio = {"waveform": torch.arange(320, dtype=torch.float32).view(1, 1, 320), "sample_rate": 240}
     node = utils_nodes.UC_MiniMaxH3ClipContinuationAccumulate
 
-    node.execute(first_images, first_audio, target_batches=2, overlap_threshold=98, first_batch_reset=True, unique_id="accumulate-overlap")
-    output = node.execute(second_images, second_audio, target_batches=2, overlap_threshold=98, first_batch_reset=False, unique_id="accumulate-overlap")
+    node.execute(first_images, first_audio, target_batches=2, overlap_threshold=98, maximum_overlap_frames=10, first_batch_reset=True, unique_id="accumulate-overlap")
+    output = node.execute(second_images, second_audio, target_batches=2, overlap_threshold=98, maximum_overlap_frames=10, first_batch_reset=False, unique_id="accumulate-overlap")
 
-    torch.testing.assert_close(output.args[0], torch.cat((first_images, second_images[22:])))
-    torch.testing.assert_close(output.args[1]["waveform"], torch.cat((first_audio["waveform"], second_audio["waveform"][..., 220:]), dim=-1))
+    torch.testing.assert_close(output.args[0], torch.cat((first_images, second_images)))
+    torch.testing.assert_close(output.args[1]["waveform"], torch.cat((first_audio["waveform"], second_audio["waveform"]), dim=-1))
 
 
 def test_refined_compression_can_create_gradients_inside_inference_mode():

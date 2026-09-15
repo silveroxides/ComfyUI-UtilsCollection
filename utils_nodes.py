@@ -166,6 +166,7 @@ class UC_MiniMaxH3ClipContinuationAccumulate(io.ComfyNode):
                 io.Audio.Input("audio", optional=True, tooltip="Optional audio from the same clip."),
                 io.Int.Input("target_batches", default=2, min=1, max=99999, step=1, tooltip="How many clips to collect before making one combined clip."),
                 io.Float.Input("overlap_threshold", default=88.0, min=0.0, max=100.0, step=0.1, tooltip="How closely repeated frames must match before they are removed. Higher percentages keep only closer matches."),
+                io.Int.Input("maximum_overlap_frames", default=56, min=1, max=99999, step=1, tooltip="Maximum number of previous-tail and current-head frames to compare for repeated overlap."),
                 io.Boolean.Input(
                     "first_batch_reset",
                     default=False,
@@ -183,7 +184,7 @@ class UC_MiniMaxH3ClipContinuationAccumulate(io.ComfyNode):
         return float("nan")
 
     @classmethod
-    def execute(cls, images, audio=None, target_batches=2, overlap_threshold=88.0, first_batch_reset=False, unique_id=None):
+    def execute(cls, images, audio=None, target_batches=2, overlap_threshold=88.0, maximum_overlap_frames=56, first_batch_reset=False, unique_id=None):
         state_key = str(unique_id)
         state = _MINIMAX_H3_CLIP_ACCUMULATION.get(state_key)
         if first_batch_reset or state is None:
@@ -192,7 +193,7 @@ class UC_MiniMaxH3ClipContinuationAccumulate(io.ComfyNode):
         images = images.detach().cpu().clone()
         if state["image_batches"]:
             overlap = find_minimax_h3_clip_continuation_overlap(
-                torch.cat(state["image_batches"], dim=0), images, overlap_threshold
+                torch.cat(state["image_batches"], dim=0), images, overlap_threshold, maximum_overlap_frames
             )
             if overlap:
                 images, audio = trim_minimax_h3_clip_continuation(images, audio, overlap)
