@@ -166,7 +166,13 @@ class UC_MiniMaxH3ClipContinuationAccumulate(io.ComfyNode):
                 io.Audio.Input("audio", optional=True, tooltip="Optional audio from the same clip."),
                 io.Int.Input("target_batches", default=2, min=1, max=99999, step=1, tooltip="How many clips to collect before making one combined clip."),
                 io.Float.Input("overlap_threshold", default=88.0, min=0.0, max=100.0, step=0.1, tooltip="How closely repeated frames must match before they are removed. Higher percentages keep only closer matches."),
-                io.Int.Input("reset_counter", default=0, min=0, max=99999, step=1, tooltip="Change this number to throw away collected clips and start a new combined clip."),
+                io.Boolean.Input(
+                    "first_batch_reset",
+                    default=False,
+                    label_on="Start new batch",
+                    label_off="Continue batch",
+                    tooltip="Enable for the first clip of a new combined batch, then disable for each clip that follows.",
+                ),
             ],
             outputs=[io.Image.Output("images"), io.Audio.Output("audio")],
             hidden=[io.Hidden.unique_id],
@@ -177,11 +183,11 @@ class UC_MiniMaxH3ClipContinuationAccumulate(io.ComfyNode):
         return float("nan")
 
     @classmethod
-    def execute(cls, images, audio=None, target_batches=2, overlap_threshold=88.0, reset_counter=0, unique_id=None):
+    def execute(cls, images, audio=None, target_batches=2, overlap_threshold=88.0, first_batch_reset=False, unique_id=None):
         state_key = str(unique_id)
         state = _MINIMAX_H3_CLIP_ACCUMULATION.get(state_key)
-        if state is None or state["reset_counter"] != reset_counter:
-            state = {"image_batches": [], "audio_batches": [], "reset_counter": reset_counter}
+        if first_batch_reset or state is None:
+            state = {"image_batches": [], "audio_batches": []}
             _MINIMAX_H3_CLIP_ACCUMULATION[state_key] = state
         images = images.detach().cpu().clone()
         if state["image_batches"]:
