@@ -176,6 +176,12 @@ def test_clip_continuation_save_still_has_only_path_output():
 
 def test_clip_continuation_accumulate_blocks_then_joins_and_resets():
     node = utils_nodes.UC_MiniMaxH3ClipContinuationAccumulate
+    schema = node.define_schema()
+    inputs = {value.id: value for value in schema.inputs}
+    assert inputs["overlap_threshold"].default == 88.0
+    assert inputs["overlap_threshold"].min == 0.0
+    assert inputs["overlap_threshold"].max == 100.0
+    assert inputs["overlap_threshold"].step == 0.1
     first_images = torch.zeros(2, 8, 8, 3)
     second_images = torch.ones(3, 8, 8, 3)
     first_audio = {"waveform": torch.zeros(1, 1, 20), "sample_rate": 240}
