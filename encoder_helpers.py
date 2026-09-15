@@ -3522,7 +3522,7 @@ def execute_advanced_minimax_h3_image_to_video(
     keyframe_mode = first_frame is not None or last_frame is not None
     if continuation_media is not None and first_frame is not None:
         raise ValueError(
-            "MiniMax H3 Clip Continuation uses its saved tail frame 0; disconnect first_frame."
+            "MiniMax H3 Clip Continuation uses its saved tail frame 0. Disconnect first_frame."
         )
     if keyframe_mode and flat_references:
         raise ValueError(

@@ -103,7 +103,7 @@ class UC_MiniMaxH3ClipContinuationLoad(io.ComfyNode):
             description="Gets a saved clip ending so the next clip can continue it.",
             inputs=[
                 io.String.Input("filename_prefix", default="h3_clip_continuation/clip", tooltip="File name used by Save. Use the same name on both nodes."),
-                io.Int.Input("clip_index", default=0, min=0, max=99999, step=1, tooltip="Which earlier clip to continue from. Use 0 for your first clip; nothing is loaded."),
+                io.Int.Input("clip_index", default=0, min=0, max=99999, step=1, tooltip="Which earlier clip to continue from. Use 0 for your first clip. Nothing is loaded."),
             ],
             outputs=[MiniMaxH3ClipContinuationMedia.Output("continuation_media")],
         )

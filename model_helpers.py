@@ -370,7 +370,7 @@ def trim_minimax_h3_clip_continuation(
 def combine_minimax_h3_clip_continuations(
     clips: Sequence[torch.Tensor], audio_clips: Sequence[dict | None], fps: int = 24,
 ) -> tuple[torch.Tensor, dict | None]:
-    """Join already-trimmed H3 clips; audio is normalized to each clip duration."""
+    """Join already-trimmed H3 clips with audio normalized to each clip duration."""
     if not clips:
         raise ValueError("Connect at least one MiniMax H3 Clip Continuation clip.")
     if len(audio_clips) not in {0, len(clips)}:

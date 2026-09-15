@@ -2088,7 +2088,7 @@ class UC_AdvancedVisualConditioningEncode(io.ComfyNode):
         klein_vl = is_klein_vl_text_encoder(clip)
         if minimax_h3 and ref_latent_mode != "off":
             raise ValueError(
-                "MiniMax H3 reference latents require Core's MiniMax H3 reference conditioning node; set ref_latent_mode to off."
+                "MiniMax H3 reference latents require Core's MiniMax H3 reference conditioning node. Set ref_latent_mode to off."
             )
 
         def format_krea_prompt(user_prompt):
@@ -3761,7 +3761,7 @@ class UC_AdvancedMiniMaxH3ImageToVideo(io.ComfyNode):
                 ),
                 io.Image.Input("video", optional=True, tooltip="Complete Video frame batch at 24 fps. The configurator controls Qwen sampling and full, spaced, or disabled VAE motion guidance."),
                 io.Audio.Input("audio", optional=True, tooltip="Optional H3 reference audio. Missing audio from a video is ignored."),
-                io.Vae.Input("audio_vae", optional=True, lazy=True, tooltip="Required only when audio is present. Skipped when audio is absent; otherwise resamples and encodes the reference audio."),
+                io.Vae.Input("audio_vae", optional=True, lazy=True, tooltip="Required only when audio is present. When audio is absent, it skips resampling and encoding."),
                 io.Combo.Input(
                     "fusion_method", options=["conds_fusion", "token_fusion"],
                     default=cls.DEFAULT_FUSION_METHOD, optional=True,
@@ -3880,7 +3880,7 @@ class UC_MiniMaxH3ClipContinuationEncoder(UC_AdvancedMiniMaxH3ImageToVideo):
                 optional=True,
                 tooltip=(
                     "Optional output from MiniMax H3 Clip Continuation Load. Tail frame 0 "
-                    "owns target frame 0; interior frames are Qwen-only Video context; the "
+                    "owns target frame 0. Interior frames are Qwen-only Video context. The "
                     "final tail frame is a target-frame guide and appended Qwen Picture."
                 ),
             ),
@@ -4159,7 +4159,7 @@ class UC_Krea2TokenAttentionWeightTokenFusion(UC_Krea2TokenAttentionWeight):
         schema.display_name = cls.DISPLAY_NAME
         schema.is_deprecated = cls.DEPRECATED
         schema.is_experimental = True
-        schema.description = "Deprecated: use Krea2 Token Attention Weight with fusion_method set to token_fusion. Existing workflows retain token_fusion by default; attention weighting remains experimental."
+        schema.description = "Deprecated: use Krea2 Token Attention Weight with fusion_method set to token_fusion. Existing workflows retain token_fusion by default. Attention weighting remains experimental."
         return schema
 
 
@@ -4191,7 +4191,7 @@ class UC_AdvMiniMaxH3ImageToVideoTemporalFusion(UC_AdvancedMiniMaxH3ImageToVideo
         schema.display_name = "Adv MiniMax H3 Image to Video (Temporal Fusion)"
         schema.description = "Experimentally fuses corresponding video visual blocks before or after Qwen encoding, preserving the ordinary video token budget."
         selector = next(value for value in schema.inputs if value.id == "fusion_method")
-        selector.tooltip = "Temporal fusion target: corresponding video visual blocks. conds_fusion blends their conditioning after separate Qwen encodes; token_fusion blends their features and DeepStack before one Qwen encode per schedule. Temporal density and consensus/spatial settings remain in their existing configurators."
+        selector.tooltip = "Temporal fusion target: corresponding video visual blocks. conds_fusion blends their conditioning after separate Qwen encodes. token_fusion blends their features and DeepStack before one Qwen encode per schedule. Temporal density and consensus/spatial settings remain in their existing configurators."
         schema.inputs = [value for value in schema.inputs if value.id not in ("fusion_images", "fusion_method")]
         schema.inputs.append(TextBlendConfig.Input("text_blend_config", optional=True, tooltip="Temporal consensus settings. Disconnected uses custom index consensus with norm rescaling."))
         schema.inputs.append(selector)
