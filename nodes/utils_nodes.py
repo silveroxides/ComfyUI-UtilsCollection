@@ -103,15 +103,16 @@ class UC_MiniMaxH3ClipContinuationSave(io.ComfyNode):
                 io.Combo.Input("tail_frames", options=["5", "22", "39", "56"], default="22", tooltip="How many ending frames to keep for the next clip."),
                 io.String.Input("filename_prefix", default="h3_clip_continuation/clip", tooltip="File name used to pair this node with Load. Use the same name on both nodes."),
                 io.Int.Input("clip_index", default=1, min=1, max=99999, step=1, tooltip="Number for this clip. Start with 1, then increase by 1 for each new clip. Re-running a number replaces that clip."),
+                io.Int.Input("padded_frames", default=0, min=0, max=99999, step=1, optional=True, tooltip="Trailing padded frames to skip at the end of the clip (e.g. from H3 duration rounding or final segment padding). Tail frames will be extracted from active content immediately before this padding."),
             ],
             outputs=[io.String.Output("path")],
             is_output_node=True,
         )
 
     @classmethod
-    def execute(cls, images, audio=None, tail_frames="22", filename_prefix="h3_clip_continuation/clip", clip_index=1):
+    def execute(cls, images, audio=None, tail_frames="22", filename_prefix="h3_clip_continuation/clip", clip_index=1, padded_frames=0):
         path = save_minimax_h3_clip_continuation_media(
-            images, int(tail_frames), filename_prefix, clip_index, audio=audio
+            images, int(tail_frames), filename_prefix, clip_index, audio=audio, padded_frames=int(padded_frames) if padded_frames is not None else 0,
         )
         return io.NodeOutput(path)
 

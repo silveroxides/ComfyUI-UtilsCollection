@@ -787,7 +787,7 @@ def test_h3_reference_node_merges_continuation_media(monkeypatch, merge_mode):
         assert frames.shape[0] == 22
     else:
         assert frames[5, 0, 0, 0] == 0.0
-        assert frames.shape[0] == 27
+        assert frames.shape[0] == 22
     audio = output.args[1]
     tail_samples = round(5 / 24 * 32000)
     torch.testing.assert_close(audio["waveform"][..., :tail_samples], torch.full((1, 1, tail_samples), 88.0))
@@ -813,6 +813,25 @@ def test_h3_reference_node_audio_only_continuation_media(monkeypatch):
     assert frames[0, 0, 0, 0] == 0.0
     audio = output.args[1]
     assert audio["waveform"][0, 0, 0] == 88.0
+
+
+@pytest.mark.parametrize("tail", [5, 22, 39, 56])
+def test_h3_reference_node_prepend_continuation_zero_padding(tail):
+    components = types.SimpleNamespace(
+        images=torch.zeros(240, 32, 32, 3), frame_rate=24, audio=None,
+    )
+    cont_frames = torch.zeros(tail, 32, 32, 3)
+    continuation = {
+        "format_version": 1, "frame_rate": 24, "frames": cont_frames,
+        "video_merge_mode": "prepend",
+    }
+    frames, audio, _, _, length, _, preview = image_helpers.prepare_h3_reference_components(
+        components, 0.5, segment_count=5, segment_index=1,
+        continuation_media=continuation, spatially_prepared=True,
+    )
+    assert (frames.shape[0] - 5) % 17 == 0
+    assert frames.shape[0] == length
+    assert preview["padded_frames"] == 0
 
 
 def test_h3_segment_count_can_exceed_available_frames():

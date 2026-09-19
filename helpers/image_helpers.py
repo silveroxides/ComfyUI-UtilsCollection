@@ -1247,22 +1247,32 @@ def prepare_h3_reference_components(components, megapixels: float, duration_seco
     source_count = source_frames.shape[0]
     source_seconds = source_count / source_rate
     segment_end = None
+    prepended_t = 0
+    if continuation_media is not None and continuation_media.get("video_merge_mode", "replace") == "prepend":
+        from .encoder_helpers import validate_minimax_h3_clip_continuation_media
+        c_frames = validate_minimax_h3_clip_continuation_media(continuation_media)
+        if c_frames is not None:
+            prepended_t = c_frames.shape[0]
+
     if segment_count:
         if segment_count < 0 or not 0 <= segment_index < segment_count:
             raise ValueError("Segment count must be positive and segment index must be between 0 and count minus 1.")
         total_frames = max(1, round(source_seconds * 24))
         target_f = total_frames / segment_count
-        k = max(0, round((target_f - 5) / 17))
-        while k > 0 and (segment_count - 1) * (5 + 17 * k) >= total_frames:
+        R = (5 - prepended_t) % 17
+        k = max(0, round((target_f - R) / 17))
+        if R == 0 and k == 0:
+            k = 1
+        while (R > 0 and k > 0 or R == 0 and k > 1) and (segment_count - 1) * (R + 17 * k) >= total_frames:
             k -= 1
-        non_final_length = 5 + 17 * k
+        non_final_length = R + 17 * k
         start_frame = segment_index * non_final_length
         if segment_index < segment_count - 1:
             frame_count = non_final_length
             segment_end = min(total_frames, start_frame + frame_count)
         else:
             remaining_frames = max(1, total_frames - start_frame)
-            frame_count = h3_video_length_from_seconds(remaining_frames / 24)
+            frame_count = h3_video_length_from_seconds((remaining_frames + prepended_t) / 24) - prepended_t
             segment_end = total_frames
     else:
         start_frame = h3_video_length_from_seconds(start_at_timestamp) if start_at_timestamp > 0 else 0

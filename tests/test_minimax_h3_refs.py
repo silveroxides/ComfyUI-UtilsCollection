@@ -169,6 +169,49 @@ def test_clip_continuation_load_media_type_filtering(monkeypatch, tmp_path):
     assert audio_only["audio"] is not None
 
 
+@pytest.mark.parametrize("tail", [5, 22, 39, 56])
+def test_clip_continuation_save_skips_trailing_padded_frames(monkeypatch, tmp_path, tail):
+    monkeypatch.setattr(model_helpers.folder_paths, "get_output_directory", lambda: str(tmp_path))
+    frames = torch.arange(58, dtype=torch.float32).view(58, 1, 1, 1).expand(58, 8, 8, 3)
+    pad_frames = torch.full((12, 8, 8, 3), 999.0)
+    full_frames = torch.cat((frames, pad_frames), dim=0)
+    pad_samples = round(12 / 24 * 40) * 800
+    tail_samples = round(tail / 24 * 40) * 800
+    audio_active = torch.arange(100000, dtype=torch.float32).view(1, 1, -1).repeat(1, 2, 1)
+    audio_pad = torch.full((1, 2, pad_samples), -999.0)
+    full_audio = {"waveform": torch.cat((audio_active, audio_pad), dim=-1), "sample_rate": 32000}
+
+    path = model_helpers.save_minimax_h3_clip_continuation_media(
+        full_frames, tail, f"h3_clip_continuation/clip_{tail}", 1,
+        audio=full_audio, padded_frames=12,
+    )
+    loaded = model_helpers.load_minimax_h3_clip_continuation_media(
+        f"h3_clip_continuation/clip_{tail}", 1,
+    )
+    assert loaded["frames"].shape[0] == tail
+    assert not loaded["frames"].eq(999.0).any()
+    torch.testing.assert_close(loaded["frames"], frames[-tail:])
+    assert loaded["audio"]["waveform"].shape == (1, 2, tail_samples)
+    assert not loaded["audio"]["waveform"].eq(-999.0).any()
+    torch.testing.assert_close(loaded["audio"]["waveform"], audio_active[..., -tail_samples:])
+
+
+def test_clip_continuation_save_node_accepts_padded_frames(monkeypatch, tmp_path):
+    monkeypatch.setattr(model_helpers.folder_paths, "get_output_directory", lambda: str(tmp_path))
+    schema = utils_nodes.UC_MiniMaxH3ClipContinuationSave.define_schema()
+    inputs = {value.id: value for value in schema.inputs}
+    assert inputs["padded_frames"].default == 0
+    frames = torch.arange(34, dtype=torch.float32).view(34, 1, 1, 1).expand(34, 8, 8, 3)
+    pad = torch.full((12, 8, 8, 3), 777.0)
+    output = utils_nodes.UC_MiniMaxH3ClipContinuationSave.execute(
+        torch.cat((frames, pad), dim=0), tail_frames="22", filename_prefix="h3_clip_continuation/save_pad",
+        clip_index=1, padded_frames=12,
+    )
+    loaded = model_helpers.load_minimax_h3_clip_continuation_media("h3_clip_continuation/save_pad", 1)
+    assert loaded["frames"].shape[0] == 22
+    assert not loaded["frames"].eq(777.0).any()
+
+
 def test_clip_continuation_rejects_short_tail_and_output_escape(monkeypatch, tmp_path):
     monkeypatch.setattr(model_helpers.folder_paths, "get_output_directory", lambda: str(tmp_path))
     with pytest.raises(ValueError, match="needs 22 frames"):
