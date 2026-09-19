@@ -1324,10 +1324,21 @@ def prepare_h3_reference_components(components, megapixels: float, duration_seco
         from .encoder_helpers import validate_minimax_h3_clip_continuation_media
         cont_frames = validate_minimax_h3_clip_continuation_media(continuation_media)
         merge_mode = continuation_media.get("video_merge_mode", "replace")
-        if cont_frames.shape[1:3] != (output_height, output_width):
-            cont_frames = resize_nchw(
-                cont_frames.movedim(-1, 1), output_width, output_height, "lanczos", "center"
-            ).clamp(0.0, 1.0).movedim(1, -1).contiguous()
+        if cont_frames is not None:
+            if cont_frames.shape[1:3] != (output_height, output_width):
+                cont_frames = resize_nchw(
+                    cont_frames.movedim(-1, 1), output_width, output_height, "lanczos", "center"
+                ).clamp(0.0, 1.0).movedim(1, -1).contiguous()
+            if merge_mode == "replace":
+                tail_count = min(cont_frames.shape[0], prepared_frames.shape[0])
+                prepared_frames = torch.cat((cont_frames[:tail_count], prepared_frames[tail_count:]), dim=0)
+                video_frames = prepared_frames
+            elif merge_mode == "prepend":
+                prepared_frames = torch.cat((cont_frames, prepared_frames), dim=0)
+                video_frames = prepared_frames
+                frame_count = prepared_frames.shape[0]
+                preview["length"] = frame_count
+
         cont_audio = continuation_media.get("audio")
         cont_waveform = None
         if cont_audio is not None and cont_audio.get("waveform") is not None and cont_audio["waveform"].numel() > 0:
@@ -1340,28 +1351,17 @@ def prepare_h3_reference_components(components, megapixels: float, duration_seco
             elif cont_waveform.shape[1] == 2 and audio_samples.shape[1] == 1:
                 cont_waveform = cont_waveform.mean(dim=1, keepdim=True)
 
-        if merge_mode == "replace":
-            tail_count = min(cont_frames.shape[0], prepared_frames.shape[0])
-            prepared_frames = torch.cat((cont_frames[:tail_count], prepared_frames[tail_count:]), dim=0)
-            video_frames = prepared_frames
-            if cont_waveform is not None and audio_samples.numel() > 0:
-                tail_samples = min(round(tail_count / 24 * 32000), audio_samples.shape[-1], cont_waveform.shape[-1])
+            if merge_mode == "replace":
+                tail_frames_count = cont_frames.shape[0] if cont_frames is not None else round(cont_waveform.shape[-1] * 24 / 32000)
+                tail_samples = min(round(tail_frames_count / 24 * 32000), audio_samples.shape[-1], cont_waveform.shape[-1])
                 audio_samples = torch.cat((cont_waveform[..., :tail_samples], audio_samples[..., tail_samples:]), dim=-1)
-        elif merge_mode == "prepend":
-            prepared_frames = torch.cat((cont_frames, prepared_frames), dim=0)
-            video_frames = prepared_frames
-            frame_count = prepared_frames.shape[0]
-            if cont_waveform is not None:
-                cont_samples = round(cont_frames.shape[0] / 24 * 32000)
-                cont_padded = torch.nn.functional.pad(cont_waveform[..., :cont_samples], (0, max(0, cont_samples - cont_waveform.shape[-1])))
-                audio_samples = torch.cat((cont_padded, audio_samples), dim=-1)
-            else:
-                cont_silence = torch.zeros(1, audio_samples.shape[1], round(cont_frames.shape[0] / 24 * 32000))
-                audio_samples = torch.cat((cont_silence, audio_samples), dim=-1)
-            audio_window = round(frame_count / 24 * 32000)
-            aligned_samples = ((audio_window + 799) // 800) * 800
-            audio_samples = audio_samples[..., :audio_window]
-            audio_samples = torch.nn.functional.pad(audio_samples, (0, aligned_samples - audio_samples.shape[-1]))
+            elif merge_mode == "prepend":
+                cont_samples = cont_waveform.shape[-1]
+                audio_samples = torch.cat((cont_waveform, audio_samples), dim=-1)
+                audio_window = round(frame_count / 24 * 32000)
+                aligned_samples = ((audio_window + 799) // 800) * 800
+                audio_samples = audio_samples[..., :audio_window]
+                audio_samples = torch.nn.functional.pad(audio_samples, (0, aligned_samples - audio_samples.shape[-1]))
             preview["length"] = frame_count
     prepared_audio = {"waveform": audio_samples, "sample_rate": 32000}
     return prepared_frames, prepared_audio, output_width, output_height, frame_count, video_frames, preview

@@ -148,6 +148,27 @@ def test_clip_continuation_save_audio_aligns_to_h3_audio_blocks(monkeypatch, tmp
     assert loaded["audio"]["sample_rate"] == 32000
 
 
+def test_clip_continuation_load_media_type_filtering(monkeypatch, tmp_path):
+    monkeypatch.setattr(model_helpers.folder_paths, "get_output_directory", lambda: str(tmp_path))
+    frames = torch.zeros(22, 8, 8, 3)
+    audio = {"waveform": torch.ones(1, 2, 29600), "sample_rate": 32000}
+    model_helpers.save_minimax_h3_clip_continuation_media(
+        frames, 22, "h3_clip_continuation/clip", 1, audio=audio,
+    )
+    load_node = utils_nodes.UC_MiniMaxH3ClipContinuationLoad
+    both = load_node.execute("h3_clip_continuation/clip", 1, "replace", "video+audio").args[0]
+    assert both["frames"] is not None
+    assert both["audio"] is not None
+
+    video_only = load_node.execute("h3_clip_continuation/clip", 1, "replace", "video only").args[0]
+    assert video_only["frames"] is not None
+    assert video_only["audio"] is None
+
+    audio_only = load_node.execute("h3_clip_continuation/clip", 1, "replace", "audio only").args[0]
+    assert audio_only["frames"] is None
+    assert audio_only["audio"] is not None
+
+
 def test_clip_continuation_rejects_short_tail_and_output_escape(monkeypatch, tmp_path):
     monkeypatch.setattr(model_helpers.folder_paths, "get_output_directory", lambda: str(tmp_path))
     with pytest.raises(ValueError, match="needs 22 frames"):
@@ -215,6 +236,8 @@ def test_clip_continuation_accumulate_blocks_then_joins_and_resets():
     assert inputs["current_entry"].display_name == "Clip number"
     load_schema = utils_nodes.UC_MiniMaxH3ClipContinuationLoad.define_schema()
     load_inputs = {value.id: value for value in load_schema.inputs}
+    assert load_inputs["media_type"].default == "video+audio"
+    assert load_inputs["media_type"].options == ["video+audio", "video only", "audio only"]
     assert load_inputs["video_merge_mode"].default == "replace"
     assert load_inputs["video_merge_mode"].options == ["replace", "prepend", "temporal fusion"]
     first_images = torch.zeros(2, 8, 8, 3)

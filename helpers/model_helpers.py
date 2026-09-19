@@ -458,11 +458,13 @@ def snapshot_minimax_h3_clip_continuation_media(media: dict | None) -> dict | No
         return None
     frames = validate_minimax_h3_clip_continuation_media(media)
     snapshot = dict(media)
-    snapshot["frames"] = frames.detach().cpu().clone()
+    snapshot["frames"] = frames.detach().cpu().clone() if frames is not None else None
     if media.get("audio") is not None:
         _continuation_audio_waveform(media["audio"])
         snapshot["audio"] = dict(media["audio"])
         snapshot["audio"]["waveform"] = media["audio"]["waveform"].detach().cpu().clone()
+    else:
+        snapshot["audio"] = None
     return snapshot
 
 

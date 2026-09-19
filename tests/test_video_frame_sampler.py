@@ -793,6 +793,28 @@ def test_h3_reference_node_merges_continuation_media(monkeypatch, merge_mode):
     torch.testing.assert_close(audio["waveform"][..., :tail_samples], torch.full((1, 1, tail_samples), 88.0))
 
 
+def test_h3_reference_node_audio_only_continuation_media(monkeypatch):
+    components = types.SimpleNamespace(
+        images=torch.arange(72, dtype=torch.float32).view(-1, 1, 1, 1).expand(-1, 32, 32, 3),
+        frame_rate=24,
+        audio={"waveform": torch.arange(72000, dtype=torch.float32).view(1, 1, -1), "sample_rate": 24000},
+    )
+    monkeypatch.setattr(utils_nodes, "cached_h3_reference_components", lambda *args: components)
+    cont_audio = {"waveform": torch.full((1, 1, 10000), 88.0), "sample_rate": 32000}
+    continuation = {
+        "format_version": 1, "frame_rate": 24,
+        "frames": None, "audio": cont_audio,
+        "video_merge_mode": "replace",
+    }
+    output = utils_nodes.UC_MiniMaxH3RefVid.execute(
+        object(), segment_count=3, segment_index=0, enable_whisper=False, continuation_media=continuation,
+    )
+    frames = output.args[0]
+    assert frames[0, 0, 0, 0] == 0.0
+    audio = output.args[1]
+    assert audio["waveform"][0, 0, 0] == 88.0
+
+
 def test_h3_segment_count_can_exceed_available_frames():
     components = types.SimpleNamespace(
         images=torch.ones(1, 32, 32, 3), frame_rate=24,

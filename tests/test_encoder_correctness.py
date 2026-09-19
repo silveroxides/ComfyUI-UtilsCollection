@@ -870,6 +870,33 @@ def test_clip_continuation_replace_mode_slices_reference_audio():
     assert ref_audio["ref_audio_t"] == 56
 
 
+def test_clip_continuation_encoder_supports_audio_only_continuation():
+    class MockAudioVAE:
+        audio_sample_rate = 32000
+
+        def encode(self, waveform):
+            return torch.ones(1, 32, 2, waveform.shape[1] // 800)
+
+    clip = _MiniMaxH3TestClip()
+    continuation = {
+        "format_version": 1, "frame_rate": 24,
+        "frames": None,
+        "audio": {"waveform": torch.zeros(1, 2, 29600), "sample_rate": 32000},
+        "video_merge_mode": "replace",
+    }
+    conditioning, _ = encoder_helpers.execute_advanced_minimax_h3_image_to_video(
+        clip, None, "prompt", 64, 64, 56,
+        continuation_media=continuation,
+        audio_vae=MockAudioVAE(),
+        enable_caching="disabled",
+    )
+    metadata = conditioning[0][1]
+    audio_kf = next(kf for kf in metadata["minimax_keyframes"] if "audio_latent" in kf)
+    assert audio_kf["resolved_frame_index"] == 0
+    assert audio_kf["audio_latent"].shape[-1] == 37
+    assert all("latent" not in kf for kf in metadata["minimax_keyframes"])
+
+
 def test_minimax_h3_reference_video_matches_core_resize_trim_and_payload(monkeypatch):
     resized = []
 

@@ -613,13 +613,15 @@ def _encode_minimax_h3_audio_reference(audio, audio_vae, cache=None):
     return {"kind": "audio", "ref_audio_t": latent.shape[-1], "audio_latent": latent}
 
 
-def validate_minimax_h3_clip_continuation_media(media) -> torch.Tensor:
+def validate_minimax_h3_clip_continuation_media(media) -> torch.Tensor | None:
     """Return saved 24-fps RGB continuation frames with a strict wire contract."""
     if not isinstance(media, dict):
         raise ValueError("MiniMax H3 Clip Continuation media must be a dictionary.")
     if media.get("format_version") != 1 or media.get("frame_rate") != 24:
         raise ValueError("MiniMax H3 Clip Continuation media must use format version 1 at 24 fps.")
     frames = media.get("frames")
+    if frames is None:
+        return None
     if (
         not torch.is_tensor(frames)
         or frames.ndim != 4
@@ -633,9 +635,11 @@ def validate_minimax_h3_clip_continuation_media(media) -> torch.Tensor:
     return frames[..., :3]
 
 
-def prepare_minimax_h3_clip_continuation_frames(media, maximum_frames: int) -> torch.Tensor:
+def prepare_minimax_h3_clip_continuation_frames(media, maximum_frames: int) -> torch.Tensor | None:
     """Return an index-preserving saved tail that fits the target video."""
     frames = validate_minimax_h3_clip_continuation_media(media)
+    if frames is None:
+        return None
     if frames.shape[0] > maximum_frames:
         raise ValueError(
             "MiniMax H3 Clip Continuation tail frames cannot exceed the target frame count."
@@ -3680,9 +3684,14 @@ def execute_advanced_minimax_h3_image_to_video(
     if active_audio is not None and continuation_media is not None:
         merge_mode = continuation_media.get("video_merge_mode", "replace")
         cont_audio = continuation_media.get("audio")
-        if merge_mode == "replace" and continuation_frames is not None and cont_audio is not None:
+        if merge_mode == "replace" and cont_audio is not None:
             sample_rate = active_audio.get("sample_rate", 32000)
-            tail_samples = round(continuation_frames.shape[0] * sample_rate / 24)
+            if continuation_frames is not None:
+                tail_samples = round(continuation_frames.shape[0] * sample_rate / 24)
+            elif torch.is_tensor(cont_audio.get("waveform")):
+                tail_samples = cont_audio["waveform"].shape[-1]
+            else:
+                tail_samples = 0
             wave = active_audio.get("waveform")
             if wave is not None and wave.shape[-1] > tail_samples:
                 active_audio = {"waveform": wave[..., tail_samples:], "sample_rate": sample_rate}

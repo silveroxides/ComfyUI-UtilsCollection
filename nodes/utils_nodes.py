@@ -66,7 +66,12 @@ class UC_MiniMaxH3RefVid(io.ComfyNode):
         if continuation_media is not None:
             frames = continuation_media.get("frames")
             f_hash = f"{frames.shape}:{float(frames.mean())}" if frames is not None and torch.is_tensor(frames) else ""
-            continuation_id = f"{f_hash}:{continuation_media.get('video_merge_mode', '')}"
+            audio_entry = continuation_media.get("audio")
+            a_hash = ""
+            if audio_entry is not None and isinstance(audio_entry, dict) and torch.is_tensor(audio_entry.get("waveform")):
+                w = audio_entry["waveform"]
+                a_hash = f"{w.shape}:{float(w.mean())}"
+            continuation_id = f"{f_hash}:{a_hash}:{continuation_media.get('video_merge_mode', '')}:{continuation_media.get('media_type', '')}"
         return f"{video_hash}:{megapixels}:{duration_seconds}:{start_at_timestamp}:{timestamp_format}:{enable_whisper}:{segment_count}:{segment_index}:{id(whisper_model)}:{continuation_id}"
 
     @classmethod
@@ -122,31 +127,41 @@ class UC_MiniMaxH3ClipContinuationLoad(io.ComfyNode):
             inputs=[
                 io.String.Input("filename_prefix", default="h3_clip_continuation/clip", tooltip="File name used by Save. Use the same name on both nodes."),
                 io.Int.Input("clip_index", default=0, min=0, max=99999, step=1, tooltip="Which earlier clip to continue from. Use 0 for your first clip. Nothing is loaded."),
+                io.Combo.Input("media_type", options=["video+audio", "video only", "audio only"], default="video+audio", tooltip="Select which continuation components to load. Video only ignores saved audio; audio only ignores saved video frames."),
                 io.Combo.Input("video_merge_mode", options=["replace", "prepend", "temporal fusion"], default="replace", tooltip="Replace substitutes opening Qwen context. Prepend shifts reference video later. Temporal fusion combines saved interior frames with reference frames at the same times through Qwen temporal consensus, preserving the reference timeline and prompt. Fusion requires an additional Qwen encoding lane.", advanced=True),
             ],
             outputs=[MiniMaxH3ClipContinuationMedia.Output("continuation_media")],
         )
 
     @classmethod
-    def IS_CHANGED(cls, filename_prefix="h3_clip_continuation/clip", clip_index=0, video_merge_mode="replace"):
+    def IS_CHANGED(cls, filename_prefix="h3_clip_continuation/clip", clip_index=0, video_merge_mode="replace", media_type="video+audio"):
         if int(clip_index) <= 0:
             return "disabled"
         if video_merge_mode not in ("replace", "prepend", "temporal fusion"):
             raise ValueError("Unsupported MiniMax H3 continuation video merge mode.")
+        if media_type not in ("video+audio", "video only", "audio only"):
+            raise ValueError("Unsupported MiniMax H3 continuation media type.")
         try:
             fingerprint = get_minimax_h3_clip_continuation_fingerprint(filename_prefix, int(clip_index))
-            return f"{fingerprint}:{video_merge_mode}"
+            return f"{fingerprint}:{video_merge_mode}:{media_type}"
         except FileNotFoundError:
             return float("nan")
 
     @classmethod
-    def execute(cls, filename_prefix="h3_clip_continuation/clip", clip_index=0, video_merge_mode="replace"):
+    def execute(cls, filename_prefix="h3_clip_continuation/clip", clip_index=0, video_merge_mode="replace", media_type="video+audio"):
         if int(clip_index) <= 0:
             return io.NodeOutput(None)
         if video_merge_mode not in ("replace", "prepend", "temporal fusion"):
             raise ValueError("Unsupported MiniMax H3 continuation video merge mode.")
+        if media_type not in ("video+audio", "video only", "audio only"):
+            raise ValueError("Unsupported MiniMax H3 continuation media type.")
         media = load_minimax_h3_clip_continuation_media(filename_prefix, int(clip_index))
         media["video_merge_mode"] = video_merge_mode
+        media["media_type"] = media_type
+        if media_type == "video only":
+            media["audio"] = None
+        elif media_type == "audio only":
+            media["frames"] = None
         return io.NodeOutput(media)
 
 
