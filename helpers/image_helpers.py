@@ -1248,25 +1248,39 @@ def prepare_h3_reference_components(components, megapixels: float, duration_seco
     source_seconds = source_count / source_rate
     segment_end = None
     prepended_t = 0
-    if continuation_media is not None and continuation_media.get("video_merge_mode", "replace") == "prepend":
-        from .encoder_helpers import validate_minimax_h3_clip_continuation_media
-        c_frames = validate_minimax_h3_clip_continuation_media(continuation_media)
-        if c_frames is not None:
-            prepended_t = c_frames.shape[0]
+    trimmed_pad = 0
+    if continuation_media is not None:
+        trimmed_pad = int(continuation_media.get("padded_frames", 0) or 0)
+        if continuation_media.get("video_merge_mode", "replace") == "prepend":
+            from .encoder_helpers import validate_minimax_h3_clip_continuation_media
+            c_frames = validate_minimax_h3_clip_continuation_media(continuation_media)
+            if c_frames is not None:
+                prepended_t = c_frames.shape[0]
 
     if segment_count:
         if segment_count < 0 or not 0 <= segment_index < segment_count:
             raise ValueError("Segment count must be positive and segment index must be between 0 and count minus 1.")
         total_frames = max(1, round(source_seconds * 24))
         target_f = total_frames / segment_count
-        R = (5 - prepended_t) % 17
-        k = max(0, round((target_f - R) / 17))
-        if R == 0 and k == 0:
-            k = 1
-        while (R > 0 and k > 0 or R == 0 and k > 1) and (segment_count - 1) * (R + 17 * k) >= total_frames:
-            k -= 1
-        non_final_length = R + 17 * k
-        start_frame = segment_index * non_final_length
+        k0 = max(0, round((target_f - 5) / 17))
+        while k0 > 0 and (segment_count - 1) * (5 + 17 * k0) >= total_frames:
+            k0 -= 1
+        L0 = 5 + 17 * k0
+
+        if prepended_t > 0:
+            R = (5 - prepended_t) % 17
+            k = max(0, round((target_f - R) / 17))
+            if R == 0 and k == 0:
+                k = 1
+            while (R > 0 and k > 0 or R == 0 and k > 1) and (L0 + (segment_count - 2) * (R + 17 * k) >= total_frames):
+                k -= 1
+            non_final_length = R + 17 * k
+            raw_start = 0 if segment_index == 0 else L0 + (segment_index - 1) * non_final_length
+        else:
+            non_final_length = L0
+            raw_start = segment_index * non_final_length
+
+        start_frame = max(0, min(total_frames - 1, raw_start - trimmed_pad))
         if segment_index < segment_count - 1:
             frame_count = non_final_length
             segment_end = min(total_frames, start_frame + frame_count)

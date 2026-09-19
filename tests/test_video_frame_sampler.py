@@ -834,6 +834,44 @@ def test_h3_reference_node_prepend_continuation_zero_padding(tail):
     assert preview["padded_frames"] == 0
 
 
+def test_h3_reference_components_fifty_second_five_segments_chain():
+    total_frames = 1199
+    source_rate = 24.0
+    images = torch.arange(total_frames, dtype=torch.float32).view(-1, 1, 1, 1).expand(-1, 32, 32, 3)
+    waveform = torch.arange(round(total_frames / 24 * 32000), dtype=torch.float32).view(1, 1, -1).repeat(1, 2, 1)
+    components = types.SimpleNamespace(images=images, frame_rate=source_rate, audio={"waveform": waveform, "sample_rate": 32000})
+
+    prev_end = -1
+    for seg_idx in range(5):
+        cont = None
+        if seg_idx > 0:
+            cont = {
+                "format_version": 1, "frame_rate": 24,
+                "frames": torch.full((22, 32, 32, 3), 999.0),
+                "audio": {"waveform": torch.full((1, 2, 29600), 999.0), "sample_rate": 32000},
+                "video_merge_mode": "prepend",
+            }
+        frames, audio, _, _, length, _, preview = image_helpers.prepare_h3_reference_components(
+            components, 0.5, segment_count=5, segment_index=seg_idx,
+            continuation_media=cont, spatially_prepared=True,
+        )
+        start = preview["start_frame"]
+        end = preview["source_end_frame"]
+        if seg_idx < 4:
+            assert preview["padded_frames"] == 0
+            assert (length - 5) % 17 == 0
+        if seg_idx == 0:
+            assert start == 0
+            assert end == 242
+            assert length == 243
+        else:
+            assert start == prev_end + 1
+            if seg_idx < 4:
+                assert length == 260
+        prev_end = end
+    assert prev_end == 1198
+
+
 def test_h3_segment_count_can_exceed_available_frames():
     components = types.SimpleNamespace(
         images=torch.ones(1, 32, 32, 3), frame_rate=24,

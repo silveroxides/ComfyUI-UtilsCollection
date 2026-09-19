@@ -8,7 +8,7 @@ export function h3VideoLengthFromSeconds(seconds) {
   return frames + ((((5 - (frames % 17)) % 17) + 17) % 17);
 }
 
-export function h3ReferenceFrameRange(startSeconds, durationSeconds, sourceSeconds = null, segmentCount = 0, segmentIndex = 0, prependedFrames = 0) {
+export function h3ReferenceFrameRange(startSeconds, durationSeconds, sourceSeconds = null, segmentCount = 0, segmentIndex = 0, prependedFrames = 0, trimmedPad = 0) {
   if (segmentCount !== 0) {
     if (!Number.isInteger(segmentCount) || segmentCount < 1
         || !Number.isInteger(segmentIndex) || segmentIndex < 0 || segmentIndex >= segmentCount
@@ -19,15 +19,26 @@ export function h3ReferenceFrameRange(startSeconds, durationSeconds, sourceSecon
     const rounded = Math.round(value);
     const total = Math.max(1, Math.abs(value % 1) === 0.5 && rounded % 2 !== 0 ? rounded - 1 : rounded);
     const targetF = total / segmentCount;
-    const prependedT = Math.max(0, Number.isInteger(prependedFrames) ? prependedFrames : 0);
-    const R = ((((5 - (prependedT % 17)) % 17) + 17) % 17);
-    let k = Math.max(0, Math.round((targetF - R) / 17));
-    if (R === 0 && k === 0) k = 1;
-    while (((R > 0 && k > 0) || (R === 0 && k > 1)) && (segmentCount - 1) * (R + 17 * k) >= total) {
-      k--;
+    let k0 = Math.max(0, Math.round((targetF - 5) / 17));
+    while (k0 > 0 && (segmentCount - 1) * (5 + 17 * k0) >= total) {
+      k0--;
     }
-    const nonFinalLength = R + 17 * k;
-    const start = segmentIndex * nonFinalLength;
+    const L0 = 5 + 17 * k0;
+    const prependedT = Math.max(0, Number.isInteger(prependedFrames) ? prependedFrames : 0);
+    const padOffset = Math.max(0, Number.isInteger(trimmedPad) ? trimmedPad : 0);
+    let nonFinalLength = L0;
+    let rawStart = segmentIndex * L0;
+    if (prependedT > 0) {
+      const R = ((((5 - (prependedT % 17)) % 17) + 17) % 17);
+      let k = Math.max(0, Math.round((targetF - R) / 17));
+      if (R === 0 && k === 0) k = 1;
+      while (((R > 0 && k > 0) || (R === 0 && k > 1)) && (L0 + (segmentCount - 2) * (R + 17 * k) >= total)) {
+        k--;
+      }
+      nonFinalLength = R + 17 * k;
+      rawStart = segmentIndex === 0 ? 0 : L0 + (segmentIndex - 1) * nonFinalLength;
+    }
+    const start = Math.max(0, Math.min(total - 1, rawStart - padOffset));
     if (segmentIndex < segmentCount - 1) {
       const length = nonFinalLength;
       const stop = Math.min(total, start + length);

@@ -845,6 +845,23 @@ def save_minimax_h3_clip_continuation_media(
         raise ValueError("Padded frames must be non-negative.")
     media = {"format_version": 1, "frame_rate": 24, "frames": frames}
     frames = validate_minimax_h3_clip_continuation_media(media)
+    if pad == 0 and frames.shape[0] > tail_frames:
+        last_frame = frames[-1]
+        auto_pad = 0
+        for i in range(2, min(frames.shape[0] - tail_frames + 1, 18)):
+            if (frames[-i] == last_frame).all():
+                auto_pad = i - 1
+            else:
+                break
+        if auto_pad > 0:
+            is_silent = True
+            if audio is not None and isinstance(audio.get("waveform"), torch.Tensor):
+                rate = audio.get("sample_rate", 32000)
+                pad_s = round(auto_pad * rate / 24)
+                if pad_s > 0 and audio["waveform"][..., -pad_s:].abs().max() > 1e-4:
+                    is_silent = False
+            if is_silent:
+                pad = auto_pad
     if frames.shape[0] < tail_frames + pad:
         detail = f"needs {tail_frames} frames" if not pad else f"needs {tail_frames + pad} frames ({tail_frames} tail + {pad} padded)"
         raise ValueError(
@@ -976,6 +993,8 @@ def _load_minimax_h3_clip_continuation_media_path(path: Path) -> dict:
         if metadata.get("audio_shape") != list(audio.shape) or metadata.get("audio_sample_rate") is None:
             raise ValueError("MiniMax H3 Clip Continuation file has invalid audio metadata.")
         result["audio"] = {"waveform": audio, "sample_rate": metadata["audio_sample_rate"]}
+    if "padded_frames" in metadata:
+        result["padded_frames"] = metadata["padded_frames"]
     return result
 
 
