@@ -2991,24 +2991,24 @@ def partition_reference_phrase(words, counts):
     return groups
 
 
-def transcribe_reference_audio(whisper_model, source_audio, prepared_audio, timestamp_format, frame_count):
-    """Return clip-relative speech lines; never transcribe synthetic no-track audio."""
-    if whisper_model is None or source_audio is None:
-        return ""
-    waveform = source_audio.get("waveform")
-    if waveform is None or waveform.numel() == 0:
-        return ""
-    _, segment_batches, languages = run_whisper(whisper_model, prepared_audio, "transcribe", "auto", word_timestamps=True)
-    if len(segment_batches) != 1:
-        raise ValueError("H3 reference transcription requires one audio recording.")
-    segments = json.loads(segment_batches[0])
-    duration = frame_count / 24
+def format_reference_transcript_phrases(segments, language, timestamp_format="00.000s", duration=None):
+    """Format word-timed phrases into syllable-partitioned timestamped lines."""
     phrases, phrase = [], []
-    for word in (word for segment in segments for word in segment["words"]):
+    words_stream = []
+    for segment in segments:
+        if "words" in segment and segment["words"]:
+            words_stream.extend(segment["words"])
+        else:
+            words_stream.append({
+                "word": segment.get("text", ""),
+                "start": segment.get("start", 0.0),
+                "end": segment.get("end", 0.0),
+            })
+    for word in words_stream:
         text = word["word"].strip()
-        if not text or duration <= 0:
+        if not text or (duration is not None and duration <= 0):
             continue
-        if float(word["end"]) < 0 or float(word["start"]) >= duration:
+        if duration is not None and (float(word["end"]) < 0 or float(word["start"]) >= duration):
             continue
         first_letter = next((character for character in text if character.isalpha()), "")
         if phrase and first_letter.isupper():
@@ -3023,17 +3023,23 @@ def transcribe_reference_audio(whisper_model, source_audio, prepared_audio, time
     if phrase:
         phrases.append(phrase)
     counts = {}
-    if phrases and languages[0] == "en":
+    if phrases and language == "en":
         keys = {reference_syllable_key(word["word"]) for phrase in phrases for word in phrase}
         counts = reference_syllable_counts(keys)
     lines = []
     for phrase in phrases:
         for words in partition_reference_phrase(phrase, counts):
-            start_seconds = min(duration, max(0.0, float(words[0]["start"])))
-            end_seconds = min(duration, max(0.0, float(words[-1]["end"])))
+            start_raw = float(words[0]["start"])
+            end_raw = float(words[-1]["end"])
+            start_seconds = min(duration, max(0.0, start_raw)) if duration is not None else max(0.0, start_raw)
+            end_seconds = min(duration, max(0.0, end_raw)) if duration is not None else max(0.0, end_raw)
             word_count = sum(any(character.isalnum() for character in word["word"]) for word in words)
             aligned_seconds = sum(
-                max(0.0, min(duration, float(word["end"])) - max(0.0, float(word["start"])))
+                max(
+                    0.0,
+                    (min(duration, float(word["end"])) if duration is not None else float(word["end"]))
+                    - (max(0.0, float(word["start"])) if duration is not None else float(word["start"])),
+                )
                 for word in words
             )
             # Gaps between words are pauses, not evidence of stretched speech.
@@ -3044,6 +3050,21 @@ def transcribe_reference_audio(whisper_model, source_audio, prepared_audio, time
             text = "".join(word["word"].replace("\r", " ").replace("\n", " ") for word in words).strip()
             lines.append(f"[{start}–{end}] {text}")
     return "\n".join(lines)
+
+
+def transcribe_reference_audio(whisper_model, source_audio, prepared_audio, timestamp_format, frame_count):
+    """Return clip-relative speech lines; never transcribe synthetic no-track audio."""
+    if whisper_model is None or source_audio is None:
+        return ""
+    waveform = source_audio.get("waveform")
+    if waveform is None or waveform.numel() == 0:
+        return ""
+    _, segment_batches, languages = run_whisper(whisper_model, prepared_audio, "transcribe", "auto", word_timestamps=True)
+    if len(segment_batches) != 1:
+        raise ValueError("H3 reference transcription requires one audio recording.")
+    segments = json.loads(segment_batches[0])
+    duration = frame_count / 24
+    return format_reference_transcript_phrases(segments, languages[0], timestamp_format=timestamp_format, duration=duration)
 
 
 def run_whisper(patcher, audio, task, language, word_timestamps=False):

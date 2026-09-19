@@ -913,6 +913,30 @@ def test_h3_whisper_selected_audio_and_timestamp_format(monkeypatch, timestamp_f
     assert decodes == [1]
 
 
+def test_whisper_transcribe_node_formatted_transcription_output(monkeypatch):
+    import json
+    from utils_collection_video_frame_sampler_test.nodes import model_nodes
+
+    schema = model_nodes.UC_WhisperTranscribe.define_schema()
+    output_ids = [value.id for value in schema.outputs]
+    assert output_ids == ["text", "segments", "language", "formatted_transcription"]
+
+    words = [
+        {"word": "Hello", "start": 0.0, "end": 0.5},
+        {"word": " world.", "start": 0.5, "end": 1.0},
+    ]
+    segments = [{"text": "Hello world.", "start": 0.0, "end": 1.0, "words": words}]
+    monkeypatch.setattr(
+        model_nodes, "run_whisper",
+        lambda *args, **kwargs: (["Hello world."], [json.dumps(segments)], ["en"]),
+    )
+    audio = {"waveform": torch.zeros(1, 1, 16000), "sample_rate": 16000}
+    output = model_nodes.UC_WhisperTranscribe.execute(object(), audio)
+    assert output.args[0] == ["Hello world."]
+    assert output.args[2] == ["en"]
+    assert output.args[3] == ["[00.000s–01.000s] Hello world."]
+
+
 @pytest.mark.parametrize("case", ["disconnected", "no_track", "empty_track", "disabled"])
 def test_h3_whisper_skips_inference_without_model_or_source_audio(monkeypatch, case):
     from utils_collection_video_frame_sampler_test.helpers import model_helpers as speech

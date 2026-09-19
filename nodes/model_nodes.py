@@ -1,6 +1,8 @@
 from comfy_api.latest import io
+from ..helpers.image_helpers import VIDEO_FRAME_TIMESTAMP_FORMATS
 from ..helpers.model_helpers import (
     WHISPER_MODELS, WHISPER_LANGUAGES, load_whisper_model, register_whisper_paths, run_whisper,
+    format_reference_transcript_phrases,
     apply_minimax_h3_refs_to_conditioning,
     create_minimax_h3_audio_ref,
     create_minimax_h3_image_refs,
@@ -14,6 +16,7 @@ from ..helpers.model_helpers import (
     minimax_h3_ref_resolution_grid,
     save_minimax_h3_ref_collection,
 )
+import json
 
 WhisperModel = io.Custom("WHISPER_MODEL")
 register_whisper_paths()
@@ -40,18 +43,29 @@ class UC_WhisperTranscribe(io.ComfyNode):
         return io.Schema(
             node_id="UC_WhisperTranscribe", display_name="Whisper Transcribe", category="utils/audio",
             description="Transcribes full recordings or translates speech to English; one aligned result per audio batch item.",
-            inputs=[WhisperModel.Input("whisper_model"), io.Audio.Input("audio"),
-                    io.Combo.Input("task", options=["transcribe", "translate"], default="transcribe"),
-                    io.Combo.Input("language", options=["auto", *WHISPER_LANGUAGES], default="auto", tooltip="Spoken language code, or automatic detection. Translation outputs English."),
-                    io.Boolean.Input("word_timestamps", default=False, optional=True, tooltip="Compute cross-attention alignment. Adds words with start/end seconds and confidence to each segment; requires an additional alignment pass.")],
-            outputs=[io.String.Output("text", is_output_list=True),
-                     io.String.Output("segments", is_output_list=True, tooltip="JSON array of start/end seconds and text. With word timestamps enabled, each segment also has words containing word, start, end, and probability."),
-                     io.String.Output("language", is_output_list=True)],
+            inputs=[
+                WhisperModel.Input("whisper_model"), io.Audio.Input("audio"),
+                io.Combo.Input("task", options=["transcribe", "translate"], default="transcribe"),
+                io.Combo.Input("language", options=["auto", *WHISPER_LANGUAGES], default="auto", tooltip="Spoken language code, or automatic detection. Translation outputs English."),
+                io.Boolean.Input("word_timestamps", default=True, optional=True, tooltip="Compute cross-attention alignment. Adds words with start/end seconds and confidence to each segment; required for syllable-counted phrase lines."),
+                io.Combo.Input("timestamp_format", options=list(VIDEO_FRAME_TIMESTAMP_FORMATS), default="00.000s", optional=True, tooltip="Timestamp formatting for formatted phrase lines, matching the timeline nodes."),
+            ],
+            outputs=[
+                io.String.Output("text", is_output_list=True),
+                io.String.Output("segments", is_output_list=True, tooltip="JSON array of start/end seconds and text. With word timestamps enabled, each segment also has words containing word, start, end, and probability."),
+                io.String.Output("language", is_output_list=True),
+                io.String.Output("formatted_transcription", is_output_list=True, tooltip="Word-timed phrases split before uppercase words and after punctuation, partitioned into 4–6 syllable lines with [start–end] timestamps matching H3 Reference Video Components."),
+            ],
         )
 
     @classmethod
-    def execute(cls, whisper_model, audio, task="transcribe", language="auto", word_timestamps=False):
-        return io.NodeOutput(*run_whisper(whisper_model, audio, task, language, word_timestamps=word_timestamps))
+    def execute(cls, whisper_model, audio, task="transcribe", language="auto", word_timestamps=True, timestamp_format="00.000s"):
+        transcripts, segments, languages = run_whisper(whisper_model, audio, task, language, word_timestamps=word_timestamps)
+        formatted = [
+            format_reference_transcript_phrases(json.loads(seg), lang, timestamp_format=timestamp_format)
+            for seg, lang in zip(segments, languages)
+        ]
+        return io.NodeOutput(transcripts, segments, languages, formatted)
 
 
 MiniMaxH3Ref = io.Custom("MINIMAX_H3_REF")
