@@ -853,8 +853,14 @@ def save_minimax_h3_clip_continuation_media(
         audio_rate = audio.get("sample_rate") if isinstance(audio, dict) else None
         if not torch.is_tensor(waveform) or waveform.ndim != 3 or waveform.shape[0] != 1 or waveform.shape[1] not in {1, 2} or not isinstance(audio_rate, int) or audio_rate <= 0:
             raise ValueError("MiniMax H3 Clip Continuation audio must be one mono or stereo waveform with a positive sample rate.")
-        sample_count = round(tail_frames * audio_rate / 24)
-        audio_tail = waveform[..., -sample_count:].detach().cpu().contiguous()
+        if audio_rate == 32000:
+            sample_count = round((tail_frames / 24) * 40) * 800
+        else:
+            sample_count = round(tail_frames * audio_rate / 24)
+        if waveform.shape[-1] >= sample_count:
+            audio_tail = waveform[..., -sample_count:].detach().cpu().contiguous()
+        else:
+            audio_tail = F.pad(waveform, (sample_count - waveform.shape[-1], 0)).detach().cpu().contiguous()
     metadata = {
         MINIMAX_H3_CLIP_CONTINUATION_METADATA_KEY: json.dumps(
             {

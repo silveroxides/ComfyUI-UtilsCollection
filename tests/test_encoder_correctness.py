@@ -822,6 +822,54 @@ def test_minimax_h3_audio_reference_matches_core_contract(monkeypatch):
     assert block["ref_audio_t"] == 4
 
 
+def test_minimax_h3_audio_reference_pads_hop_length_for_vae():
+    class HopAudioVAE:
+        hop_length = 800
+        audio_sample_rate = 32000
+
+        def encode(self, waveform):
+            assert waveform.shape == (1, 800, 2)
+            return torch.ones(1, 32, 2, 1)
+
+    block = encoder_helpers._encode_minimax_h3_audio_reference(
+        {"waveform": torch.ones(1, 1, 500), "sample_rate": 32000},
+        HopAudioVAE(),
+    )
+    assert block["kind"] == "audio"
+    assert block["ref_audio_t"] == 1
+
+
+def test_clip_continuation_replace_mode_slices_reference_audio():
+    class MockAudioVAE:
+        audio_sample_rate = 32000
+
+        def encode(self, waveform):
+            return torch.ones(1, 32, 2, waveform.shape[1] // 800)
+
+    clip = _MiniMaxH3TestClip()
+    vae = types.SimpleNamespace(encode=lambda frames: torch.ones(1, 4, 2, 4, 4))
+    continuation = {
+        "format_version": 1, "frame_rate": 24,
+        "frames": torch.zeros(22, 64, 64, 3),
+        "audio": {"waveform": torch.zeros(1, 2, 29600), "sample_rate": 32000},
+        "video_merge_mode": "replace",
+    }
+    audio = {"waveform": torch.ones(1, 2, 74400), "sample_rate": 32000}
+    conditioning, _ = encoder_helpers.execute_advanced_minimax_h3_image_to_video(
+        clip, vae, "prompt", 64, 64, 56,
+        continuation_media=continuation,
+        audio=audio,
+        audio_vae=MockAudioVAE(),
+        enable_caching="disabled",
+    )
+    metadata = conditioning[0][1]
+    audio_kf = next(kf for kf in metadata["minimax_keyframes"] if "audio_latent" in kf)
+    assert audio_kf["resolved_frame_index"] == 0
+    assert audio_kf["audio_latent"].shape[-1] == 37
+    ref_audio = next(ref for ref in metadata["minimax_refs"] if ref["kind"] == "audio")
+    assert ref_audio["ref_audio_t"] == 56
+
+
 def test_minimax_h3_reference_video_matches_core_resize_trim_and_payload(monkeypatch):
     resized = []
 

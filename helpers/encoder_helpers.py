@@ -598,6 +598,14 @@ def _encode_minimax_h3_audio_reference(audio, audio_vae, cache=None):
     target_rate = getattr(audio_vae, "audio_sample_rate", 32000)
     if sample_rate != target_rate:
         waveform = torchaudio.functional.resample(waveform, sample_rate, target_rate)
+    if waveform.shape[1] == 1:
+        waveform = waveform.repeat(1, 2, 1)
+    hop_length = getattr(getattr(audio_vae, "first_stage_model", audio_vae), "hop_length", getattr(audio_vae, "downscale_ratio", None))
+    if isinstance(hop_length, (int, float)) and hop_length > 1:
+        hop = int(hop_length)
+        rem = waveform.shape[-1] % hop
+        if rem != 0:
+            waveform = F.pad(waveform, (0, hop - rem))
     samples = waveform[:1].movedim(1, -1)
     latent = audio_vae.encode(samples) if cache is None else cache.encode_vae(audio_vae, samples, media="audio")
     if not torch.is_tensor(latent) or latent.ndim < 1 or latent.shape[-1] < 1:
@@ -3668,7 +3676,19 @@ def execute_advanced_minimax_h3_image_to_video(
     )
     if continuation_frames is not None and vae is None:
         raise ValueError("MiniMax H3 Clip Continuation requires a video VAE.")
-    audio_reference = _encode_minimax_h3_audio_reference(audio, audio_vae, cache=cache)
+    active_audio = audio
+    if active_audio is not None and continuation_media is not None:
+        merge_mode = continuation_media.get("video_merge_mode", "replace")
+        cont_audio = continuation_media.get("audio")
+        if merge_mode == "replace" and continuation_frames is not None and cont_audio is not None:
+            sample_rate = active_audio.get("sample_rate", 32000)
+            tail_samples = round(continuation_frames.shape[0] * sample_rate / 24)
+            wave = active_audio.get("waveform")
+            if wave is not None and wave.shape[-1] > tail_samples:
+                active_audio = {"waveform": wave[..., tail_samples:], "sample_rate": sample_rate}
+            else:
+                active_audio = None
+    audio_reference = _encode_minimax_h3_audio_reference(active_audio, audio_vae, cache=cache)
     continuation_audio_reference = _encode_minimax_h3_audio_reference(
         continuation_media.get("audio") if continuation_media is not None else None,
         audio_vae,

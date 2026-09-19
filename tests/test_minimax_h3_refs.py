@@ -134,6 +134,20 @@ def test_clip_continuation_save_load_overwrite_and_fingerprint(monkeypatch, tmp_
     )
 
 
+def test_clip_continuation_save_audio_aligns_to_h3_audio_blocks(monkeypatch, tmp_path):
+    monkeypatch.setattr(model_helpers.folder_paths, "get_output_directory", lambda: str(tmp_path))
+    frames = torch.zeros(56, 8, 8, 3)
+    audio = {"waveform": torch.ones(1, 2, 74400), "sample_rate": 32000}
+    model_helpers.save_minimax_h3_clip_continuation_media(
+        frames, 22, "h3_clip_continuation/clip", 1, audio=audio,
+    )
+    loaded = model_helpers.load_minimax_h3_clip_continuation_media(
+        "h3_clip_continuation/clip", 1,
+    )
+    assert loaded["audio"]["waveform"].shape == (1, 2, 29600)
+    assert loaded["audio"]["sample_rate"] == 32000
+
+
 def test_clip_continuation_rejects_short_tail_and_output_escape(monkeypatch, tmp_path):
     monkeypatch.setattr(model_helpers.folder_paths, "get_output_directory", lambda: str(tmp_path))
     with pytest.raises(ValueError, match="needs 22 frames"):
