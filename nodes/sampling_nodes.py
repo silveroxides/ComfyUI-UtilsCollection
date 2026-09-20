@@ -2,6 +2,9 @@
 
 from comfy_api.latest import io
 from ..helpers.sampling_helpers import (
+    H3_CHUNK_SECONDS_OPTIONS,
+    H3_OVERLAP_SECONDS_OPTIONS,
+    parse_h3_seconds_option,
     split_h3_video_components_into_segments,
     start_sampling_loop,
 )
@@ -18,13 +21,19 @@ class UC_H3LoopSampler(io.ComfyNode):
             category="utils/sampling",
             description="Samples long-form MiniMax H3 AV latents by windowed chunks with carry preservation.",
             inputs=[
+                io.Model.Input(
+                    "model",
+                    optional=True,
+                    tooltip="Diffusion model (such as MiniMax H3). When connected, you do not need an external Guider node.",
+                ),
                 io.Noise.Input(
                     "noise",
                     tooltip="Noise generator (such as RandomNoise) used to seed each chunk.",
                 ),
                 io.Guider.Input(
                     "guider",
-                    tooltip="Main guidance settings (such as BasicGuider or CFGGuider). Controls prompt strength and negative conditioning.",
+                    optional=True,
+                    tooltip="Optional external guider. If model is connected, this can remain disconnected.",
                 ),
                 io.Sampler.Input(
                     "sampler",
@@ -42,21 +51,17 @@ class UC_H3LoopSampler(io.ComfyNode):
                     "latent",
                     tooltip="Blank joint video and audio canvas (from Empty MiniMax H3 Latent) sized for the total clip length.",
                 ),
-                io.Int.Input(
-                    "chunk_frames",
-                    default=124,
-                    min=0,
-                    max=3600,
-                    step=17,
-                    tooltip="Length of each generation chunk in frames. Set to 0 to generate the whole video in one single pass.",
+                io.Combo.Input(
+                    "chunk_duration",
+                    options=list(H3_CHUNK_SECONDS_OPTIONS),
+                    default="5.17s (124 frames)",
+                    tooltip="Duration of each generation chunk snapped to valid H3 frame grids. Choose '0.00s (single pass)' to generate the entire video in one chunk without looping.",
                 ),
-                io.Int.Input(
-                    "overlap_frames",
-                    default=22,
-                    min=0,
-                    max=720,
-                    step=17,
-                    tooltip="Number of shared frames between adjacent chunks to ensure seamless transitions.",
+                io.Combo.Input(
+                    "overlap_duration",
+                    options=list(H3_OVERLAP_SECONDS_OPTIONS),
+                    default="0.92s (22 frames)",
+                    tooltip="Shared time window between adjacent chunks to guarantee seamless motion and audio continuity.",
                 ),
                 io.Combo.Input(
                     "carry_mode",
@@ -148,13 +153,14 @@ class UC_H3LoopSampler(io.ComfyNode):
     def execute(
         cls,
         noise,
-        guider,
         sampler,
         sigmas,
         conditioning,
         latent,
-        chunk_frames=124,
-        overlap_frames=22,
+        model=None,
+        guider=None,
+        chunk_duration="5.17s (124 frames)",
+        overlap_duration="0.92s (22 frames)",
         carry_mode="mask",
         overlap_strength_video=1.0,
         overlap_strength_audio=0.9,
@@ -165,11 +171,21 @@ class UC_H3LoopSampler(io.ComfyNode):
         phase2_guider=None,
         denoise_mask=None,
         audio_denoise_mask=None,
+        **kwargs,
     ) -> io.NodeOutput:
+        if guider is None:
+            if model is None:
+                raise ValueError("UC_H3LoopSampler requires either 'model' or 'guider' to be connected.")
+            from comfy_extras.nodes_custom_sampler import Guider_Basic
+            guider = Guider_Basic(model)
+
         cond_list = conditioning.get("conds") if isinstance(conditioning, dict) and "conds" in conditioning else (
             conditioning if isinstance(conditioning, list) and conditioning and isinstance(conditioning[0], list) and not isinstance(conditioning[0][0], torch.Tensor)
             else [conditioning]
         )
+
+        cf = kwargs.get("chunk_frames") if "chunk_frames" in kwargs else parse_h3_seconds_option(chunk_duration, 124)
+        of = kwargs.get("overlap_frames") if "overlap_frames" in kwargs else parse_h3_seconds_option(overlap_duration, 22)
 
         out_latent, num_chunks, report = start_sampling_loop(
             noise=noise,
@@ -178,8 +194,8 @@ class UC_H3LoopSampler(io.ComfyNode):
             sigmas=sigmas,
             cond_list=cond_list,
             latent=latent,
-            chunk_frames=chunk_frames,
-            overlap_frames=overlap_frames,
+            chunk_frames=cf,
+            overlap_frames=of,
             carry_mode=carry_mode,
             overlap_strength_video=overlap_strength_video,
             overlap_strength_audio=overlap_strength_audio,

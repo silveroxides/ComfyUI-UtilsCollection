@@ -169,6 +169,11 @@ def test_node_schema():
     assert schema.node_id == "UC_H3LoopSampler"
     assert len(schema.inputs) >= 7
     assert len(schema.outputs) == 3
+    input_names = [inp.id for inp in schema.inputs]
+    assert "model" in input_names
+    assert "guider" in input_names
+    assert "chunk_duration" in input_names
+    assert "overlap_duration" in input_names
 
     seg_schema = UC_H3RefVideoSegments.define_schema()
     assert seg_schema.node_id == "UC_H3RefVideoSegments"

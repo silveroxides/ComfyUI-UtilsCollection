@@ -25,6 +25,62 @@ H3_LATENT_BASE = 2
 H3_VIDEO_T_DIM = 2
 H3_AUDIO_T_DIM = 3
 
+H3_CHUNK_SECONDS_OPTIONS = [
+    "0.00s (single pass)",
+    "2.33s (56 frames)",
+    "3.04s (73 frames)",
+    "3.75s (90 frames)",
+    "4.46s (107 frames)",
+    "5.17s (124 frames)",
+    "5.88s (141 frames)",
+    "6.58s (158 frames)",
+    "7.29s (175 frames)",
+    "8.00s (192 frames)",
+    "8.71s (209 frames)",
+    "9.42s (226 frames)",
+    "10.12s (243 frames)",
+    "10.83s (260 frames)",
+    "12.25s (294 frames)",
+    "13.67s (328 frames)",
+    "15.08s (362 frames)",
+    "16.50s (396 frames)",
+    "17.92s (430 frames)",
+    "20.04s (481 frames)",
+]
+
+H3_OVERLAP_SECONDS_OPTIONS = [
+    "0.00s (no overlap)",
+    "0.21s (5 frames)",
+    "0.92s (22 frames)",
+    "1.62s (39 frames)",
+    "2.33s (56 frames)",
+    "3.04s (73 frames)",
+    "3.75s (90 frames)",
+]
+
+
+def parse_h3_seconds_option(option_str: Any, default_frames: int = 0) -> int:
+    """Parse integer frame count from a seconds combo option string like '5.17s (124 frames)'."""
+    if isinstance(option_str, (int, float)):
+        return max(0, int(option_str))
+    if not isinstance(option_str, str):
+        return default_frames
+    import re
+    match = re.search(r"\((\d+)\s*frames?\)", option_str)
+    if match:
+        return int(match.group(1))
+    if "single pass" in option_str or "no overlap" in option_str:
+        return 0
+    # Try parsing direct number string
+    try:
+        val = float(option_str.replace("s", "").strip())
+        if val <= 0:
+            return 0
+        from .parameter_helpers import h3_video_length_from_seconds
+        return h3_video_length_from_seconds(val)
+    except Exception:
+        return default_frames
+
 
 def h3_snap_latent_t(n: int) -> int:
     """Snap latent count to H3's 5j+2 temporal grid (minimum 2)."""
