@@ -200,15 +200,38 @@ def check_core_any_index_guides() -> bool:
         return False
 
 
-def plan_h3_windows(total_frames: int, window_frames: int, overlap_frames: int) -> list[tuple[int, int]]:
+def plan_h3_windows(
+    total_frames: int,
+    window_frames: int,
+    overlap_frames: int,
+    segment_lengths: Optional[Sequence[int]] = None,
+) -> list[tuple[int, int]]:
     """Plan H3 window intervals on latent grid (start_idx, end_idx) inclusive-exclusive.
     
-    Ensures step stride maintains 5-group phase alignment.
+    If segment_lengths is provided, directly uses those segment frame counts converted to latents.
+    Otherwise, computes overlapping sliding windows ensuring step stride maintains 5-group phase alignment.
     """
     total_f = h3_snap_frame_count(int(total_frames))
     total_latents = h3_frames_to_latents(total_f)
     if total_latents <= H3_LATENT_BASE:
         return [(0, total_latents)]
+
+    if segment_lengths:
+        windows = []
+        curr_f = 0
+        for seg_f in segment_lengths:
+            seg_len = int(seg_f)
+            start_f = curr_f
+            end_f = min(total_f, curr_f + seg_len)
+            v0 = h3_frames_to_latents(start_f) if start_f > 0 else 0
+            v1 = min(total_latents, h3_frames_to_latents(end_f))
+            if v1 > v0:
+                windows.append((v0, v1))
+            curr_f = end_f
+            if curr_f >= total_f:
+                break
+        if windows:
+            return windows
 
     w_frames = max(H3_FRAME_BASE, int(window_frames)) if window_frames > 0 else total_f
     w_latents = min(total_latents, h3_snap_latent_t(h3_frames_to_latents(w_frames)))
@@ -377,8 +400,9 @@ def start_sampling_loop(
     sigmas: torch.Tensor,
     cond_list: Sequence[Any],
     latent: dict[str, Any],
-    chunk_frames: int,
-    overlap_frames: int,
+    chunk_frames: int = 124,
+    overlap_frames: int = 22,
+    segment_lengths: Optional[Sequence[int]] = None,
     carry_mode: str = "mask",
     overlap_strength_video: float = 1.0,
     overlap_strength_audio: float = 0.9,
@@ -399,7 +423,12 @@ def start_sampling_loop(
     total_a = 0 if master_a is None else int(master_a.shape[H3_AUDIO_T_DIM])
     total_f = h3_latents_to_frames(total_v)
 
-    windows = plan_h3_windows(total_f, chunk_frames, overlap_frames)
+    windows = plan_h3_windows(
+        total_frames=total_f,
+        window_frames=chunk_frames,
+        overlap_frames=overlap_frames,
+        segment_lengths=segment_lengths,
+    )
     num_chunks = len(windows)
 
     out_v = master_v.clone()

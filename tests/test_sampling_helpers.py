@@ -85,6 +85,12 @@ def test_plan_h3_windows():
         assert start >= 0
         assert end <= 22
 
+    # Direct segment lengths test
+    custom_windows = plan_h3_windows(total_frames=73, window_frames=0, overlap_frames=0, segment_lengths=[22, 22, 29])
+    assert len(custom_windows) == 3
+    assert custom_windows[0][0] == 0
+    assert custom_windows[-1][1] == 22
+
 
 def test_prepare_chunk_guider_isolation():
     class FakeGuider:
@@ -172,6 +178,7 @@ def test_node_schema():
     input_names = [inp.id for inp in schema.inputs]
     assert "model" in input_names
     assert "guider" in input_names
+    assert "segment_lengths" in input_names
     assert "chunk_duration" in input_names
     assert "overlap_duration" in input_names
 
