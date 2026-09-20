@@ -1,7 +1,10 @@
 """Node definitions for sampling workflows."""
 
 from comfy_api.latest import io
-from ..helpers.sampling_helpers import start_sampling_loop
+from ..helpers.sampling_helpers import (
+    split_h3_video_components_into_segments,
+    start_sampling_loop,
+)
 
 
 class UC_H3LoopSampler(io.ComfyNode):
@@ -189,3 +192,149 @@ class UC_H3LoopSampler(io.ComfyNode):
             audio_denoise_mask=audio_denoise_mask,
         )
         return io.NodeOutput(out_latent, num_chunks, report)
+
+
+class UC_H3RefVideoSegments(io.ComfyNode):
+    """Splits a reference video into a list of windowed H3 segments for batched conditioning."""
+
+    @classmethod
+    def define_schema(cls):
+        from ..helpers.image_helpers import VIDEO_FRAME_TIMESTAMP_FORMATS
+
+        return io.Schema(
+            node_id="UC_H3RefVideoSegments",
+            display_name="H3 Reference Video Segments (List)",
+            category="advanced/video",
+            description="Prepares all sequential H3 reference segments as list outputs for multi-chunk captioning and conditioning workflows.",
+            search_aliases=["minimax", "h3", "reference", "video", "segments", "list"],
+            inputs=[
+                io.Video.Input(
+                    "video",
+                    tooltip="Full reference video clip to slice across all segments.",
+                ),
+                io.Float.Input(
+                    "megapixels",
+                    default=0.5,
+                    min=0.01,
+                    max=4.0,
+                    step=0.001,
+                    tooltip="Target frame size. Scales and center crops frames cleanly to matching standard aspect ratio.",
+                ),
+                io.Int.Input(
+                    "segment_count",
+                    default=0,
+                    min=0,
+                    step=1,
+                    tooltip="Number of explicit equal segments. 0 uses chunk_frames and overlap_frames to match H3 Loop Sampler windows.",
+                ),
+                io.Int.Input(
+                    "chunk_frames",
+                    default=124,
+                    min=5,
+                    max=3600,
+                    step=17,
+                    tooltip="Frames per chunk window when segment_count is 0.",
+                ),
+                io.Int.Input(
+                    "overlap_frames",
+                    default=22,
+                    min=0,
+                    max=720,
+                    step=17,
+                    tooltip="Overlap frames between consecutive chunk windows.",
+                ),
+                io.Custom("WHISPER_MODEL").Input(
+                    "whisper_model",
+                    optional=True,
+                    tooltip="Optional Whisper speech recognition model for word-timed transcription.",
+                ),
+                io.Combo.Input(
+                    "timestamp_format",
+                    options=list(VIDEO_FRAME_TIMESTAMP_FORMATS),
+                    default="00.000s",
+                    optional=True,
+                    tooltip="Timestamp format for transcript outputs.",
+                ),
+                io.Boolean.Input(
+                    "enable_whisper",
+                    default=True,
+                    optional=True,
+                    tooltip="Transcribe speech in each segment when a Whisper model is connected.",
+                ),
+            ],
+            outputs=[
+                io.Image.Output(
+                    "frames_list",
+                    is_output_list=True,
+                    tooltip="List of prepared 24 fps video frames, one per segment.",
+                ),
+                io.Audio.Output(
+                    "audio_list",
+                    is_output_list=True,
+                    tooltip="List of matching audio tracks, one per segment.",
+                ),
+                io.Int.Output(
+                    "width",
+                    tooltip="Common width in pixels matching H3 resolution requirements.",
+                ),
+                io.Int.Output(
+                    "height",
+                    tooltip="Common height in pixels matching H3 resolution requirements.",
+                ),
+                io.Int.Output(
+                    "lengths",
+                    is_output_list=True,
+                    tooltip="List of segment frame lengths.",
+                ),
+                io.Video.Output(
+                    "video_list",
+                    is_output_list=True,
+                    tooltip="List of preview video objects for each segment.",
+                ),
+                io.String.Output(
+                    "transcribed_audio_list",
+                    is_output_list=True,
+                    tooltip="List of word-timed transcripts aligned to each segment.",
+                ),
+            ],
+        )
+
+    @classmethod
+    def execute(
+        cls,
+        video,
+        megapixels=0.5,
+        segment_count=0,
+        chunk_frames=124,
+        overlap_frames=22,
+        whisper_model=None,
+        timestamp_format="00.000s",
+        enable_whisper=True,
+    ) -> io.NodeOutput:
+        (
+            frames_list,
+            audio_list,
+            width,
+            height,
+            length_list,
+            video_list,
+            transcript_list,
+        ) = split_h3_video_components_into_segments(
+            video=video,
+            megapixels=megapixels,
+            segment_count=segment_count,
+            chunk_frames=chunk_frames,
+            overlap_frames=overlap_frames,
+            whisper_model=whisper_model,
+            timestamp_format=timestamp_format,
+            enable_whisper=enable_whisper,
+        )
+        return io.NodeOutput(
+            frames_list,
+            audio_list,
+            width,
+            height,
+            length_list,
+            video_list,
+            transcript_list,
+        )

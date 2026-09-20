@@ -424,3 +424,89 @@ def start_sampling_loop(
     final_latent = h3_pack_av(latent, out_v, out_a)
     report = "\n".join(lines)
     return final_latent, num_chunks, report
+
+
+def split_h3_video_components_into_segments(
+    video: Any,
+    megapixels: float = 0.5,
+    segment_count: int = 0,
+    chunk_frames: int = 124,
+    overlap_frames: int = 22,
+    whisper_model: Any = None,
+    timestamp_format: str = "00.000s",
+    enable_whisper: bool = True,
+) -> tuple[list[torch.Tensor], list[dict[str, Any]], int, int, list[int], list[Any], list[str]]:
+    """Split reference video components across planned segments or windows, returning lists."""
+    from fractions import Fraction
+    from comfy_api.latest import io, InputImpl, Types
+    from .image_helpers import cached_h3_reference_components, prepare_h3_reference_components
+    from .model_helpers import transcribe_reference_audio
+
+    components = cached_h3_reference_components(video, megapixels)
+    source_frames = components.images
+    source_rate = float(components.frame_rate)
+    source_count = source_frames.shape[0]
+    source_seconds = source_count / source_rate
+    total_frames = max(1, round(source_seconds * 24))
+
+    if segment_count > 0:
+        windows = []
+        for seg_idx in range(segment_count):
+            windows.append((seg_idx, True))
+        is_manual_segments = True
+    else:
+        planned_windows = plan_h3_windows(total_frames, chunk_frames, overlap_frames)
+        windows = [(w, False) for w in planned_windows]
+        is_manual_segments = False
+
+    frames_list = []
+    audio_list = []
+    length_list = []
+    video_list = []
+    transcript_list = []
+    out_w = 0
+    out_h = 0
+
+    if is_manual_segments:
+        for seg_idx, _ in windows:
+            frames, audio, width, height, length, _, _ = prepare_h3_reference_components(
+                components,
+                megapixels,
+                duration_seconds=0.0,
+                start_at_timestamp=0.0,
+                spatially_prepared=True,
+                segment_count=segment_count,
+                segment_index=seg_idx,
+            )
+            out_w, out_h = width, height
+            t_audio = transcribe_reference_audio(whisper_model, components.audio, audio, timestamp_format, length) if enable_whisper else ""
+            prep_video = InputImpl.VideoFromComponents(Types.VideoComponents(images=frames, audio=audio, frame_rate=Fraction(24)))
+            frames_list.append(frames)
+            audio_list.append(audio)
+            length_list.append(length)
+            video_list.append(prep_video)
+            transcript_list.append(t_audio)
+    else:
+        for (v0, v1), _ in windows:
+            start_f = h3_frame_at_latent(v0)
+            end_f = h3_frame_at_latent(v1)
+            duration_s = max(0.1, (end_f - start_f) / 24.0)
+            start_s = start_f / 24.0
+
+            frames, audio, width, height, length, _, _ = prepare_h3_reference_components(
+                components,
+                megapixels,
+                duration_seconds=duration_s,
+                start_at_timestamp=start_s,
+                spatially_prepared=True,
+            )
+            out_w, out_h = width, height
+            t_audio = transcribe_reference_audio(whisper_model, components.audio, audio, timestamp_format, length) if enable_whisper else ""
+            prep_video = InputImpl.VideoFromComponents(Types.VideoComponents(images=frames, audio=audio, frame_rate=Fraction(24)))
+            frames_list.append(frames)
+            audio_list.append(audio)
+            length_list.append(length)
+            video_list.append(prep_video)
+            transcript_list.append(t_audio)
+
+    return frames_list, audio_list, out_w, out_h, length_list, video_list, transcript_list

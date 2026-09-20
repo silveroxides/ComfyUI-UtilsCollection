@@ -261,6 +261,7 @@ class SamplingUtils(ComfyExtension):
             TextGenerateQwen35SystemPrompt,
             ColorConvertNode,
             UC_H3LoopSampler,
+            UC_H3RefVideoSegments,
             *LOGIC_MATH_NODES,
             *SCHEDULER_NODES,
         ])

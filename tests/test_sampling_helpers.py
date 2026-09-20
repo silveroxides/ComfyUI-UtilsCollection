@@ -33,7 +33,10 @@ from utils_collection_sampling_test.helpers.sampling_helpers import (
     start_sampling_loop,
     strip_stale_keyframes,
 )
-from utils_collection_sampling_test.nodes.sampling_nodes import UC_H3LoopSampler
+from utils_collection_sampling_test.nodes.sampling_nodes import (
+    UC_H3LoopSampler,
+    UC_H3RefVideoSegments,
+)
 
 
 def test_h3_temporal_conversions():
@@ -166,3 +169,13 @@ def test_node_schema():
     assert schema.node_id == "UC_H3LoopSampler"
     assert len(schema.inputs) >= 7
     assert len(schema.outputs) == 3
+
+    seg_schema = UC_H3RefVideoSegments.define_schema()
+    assert seg_schema.node_id == "UC_H3RefVideoSegments"
+    assert seg_schema.outputs[0].is_output_list is True
+    assert seg_schema.outputs[1].is_output_list is True
+    assert seg_schema.outputs[2].is_output_list is False
+    assert seg_schema.outputs[3].is_output_list is False
+    assert seg_schema.outputs[4].is_output_list is True
+    assert seg_schema.outputs[5].is_output_list is True
+    assert seg_schema.outputs[6].is_output_list is True
