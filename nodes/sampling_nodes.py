@@ -1,5 +1,6 @@
 """Node definitions for sampling workflows."""
 
+import torch
 from comfy_api.latest import io
 from ..helpers.sampling_helpers import (
     H3_CHUNK_SECONDS_OPTIONS,
