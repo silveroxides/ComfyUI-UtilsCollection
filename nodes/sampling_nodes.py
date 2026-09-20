@@ -20,6 +20,7 @@ class UC_H3LoopSampler(io.ComfyNode):
             node_id="UC_H3LoopSampler",
             display_name="H3 Loop Sampler",
             category="utils/sampling",
+            is_input_list=True,
             description="Samples long-form MiniMax H3 AV latents by windowed chunks with carry preservation.",
             inputs=[
                 io.Model.Input(
@@ -180,40 +181,95 @@ class UC_H3LoopSampler(io.ComfyNode):
         audio_denoise_mask=None,
         **kwargs,
     ) -> io.NodeOutput:
-        if guider is None:
-            if model is None:
+        # Unwrap any list-wrapped scalar inputs caused by is_input_list=True
+        def _first(val):
+            return val[0] if isinstance(val, list) and len(val) > 0 else val
+
+        noise_val = _first(noise)
+        sampler_val = _first(sampler)
+        sigmas_val = _first(sigmas)
+        latent_val = _first(latent)
+        model_val = _first(model)
+        guider_val = _first(guider)
+        chunk_dur_val = _first(chunk_duration)
+        overlap_dur_val = _first(overlap_duration)
+        carry_val = _first(carry_mode)
+        str_v_val = _first(overlap_strength_video)
+        str_a_val = _first(overlap_strength_audio)
+        start_step_val = _first(sampling_start_step)
+        end_step_val = _first(sampling_end_step)
+        p2_start_val = _first(phase2_start_step)
+        p2_sampler_val = _first(phase2_sampler)
+        p2_guider_val = _first(phase2_guider)
+        d_mask_val = _first(denoise_mask)
+        ad_mask_val = _first(audio_denoise_mask)
+
+        if guider_val is None:
+            if model_val is None:
                 raise ValueError("UC_H3LoopSampler requires either 'model' or 'guider' to be connected.")
             from comfy_extras.nodes_custom_sampler import Guider_Basic
-            guider = Guider_Basic(model)
+            guider_val = Guider_Basic(model_val)
 
-        cond_list = conditioning.get("conds") if isinstance(conditioning, dict) and "conds" in conditioning else (
-            conditioning if isinstance(conditioning, list) and conditioning and isinstance(conditioning[0], list) and not isinstance(conditioning[0][0], torch.Tensor)
-            else [conditioning]
-        )
+        # Handle conditioning list
+        if isinstance(conditioning, dict) and "conds" in conditioning:
+            cond_list = conditioning["conds"]
+        elif isinstance(conditioning, list):
+            # Check if wrapped in outer list from is_input_list=True: [ [cond0, cond1] ]
+            unwrapped = conditioning
+            if len(conditioning) == 1 and isinstance(conditioning[0], list):
+                if len(conditioning[0]) > 0 and isinstance(conditioning[0][0], list):
+                    unwrapped = conditioning[0]
 
-        cf = kwargs.get("chunk_frames") if "chunk_frames" in kwargs else parse_h3_seconds_option(chunk_duration, 124)
-        of = kwargs.get("overlap_frames") if "overlap_frames" in kwargs else parse_h3_seconds_option(overlap_duration, 22)
+            if len(unwrapped) > 0 and isinstance(unwrapped[0], list):
+                if len(unwrapped[0]) > 0 and isinstance(unwrapped[0][0], list):
+                    # List of conditionings: [ [[t0, d0]], [[t1, d1]] ]
+                    cond_list = unwrapped
+                elif len(unwrapped[0]) == 2 and isinstance(unwrapped[0][1], dict):
+                    # Single conditioning: [ [t0, d0] ]
+                    cond_list = [unwrapped]
+                else:
+                    cond_list = unwrapped
+            else:
+                cond_list = [unwrapped]
+        else:
+            cond_list = [conditioning]
+
+        # Flatten segment_lengths if passed as list of lists
+        flat_segments = None
+        if segment_lengths is not None:
+            if isinstance(segment_lengths, list):
+                flat_segments = []
+                for item in segment_lengths:
+                    if isinstance(item, list):
+                        flat_segments.extend([int(x) for x in item])
+                    else:
+                        flat_segments.append(int(item))
+            elif isinstance(segment_lengths, (int, float)):
+                flat_segments = [int(segment_lengths)]
+
+        cf = kwargs.get("chunk_frames") if "chunk_frames" in kwargs else parse_h3_seconds_option(chunk_dur_val, 124)
+        of = kwargs.get("overlap_frames") if "overlap_frames" in kwargs else parse_h3_seconds_option(overlap_dur_val, 22)
 
         out_latent, num_chunks, report = start_sampling_loop(
-            noise=noise,
-            guider=guider,
-            sampler=sampler,
-            sigmas=sigmas,
+            noise=noise_val,
+            guider=guider_val,
+            sampler=sampler_val,
+            sigmas=sigmas_val,
             cond_list=cond_list,
-            latent=latent,
+            latent=latent_val,
             chunk_frames=cf,
             overlap_frames=of,
-            segment_lengths=segment_lengths,
-            carry_mode=carry_mode,
-            overlap_strength_video=overlap_strength_video,
-            overlap_strength_audio=overlap_strength_audio,
-            sampling_start_step=sampling_start_step,
-            sampling_end_step=sampling_end_step,
-            phase2_start_step=phase2_start_step,
-            phase2_sampler=phase2_sampler,
-            phase2_guider=phase2_guider,
-            denoise_mask=denoise_mask,
-            audio_denoise_mask=audio_denoise_mask,
+            segment_lengths=flat_segments,
+            carry_mode=carry_val,
+            overlap_strength_video=str_v_val,
+            overlap_strength_audio=str_a_val,
+            sampling_start_step=start_step_val,
+            sampling_end_step=end_step_val,
+            phase2_start_step=p2_start_val,
+            phase2_sampler=p2_sampler_val,
+            phase2_guider=p2_guider_val,
+            denoise_mask=d_mask_val,
+            audio_denoise_mask=ad_mask_val,
         )
         return io.NodeOutput(out_latent, num_chunks, report)
 

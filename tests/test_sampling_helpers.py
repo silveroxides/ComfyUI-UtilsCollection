@@ -170,6 +170,81 @@ def test_start_sampling_loop_mock():
         sh.run_chunk_sampling = orig_run
 
 
+def test_h3_loop_sampler_execute_handles_all_input_variants():
+    v = torch.zeros([1, 24, 7, 4, 4])
+    a = torch.zeros([1, 32, 2, 12])
+    latent = h3_pack_av({}, v, a)
+    single_cond = [[torch.zeros([1, 5, 16]), {}]]
+    multi_cond = [single_cond, single_cond]
+
+    class FakeModel:
+        def __init__(self):
+            self.model_options = {}
+
+        def is_dynamic(self):
+            return False
+
+        def get_non_dynamic_delegate(self):
+            return self
+
+        def model_dtype(self):
+            return torch.float16
+
+    class MockGuider:
+        def __init__(self):
+            self.original_conds = {"positive": single_cond, "negative": None}
+            self.model_options = {}
+
+        def set_conds(self, positive, negative=None):
+            self.original_conds["positive"] = positive
+
+    from utils_collection_sampling_test.helpers import sampling_helpers as sh
+    orig_run = sh.run_chunk_sampling
+
+    def dummy_run_chunk(noise, g, s, sig, chunk_latent, **kwargs):
+        return chunk_latent
+
+    sh.run_chunk_sampling = dummy_run_chunk
+    try:
+        # 1. Test when segment_lengths is a single int (caused by ComfyUI list unwrapping)
+        res1 = UC_H3LoopSampler.execute(
+            noise=[None],
+            sampler=[object()],
+            sigmas=[torch.tensor([1.0, 0.0])],
+            conditioning=[multi_cond],
+            latent=[latent],
+            model=[FakeModel()],
+            segment_lengths=[22],
+        )
+        assert res1.result[0] is not None
+
+        # 2. Test when segment_lengths is list of ints
+        res2 = UC_H3LoopSampler.execute(
+            noise=None,
+            sampler=object(),
+            sigmas=torch.tensor([1.0, 0.0]),
+            conditioning=multi_cond,
+            latent=latent,
+            guider=MockGuider(),
+            segment_lengths=[7, 15],
+        )
+        assert res2.result[0] is not None
+
+        # 3. Test when segment_lengths is list of lists
+        res3 = UC_H3LoopSampler.execute(
+            noise=None,
+            sampler=object(),
+            sigmas=torch.tensor([1.0, 0.0]),
+            conditioning=single_cond,
+            latent=latent,
+            model=FakeModel(),
+            segment_lengths=[[7], [15]],
+        )
+        assert res3.result[0] is not None
+    finally:
+        sh.run_chunk_sampling = orig_run
+
+
 def test_node_schema():
     schema = UC_H3LoopSampler.define_schema()
     assert schema.node_id == "UC_H3LoopSampler"

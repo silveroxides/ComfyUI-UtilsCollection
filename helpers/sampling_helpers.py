@@ -217,6 +217,13 @@ def plan_h3_windows(
         return [(0, total_latents)]
 
     if segment_lengths:
+        if isinstance(segment_lengths, (int, float)):
+            segment_lengths = [int(segment_lengths)]
+        elif not isinstance(segment_lengths, (list, tuple)):
+            try:
+                segment_lengths = list(segment_lengths)
+            except Exception:
+                segment_lengths = [int(segment_lengths)]
         windows = []
         curr_f = 0
         for seg_f in segment_lengths:
