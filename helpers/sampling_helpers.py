@@ -430,6 +430,41 @@ def start_sampling_loop(
     total_a = 0 if master_a is None else int(master_a.shape[H3_AUDIO_T_DIM])
     total_f = h3_latents_to_frames(total_v)
 
+    # Check if target latent is smaller than requested segments/conds and expand it automatically
+    needed_frames = 0
+    if segment_lengths:
+        needed_frames = sum(int(x) for x in segment_lengths)
+    elif chunk_frames > 0 and len(cond_list) > 1:
+        needed_frames = chunk_frames + max(0, len(cond_list) - 1) * max(1, chunk_frames - overlap_frames)
+
+    if needed_frames > total_f:
+        target_f = h3_snap_frame_count(needed_frames)
+        target_v = h3_frames_to_latents(target_f)
+        target_a = h3_frames_to_audio_t(target_f)
+        LOGGER.info(
+            f"UC_H3LoopSampler: expanding master latent from {total_f} frames ({total_v} latents) "
+            f"to {target_f} frames ({target_v} latents) to accommodate all {len(cond_list)} chunks."
+        )
+        expanded_v = torch.zeros(
+            [master_v.shape[0], master_v.shape[1], target_v, master_v.shape[3], master_v.shape[4]],
+            dtype=master_v.dtype,
+            device=master_v.device,
+        )
+        expanded_v[:, :, :total_v] = master_v
+        master_v = expanded_v
+        total_v = target_v
+        total_f = target_f
+
+        if master_a is not None and target_a > total_a:
+            expanded_a = torch.zeros(
+                [master_a.shape[0], master_a.shape[1], master_a.shape[2], target_a],
+                dtype=master_a.dtype,
+                device=master_a.device,
+            )
+            expanded_a[:, :, :, :total_a] = master_a
+            master_a = expanded_a
+            total_a = target_a
+
     windows = plan_h3_windows(
         total_frames=total_f,
         window_frames=chunk_frames,

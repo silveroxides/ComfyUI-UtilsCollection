@@ -183,7 +183,11 @@ class UC_H3LoopSampler(io.ComfyNode):
     ) -> io.NodeOutput:
         # Unwrap any list-wrapped scalar inputs caused by is_input_list=True
         def _first(val):
-            return val[0] if isinstance(val, list) and len(val) > 0 else val
+            while isinstance(val, list) and len(val) > 0 and (isinstance(val[0], list) or not isinstance(val, dict)):
+                if isinstance(val[0], dict) and "samples" in val[0]:
+                    return val[0]
+                val = val[0]
+            return val
 
         noise_val = _first(noise)
         sampler_val = _first(sampler)
@@ -203,6 +207,20 @@ class UC_H3LoopSampler(io.ComfyNode):
         p2_guider_val = _first(phase2_guider)
         d_mask_val = _first(denoise_mask)
         ad_mask_val = _first(audio_denoise_mask)
+
+        # Make sure latent_val is a dict
+        if isinstance(latent, list):
+            for item in latent:
+                if isinstance(item, dict) and "samples" in item:
+                    latent_val = item
+                    break
+                elif isinstance(item, list):
+                    for sub in item:
+                        if isinstance(sub, dict) and "samples" in sub:
+                            latent_val = sub
+                            break
+                    if isinstance(latent_val, dict) and "samples" in latent_val:
+                        break
 
         if guider_val is None:
             if model_val is None:
