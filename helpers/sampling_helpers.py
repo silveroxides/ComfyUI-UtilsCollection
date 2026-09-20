@@ -400,6 +400,29 @@ def run_chunk_sampling(
     return current
 
 
+def reset_model_caches(guider: Any) -> None:
+    """Reset any residual or attention caches attached to the model before sampling a chunk."""
+    if guider is None:
+        return
+    model_patcher = getattr(guider, "model_patcher", None)
+    if model_patcher is None:
+        model_patcher = getattr(guider, "model", None)
+    if model_patcher is None:
+        return
+
+    opts = getattr(model_patcher, "model_options", {}) or {}
+    to = opts.get("transformer_options", {}) or {}
+    patches_replace = to.get("patches_replace", {}) or {}
+    dit_patches = patches_replace.get("dit", {}) or {}
+
+    for k, patch_obj in dit_patches.items():
+        if hasattr(patch_obj, "reset") and callable(patch_obj.reset):
+            try:
+                patch_obj.reset()
+            except Exception:
+                pass
+
+
 def start_sampling_loop(
     noise: Any,
     guider: Any,
@@ -527,6 +550,11 @@ def start_sampling_loop(
         chunk_g2 = None
         if phase2_guider is not None:
             chunk_g2 = prepare_chunk_guider(phase2_guider, chunk_cond, frame0=frame0)
+
+        # Reset any block residual caches so each chunk gets a clean schedule start
+        reset_model_caches(chunk_g)
+        if chunk_g2 is not None:
+            reset_model_caches(chunk_g2)
 
         sampled = run_chunk_sampling(
             noise,
