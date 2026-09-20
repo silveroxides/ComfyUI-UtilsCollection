@@ -85,10 +85,11 @@ def test_plan_h3_windows():
         assert start >= 0
         assert end <= 22
 
-    # Direct segment lengths test
-    custom_windows = plan_h3_windows(total_frames=73, window_frames=0, overlap_frames=0, segment_lengths=[22, 22, 29])
+    # Direct segment lengths test with overlap
+    custom_windows = plan_h3_windows(total_frames=73, window_frames=0, overlap_frames=22, segment_lengths=[22, 22, 29])
     assert len(custom_windows) == 3
     assert custom_windows[0][0] == 0
+    assert custom_windows[1][0] == 0  # overlapped into chunk 0
     assert custom_windows[-1][1] == 22
 
 

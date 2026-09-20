@@ -224,14 +224,26 @@ def plan_h3_windows(
                 segment_lengths = list(segment_lengths)
             except Exception:
                 segment_lengths = [int(segment_lengths)]
+
+        ov_latents = 0
+        if overlap_frames > 0:
+            raw_ov = h3_frames_to_latents(int(overlap_frames))
+            ov_latents = h3_snap_latent_t(raw_ov) if raw_ov >= H3_LATENT_BASE else 0
+
         windows = []
         curr_f = 0
-        for seg_f in segment_lengths:
+        for i, seg_f in enumerate(segment_lengths):
             seg_len = int(seg_f)
             start_f = curr_f
             end_f = min(total_f, curr_f + seg_len)
-            v0 = h3_frames_to_latents(start_f) if start_f > 0 else 0
+            nominal_v0 = h3_frames_to_latents(start_f) if start_f > 0 else 0
             v1 = min(total_latents, h3_frames_to_latents(end_f))
+
+            # Apply overlap carry into the window start if not the first chunk
+            v0 = nominal_v0
+            if i > 0 and ov_latents > 0:
+                v0 = max(0, nominal_v0 - ov_latents)
+
             if v1 > v0:
                 windows.append((v0, v1))
             curr_f = end_f
