@@ -429,17 +429,17 @@ def start_sampling_loop(
 def split_h3_video_components_into_segments(
     video: Any,
     megapixels: float = 0.5,
+    duration_seconds: float = 0.0,
+    start_at_timestamp: float = 0.0,
     segment_count: int = 0,
-    chunk_frames: int = 124,
-    overlap_frames: int = 22,
     whisper_model: Any = None,
     timestamp_format: str = "00.000s",
     enable_whisper: bool = True,
 ) -> tuple[list[torch.Tensor], list[dict[str, Any]], int, int, list[int], list[Any], list[str]]:
-    """Split reference video components across planned segments or windows, returning lists."""
+    """Split reference video components across sequential segments, returning lists."""
     from fractions import Fraction
-    from comfy_api.latest import io, InputImpl, Types
-    from .image_helpers import cached_h3_reference_components, prepare_h3_reference_components
+    from comfy_api.latest import InputImpl, Types
+    from .image_helpers import cached_h3_reference_components, prepare_h3_reference_components, h3_video_length_from_seconds
     from .model_helpers import transcribe_reference_audio
 
     components = cached_h3_reference_components(video, megapixels)
@@ -447,17 +447,23 @@ def split_h3_video_components_into_segments(
     source_rate = float(components.frame_rate)
     source_count = source_frames.shape[0]
     source_seconds = source_count / source_rate
-    total_frames = max(1, round(source_seconds * 24))
 
+    # If segment_count is specified, divide into that many equal H3 segments
+    # If segment_count is 0, use duration_seconds to step across available duration
     if segment_count > 0:
-        windows = []
-        for seg_idx in range(segment_count):
-            windows.append((seg_idx, True))
-        is_manual_segments = True
+        segment_indices = list(range(segment_count))
+        use_fixed_segments = True
     else:
-        planned_windows = plan_h3_windows(total_frames, chunk_frames, overlap_frames)
-        windows = [(w, False) for w in planned_windows]
-        is_manual_segments = False
+        dur = float(duration_seconds) if duration_seconds > 0 else 5.17
+        start_sec = float(start_at_timestamp) if start_at_timestamp > 0 else 0.0
+        remaining_sec = max(0.0, source_seconds - start_sec)
+        num_segments = max(1, int(round(remaining_sec / dur)))
+        segment_indices = []
+        curr = start_sec
+        while curr < source_seconds:
+            segment_indices.append((curr, dur))
+            curr += dur
+        use_fixed_segments = False
 
     frames_list = []
     audio_list = []
@@ -467,8 +473,8 @@ def split_h3_video_components_into_segments(
     out_w = 0
     out_h = 0
 
-    if is_manual_segments:
-        for seg_idx, _ in windows:
+    if use_fixed_segments:
+        for seg_idx in segment_indices:
             frames, audio, width, height, length, _, _ = prepare_h3_reference_components(
                 components,
                 megapixels,
@@ -487,17 +493,12 @@ def split_h3_video_components_into_segments(
             video_list.append(prep_video)
             transcript_list.append(t_audio)
     else:
-        for (v0, v1), _ in windows:
-            start_f = h3_frame_at_latent(v0)
-            end_f = h3_frame_at_latent(v1)
-            duration_s = max(0.1, (end_f - start_f) / 24.0)
-            start_s = start_f / 24.0
-
+        for s_time, s_dur in segment_indices:
             frames, audio, width, height, length, _, _ = prepare_h3_reference_components(
                 components,
                 megapixels,
-                duration_seconds=duration_s,
-                start_at_timestamp=start_s,
+                duration_seconds=s_dur,
+                start_at_timestamp=s_time,
                 spatially_prepared=True,
             )
             out_w, out_h = width, height
