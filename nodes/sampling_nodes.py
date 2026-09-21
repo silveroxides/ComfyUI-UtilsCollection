@@ -53,6 +53,17 @@ class UC_H3LoopSampler(io.ComfyNode):
                     "latent",
                     tooltip="Blank joint video and audio canvas (from Empty MiniMax H3 Latent) sized for the total clip length.",
                 ),
+                io.Audio.Input(
+                    "source_audio",
+                    optional=True,
+                    tooltip="Optional full source soundtrack. With preserve_input, it is encoded and pinned in the H3 latent while this node also returns the clean timeline-aligned track directly.",
+                ),
+                io.Vae.Input(
+                    "audio_vae",
+                    optional=True,
+                    lazy=True,
+                    tooltip="MiniMax H3 audio VAE. Required only when source_audio is connected.",
+                ),
                 io.AnyType.Input(
                     "segment_lengths",
                     optional=True,
@@ -159,8 +170,16 @@ class UC_H3LoopSampler(io.ComfyNode):
                     "report",
                     tooltip="Summary log showing chunk frame ranges, carried frames, and timings.",
                 ),
+                io.Audio.Output(
+                    "audio_passthrough",
+                    tooltip="Clean source audio aligned to the generated H3 clip. Connect this instead of decoding preserved source audio from the latent.",
+                ),
             ],
         )
+
+    @classmethod
+    def check_lazy_status(cls, source_audio=None, audio_vae=None, **kwargs):
+        return ["audio_vae"] if source_audio is not None and audio_vae is None else []
 
     @classmethod
     def execute(
@@ -170,6 +189,8 @@ class UC_H3LoopSampler(io.ComfyNode):
         sigmas,
         conditioning,
         latent,
+        source_audio=None,
+        audio_vae=None,
         model=None,
         guider=None,
         segment_lengths=None,
@@ -200,6 +221,8 @@ class UC_H3LoopSampler(io.ComfyNode):
         sampler_val = _first(sampler)
         sigmas_val = _first(sigmas)
         latent_val = _first(latent)
+        source_audio_val = _first(source_audio)
+        audio_vae_val = _first(audio_vae)
         model_val = _first(model)
         guider_val = _first(guider)
         chunk_dur_val = _first(chunk_duration)
@@ -276,7 +299,7 @@ class UC_H3LoopSampler(io.ComfyNode):
         cf = kwargs.get("chunk_frames") if "chunk_frames" in kwargs else parse_h3_seconds_option(chunk_dur_val, 124)
         of = kwargs.get("overlap_frames") if "overlap_frames" in kwargs else parse_h3_seconds_option(overlap_dur_val, 22)
 
-        out_latent, num_chunks, report = start_sampling_loop(
+        out_latent, num_chunks, report, passthrough_audio = start_sampling_loop(
             noise=noise_val,
             guider=guider_val,
             sampler=sampler_val,
@@ -297,8 +320,10 @@ class UC_H3LoopSampler(io.ComfyNode):
             phase2_guider=p2_guider_val,
             denoise_mask=d_mask_val,
             audio_denoise_mask=ad_mask_val,
+            source_audio=source_audio_val,
+            audio_vae=audio_vae_val,
         )
-        return io.NodeOutput(out_latent, num_chunks, report)
+        return io.NodeOutput(out_latent, num_chunks, report, passthrough_audio)
 
 
 class UC_H3RefVideoSegments(io.ComfyNode):

@@ -6,6 +6,7 @@ from typing import Any, Optional, Sequence
 
 import torch
 import torch.nn.functional as F
+import torchaudio
 
 import comfy.model_management
 import comfy.utils
@@ -180,6 +181,62 @@ def h3_split_noise_mask(latent_dict: dict[str, Any]) -> tuple[Optional[torch.Ten
     if getattr(m, "ndim", 0) == 5:
         return m, None
     return None, m
+
+
+def prepare_h3_source_audio(
+    audio: dict[str, Any],
+    audio_vae: Any,
+    audio_template: torch.Tensor,
+    total_frames: int,
+) -> tuple[torch.Tensor, dict[str, Any]]:
+    """Fit raw source audio to an H3 clip and encode it into its audio latent."""
+    if not isinstance(audio, dict) or not torch.is_tensor(audio.get("waveform")):
+        raise ValueError("UC_H3LoopSampler source_audio must contain a waveform tensor.")
+    waveform = audio["waveform"]
+    sample_rate = audio.get("sample_rate")
+    if (
+        waveform.ndim != 3
+        or waveform.shape[1] not in (1, 2)
+        or waveform.shape[-1] < 1
+        or not torch.is_floating_point(waveform)
+        or not torch.isfinite(waveform).all()
+        or not isinstance(sample_rate, (int, float))
+        or sample_rate <= 0
+    ):
+        raise ValueError("UC_H3LoopSampler source_audio requires a finite mono or stereo waveform and positive sample rate.")
+    if audio_vae is None or not callable(getattr(audio_vae, "encode", None)):
+        raise ValueError("UC_H3LoopSampler source_audio requires an audio_vae input.")
+
+    source = waveform[:1]
+    if source.shape[1] == 1:
+        source = source.repeat(1, 2, 1)
+    target_samples = int(round(int(total_frames) * float(sample_rate) / H3_FPS))
+    if source.shape[-1] > target_samples:
+        source = source[..., :target_samples]
+    elif source.shape[-1] < target_samples:
+        source = F.pad(source, (0, target_samples - source.shape[-1]))
+    passthrough = {"waveform": source, "sample_rate": int(sample_rate)}
+
+    vae_rate = getattr(audio_vae, "audio_sample_rate", sample_rate)
+    encoded_source = source
+    if vae_rate != sample_rate:
+        encoded_source = torchaudio.functional.resample(encoded_source, sample_rate, vae_rate)
+    hop = getattr(getattr(audio_vae, "first_stage_model", audio_vae), "hop_length", getattr(audio_vae, "downscale_ratio", None))
+    if isinstance(hop, (int, float)) and hop > 1:
+        remainder = encoded_source.shape[-1] % int(hop)
+        if remainder:
+            encoded_source = F.pad(encoded_source, (0, int(hop) - remainder))
+
+    encoded = audio_vae.encode(encoded_source.movedim(1, -1))
+    if not torch.is_tensor(encoded) or encoded.ndim != audio_template.ndim or encoded.shape[:-1] != audio_template.shape[:-1]:
+        raise ValueError("UC_H3LoopSampler audio_vae returned an incompatible audio latent.")
+    encoded = encoded.to(dtype=audio_template.dtype, device=audio_template.device)
+    target_t = audio_template.shape[-1]
+    if encoded.shape[-1] > target_t:
+        encoded = encoded[..., :target_t]
+    elif encoded.shape[-1] < target_t:
+        encoded = F.pad(encoded, (0, target_t - encoded.shape[-1]))
+    return encoded.contiguous(), passthrough
 
 
 def check_core_per_row_masking() -> bool:
@@ -419,10 +476,10 @@ def build_carry_noise_mask(
             am = master_mask_a[:, :, :, a0:a1].to(dtype=am.dtype, device=am.device).clone()
 
     if carried_v > 0:
-        vm[:, :, :carried_v] = 1.0 - float(strength_v)
+        vm[:, :, :carried_v] = torch.minimum(vm[:, :, :carried_v], torch.full_like(vm[:, :, :carried_v], 1.0 - float(strength_v)))
 
     if am is not None and carried_a > 0:
-        am[:, :, :, :carried_a] = 1.0 - float(strength_a)
+        am[:, :, :, :carried_a] = torch.minimum(am[:, :, :, :carried_a], torch.full_like(am[:, :, :, :carried_a], 1.0 - float(strength_a)))
 
     return NestedTensor([vm, am]) if am is not None else vm
 
@@ -523,7 +580,9 @@ def start_sampling_loop(
     phase2_guider: Optional[Any] = None,
     denoise_mask: Optional[torch.Tensor] = None,
     audio_denoise_mask: Optional[torch.Tensor] = None,
-) -> tuple[dict[str, Any], int, str]:
+    source_audio: Optional[dict[str, Any]] = None,
+    audio_vae: Optional[Any] = None,
+) -> tuple[dict[str, Any], int, str, Optional[dict[str, Any]]]:
     """Execute looping sampling over an H3 whole-clip AV latent."""
     if not cond_list:
         raise ValueError("start_sampling_loop: conditioning list is empty")
@@ -568,6 +627,14 @@ def start_sampling_loop(
             master_a = expanded_a
             total_a = target_a
 
+    passthrough_audio = None
+    if source_audio is not None:
+        if audio_mode != "preserve_input":
+            raise ValueError("UC_H3LoopSampler source_audio requires audio_mode 'preserve_input'.")
+        if master_a is None:
+            raise ValueError("UC_H3LoopSampler source_audio requires a joint video/audio latent.")
+        master_a, passthrough_audio = prepare_h3_source_audio(source_audio, audio_vae, master_a, total_f)
+
     total_v, total_a, window_records, _ = plan_h3_schedule(
         total_frames=total_f,
         window_frames=chunk_frames,
@@ -579,6 +646,12 @@ def start_sampling_loop(
     out_v = master_v.clone()
     out_a = None if master_a is None else master_a.clone()
     in_mask_v, in_mask_a = h3_split_noise_mask(latent)
+    if source_audio is not None:
+        in_mask_a = torch.zeros(
+            [master_a.shape[0], 1, master_a.shape[2], master_a.shape[3]],
+            dtype=torch.float32,
+            device=master_a.device,
+        )
 
     lines = [
         f"Sampling {num_chunks} chunk(s) over {total_v} latents ({total_f} frames, {total_f / float(H3_FPS):.2f}s), "
@@ -676,9 +749,15 @@ def start_sampling_loop(
     if audio_mode == "preserve_input" and master_a is not None:
         out_a = master_a.clone()
 
-    final_latent = h3_pack_av(latent, out_v, out_a)
+    final_mask = None
+    if source_audio is not None:
+        final_v_mask = in_mask_v
+        if final_v_mask is None:
+            final_v_mask = torch.ones([out_v.shape[0], 1] + list(out_v.shape[2:]), dtype=torch.float32, device=out_v.device)
+        final_mask = NestedTensor([final_v_mask, in_mask_a])
+    final_latent = h3_pack_av(latent, out_v, out_a, noise_mask=final_mask)
     report = "\n".join(lines)
-    return final_latent, num_chunks, report
+    return final_latent, num_chunks, report, passthrough_audio
 
 
 def split_h3_video_components_into_segments(

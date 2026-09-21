@@ -30,6 +30,7 @@ from utils_collection_sampling_test.helpers.sampling_helpers import (
     h3_unpack_av,
     plan_h3_windows,
     prepare_chunk_guider,
+    prepare_h3_source_audio,
     start_sampling_loop,
     strip_stale_keyframes,
 )
@@ -162,7 +163,7 @@ def test_start_sampling_loop_mock():
 
     sh.run_chunk_sampling = dummy_run_chunk
     try:
-        out_latent, num_chunks, report = start_sampling_loop(
+        out_latent, num_chunks, report, passthrough_audio = start_sampling_loop(
             noise=None,
             guider=MockGuider(),
             sampler=MockSampler(),
@@ -178,8 +179,111 @@ def test_start_sampling_loop_mock():
         assert res_v.shape == v.shape
         assert res_a.shape == a.shape
         assert "chunk 0" in report
+        assert passthrough_audio is None
     finally:
         sh.run_chunk_sampling = orig_run
+
+
+def test_h3_source_audio_is_encoded_pinned_and_returned_cleanly():
+    video = torch.zeros([1, 24, 17, 4, 4])
+    audio_latent = torch.zeros([1, 32, 2, 93])
+    source_audio = {"waveform": torch.ones([1, 1, 300]), "sample_rate": 240}
+
+    class MockAudioVAE:
+        audio_sample_rate = 240
+        downscale_ratio = 8
+
+        def encode(self, samples):
+            assert samples.shape[1] % 8 == 0
+            return torch.full([1, 32, 2, 20], 3.0)
+
+    encoded, passthrough = prepare_h3_source_audio(source_audio, MockAudioVAE(), audio_latent, total_frames=56)
+    assert encoded.shape == audio_latent.shape
+    assert torch.all(encoded[..., :20] == 3.0)
+    assert torch.all(encoded[..., 20:] == 0.0)
+    assert passthrough["waveform"].shape == (1, 2, 560)
+    assert passthrough["sample_rate"] == 240
+
+    cond = [[torch.zeros([1, 5, 16]), {}]]
+
+    class MockGuider:
+        def __init__(self):
+            self.original_conds = {"positive": cond, "negative": None}
+            self.model_options = {}
+
+        def set_conds(self, positive, negative=None):
+            self.original_conds["positive"] = positive
+
+    from utils_collection_sampling_test.helpers import sampling_helpers as sh
+    observed_masks = []
+    original_run = sh.run_chunk_sampling
+
+    def identity_chunk(noise, guider, sampler, sigmas, chunk_latent, **kwargs):
+        observed_masks.append(chunk_latent["noise_mask"].unbind()[-1])
+        return chunk_latent
+
+    sh.run_chunk_sampling = identity_chunk
+    try:
+        result, _, _, direct_audio = start_sampling_loop(
+            noise=None,
+            guider=MockGuider(),
+            sampler=object(),
+            sigmas=torch.tensor([1.0, 0.0]),
+            cond_list=cond,
+            latent=h3_pack_av({}, video, audio_latent),
+            chunk_frames=22,
+            overlap_frames=22,
+            source_audio=source_audio,
+            audio_vae=MockAudioVAE(),
+        )
+    finally:
+        sh.run_chunk_sampling = original_run
+
+    _, result_audio = h3_unpack_av(result)
+    result_video_mask, result_audio_mask = h3_split_noise_mask(result)
+    assert direct_audio["waveform"].shape == (1, 2, 560)
+    assert torch.all(result_audio[..., :20] == 3.0)
+    assert result_video_mask is not None
+    assert torch.count_nonzero(result_audio_mask) == 0
+    assert observed_masks and all(torch.count_nonzero(mask) == 0 for mask in observed_masks)
+
+
+def test_h3_source_audio_rejects_generated_audio_modes():
+    video = torch.zeros([1, 24, 7, 4, 4])
+    audio_latent = torch.zeros([1, 32, 2, 37])
+    with pytest.raises(ValueError, match="preserve_input"):
+        start_sampling_loop(
+            noise=None,
+            guider=object(),
+            sampler=object(),
+            sigmas=torch.tensor([1.0, 0.0]),
+            cond_list=[[torch.zeros([1, 5, 16]), {}]],
+            latent=h3_pack_av({}, video, audio_latent),
+            audio_mode="full_generation",
+            source_audio={"waveform": torch.ones([1, 2, 10]), "sample_rate": 10},
+        )
+
+
+def test_h3_source_audio_requires_joint_latent_and_valid_waveform():
+    video = torch.zeros([1, 24, 7, 4, 4])
+    source_audio = {"waveform": torch.ones([1, 2, 10]), "sample_rate": 10}
+    with pytest.raises(ValueError, match="joint video/audio latent"):
+        start_sampling_loop(
+            noise=None,
+            guider=object(),
+            sampler=object(),
+            sigmas=torch.tensor([1.0, 0.0]),
+            cond_list=[[torch.zeros([1, 5, 16]), {}]],
+            latent=h3_pack_av({}, video),
+            source_audio=source_audio,
+        )
+    with pytest.raises(ValueError, match="finite mono or stereo"):
+        prepare_h3_source_audio(
+            {"waveform": torch.ones([1, 3, 10]), "sample_rate": 10},
+            object(),
+            torch.zeros([1, 32, 2, 37]),
+            total_frames=22,
+        )
 
 
 def test_h3_loop_sampler_execute_handles_all_input_variants():
@@ -261,7 +365,7 @@ def test_node_schema():
     schema = UC_H3LoopSampler.define_schema()
     assert schema.node_id == "UC_H3LoopSampler"
     assert len(schema.inputs) >= 7
-    assert len(schema.outputs) == 3
+    assert len(schema.outputs) == 4
     input_names = [inp.id for inp in schema.inputs]
     assert "model" in input_names
     assert "guider" in input_names
@@ -269,6 +373,11 @@ def test_node_schema():
     assert "segment_lengths" in input_names
     assert "chunk_duration" in input_names
     assert "overlap_duration" in input_names
+    assert "source_audio" in input_names
+    assert "audio_vae" in input_names
+    assert schema.outputs[-1].id == "audio_passthrough"
+    assert UC_H3LoopSampler.check_lazy_status() == []
+    assert UC_H3LoopSampler.check_lazy_status(source_audio={"waveform": torch.ones([1, 2, 1])}) == ["audio_vae"]
 
     seg_schema = UC_H3RefVideoSegments.define_schema()
     assert seg_schema.node_id == "UC_H3RefVideoSegments"
