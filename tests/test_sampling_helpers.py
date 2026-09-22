@@ -33,6 +33,7 @@ from utils_collection_sampling_test.helpers.sampling_helpers import (
     prepare_h3_source_audio,
     start_sampling_loop,
     strip_stale_keyframes,
+    split_h3_video_components_into_segments,
 )
 from utils_collection_sampling_test.nodes.sampling_nodes import (
     UC_H3LoopSampler,
@@ -381,6 +382,8 @@ def test_node_schema():
 
     seg_schema = UC_H3RefVideoSegments.define_schema()
     assert seg_schema.node_id == "UC_H3RefVideoSegments"
+    mp_input = next(inp for inp in seg_schema.inputs if inp.id == "megapixels")
+    assert mp_input.min == 0.0
     assert seg_schema.outputs[0].is_output_list is True
     assert seg_schema.outputs[1].is_output_list is True
     assert seg_schema.outputs[2].is_output_list is False
@@ -388,3 +391,13 @@ def test_node_schema():
     assert seg_schema.outputs[4].is_output_list is True
     assert seg_schema.outputs[5].is_output_list is True
     assert seg_schema.outputs[6].is_output_list is True
+
+    # Test split_h3_video_components_into_segments with megapixels=0.0 preserves resolution
+    import types
+    raw_frames = torch.zeros(24, 60, 120, 3)
+    comp = types.SimpleNamespace(images=raw_frames, frame_rate=24, audio=None)
+    vid = types.SimpleNamespace(get_components=lambda: comp)
+    out = split_h3_video_components_into_segments(vid, megapixels=0.0, segment_count=1)
+    frames_list, _, out_w, out_h, lengths, _, _ = out
+    assert (out_w, out_h) == (120, 60)
+    assert tuple(frames_list[0].shape[1:3]) == (60, 120)

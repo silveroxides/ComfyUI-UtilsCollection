@@ -1006,6 +1006,12 @@ def test_h3_reference_components_round_seconds_and_preserve_audio_start():
     assert short.result[1]["waveform"].shape[-1] == 7200
     assert torch.count_nonzero(short.result[1]["waveform"]) == 0
 
+    # megapixels=0.0 keeps native frame dimensions without scaling or cropping.
+    zero_mp = utils_nodes.UC_MiniMaxH3RefVid.execute(video, megapixels=0.0)
+    assert zero_mp.result[2] == 16
+    assert zero_mp.result[3] == 8
+    assert tuple(zero_mp.result[0].shape[1:3]) == (8, 16)
+
 
 @pytest.mark.parametrize("timestamp_format, expected", [
     ("00.000s", "[00.400s–01.800s] Shake the bottle."),
