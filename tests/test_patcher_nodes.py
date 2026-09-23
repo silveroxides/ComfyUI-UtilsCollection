@@ -456,7 +456,7 @@ def test_h3_sla_sampling_scope_restores_reduced_precision_accumulation():
     assert {name: getattr(backend, name) for name in attributes} == original
 
 
-def test_unified_h3_memory_optimizations_use_clone_scoped_block_patches(monkeypatch):
+def test_unified_h3_memory_optimizations_use_clone_scoped_block_patches(monkeypatch, caplog):
     class FakeAttention:
         def forward(self, x, rope_freqs=None, transformer_options=None):
             return x
@@ -473,6 +473,7 @@ def test_unified_h3_memory_optimizations_use_clone_scoped_block_patches(monkeypa
             self.model = types.SimpleNamespace(diffusion_model=diffusion)
             self.model_options = {"transformer_options": {}}
             self.object_patches = {}
+            self.wrappers = {}
 
         def clone(self):
             return FakePatcher(self.model.diffusion_model)
@@ -482,6 +483,12 @@ def test_unified_h3_memory_optimizations_use_clone_scoped_block_patches(monkeypa
 
         def add_object_patch(self, path, value):
             self.object_patches[path] = value
+
+        def remove_wrappers_with_key(self, wrapper_type, key):
+            self.wrappers.get(wrapper_type, {}).pop(key, None)
+
+        def add_wrapper_with_key(self, wrapper_type, key, wrapper):
+            self.wrappers.setdefault(wrapper_type, {})[key] = wrapper
 
     patched = patcher_helpers.patch_unified_attention_model(
         FakePatcher(FakeH3()),
@@ -496,6 +503,19 @@ def test_unified_h3_memory_optimizations_use_clone_scoped_block_patches(monkeypa
         "diffusion_model.blocks.0.attn.forward",
         "diffusion_model.blocks.1.attn.forward",
     ]
+    scope = patched.wrappers[patcher_helpers.comfy.patcher_extension.WrappersMP.OUTER_SAMPLE][
+        patcher_helpers.UNIFIED_ATTENTION_SAMPLING_SCOPE_KEY
+    ]
+
+    def fail():
+        raise RuntimeError("sampling failed")
+
+    with caplog.at_level(logging.INFO, logger=patcher_helpers.__name__):
+        assert scope(lambda: "sampled") == "sampled"
+        with pytest.raises(RuntimeError, match="sampling failed"):
+            scope(fail)
+    assert caplog.text.count("SageAttention active for sampling") == 2
+    assert caplog.text.count("SageAttention sampling ended; Core default attention unchanged") == 2
 
 
 def test_h3_radial_block_mask_keeps_cross_segment_blocks_dense():

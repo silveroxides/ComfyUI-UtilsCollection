@@ -45,6 +45,7 @@ MINIMAX_H3_CACHE_OWNER_KEY = "utilscollection_minimax_h3_cache"
 MINIMAX_H3_SPECTRUM_OWNER_KEY = "utilscollection_minimax_h3_spectrum"
 MINIMAX_H3_PDD_OWNER_KEY = "utilscollection_minimax_h3_pdd_acc"
 UNIFIED_ATTENTION_OWNER_KEY = "utilscollection_unified_attention"
+UNIFIED_ATTENTION_SAMPLING_SCOPE_KEY = "utilscollection_unified_attention_sampling_scope"
 MINIMAX_H3_RADIAL_WRAPPER_KEY = "utilscollection_minimax_h3_radial"
 MINIMAX_H3_RADIAL_STATE_KEY = "utilscollection_minimax_h3_radial_state"
 MINIMAX_H3_SLA_WRAPPER_KEY = "utilscollection_minimax_h3_sla"
@@ -5374,6 +5375,18 @@ def _patch_h3_sla_attention(model: Any, config: MiniMaxH3SlaAttentionConfig) -> 
     return patched
 
 
+def _unified_attention_sampling_scope(mode: str):
+    def scope(sample_fn: Callable[..., Any], *args: Any, **kwargs: Any) -> Any:
+        logger = logging.getLogger(__name__)
+        logger.info("Unified Attention Patcher: %s active for sampling", mode)
+        try:
+            return sample_fn(*args, **kwargs)
+        finally:
+            logger.info("Unified Attention Patcher: %s sampling ended; Core default attention unchanged", mode)
+
+    return scope
+
+
 def patch_unified_attention_model(model: Any, attention_mode: dict[str, Any]) -> Any:
     mode = attention_mode.get("attention_mode")
     if mode not in UNIFIED_ATTENTION_MODES:
@@ -5384,8 +5397,8 @@ def patch_unified_attention_model(model: Any, attention_mode: dict[str, Any]) ->
         config = attention_mode.get("minimax_h3_radial_config")
         if not isinstance(config, MiniMaxH3RadialAttentionConfig):
             raise ValueError("Sparse / MiniMax H3 Radial requires MiniMax H3 Radial Attention Config.")
-        return _patch_h3_radial_attention(model, config)
-    if mode == "Sparse / MiniMax H3 SLA":
+        patched = _patch_h3_radial_attention(model, config)
+    elif mode == "Sparse / MiniMax H3 SLA":
         config = attention_mode.get("minimax_h3_sla_config")
         if config is None:
             config = MiniMaxH3SlaAttentionConfig()
@@ -5399,27 +5412,33 @@ def patch_unified_attention_model(model: Any, attention_mode: dict[str, Any]) ->
             protect_reference_media=attention_mode.get("protect_reference_media", "Light"),
             dense_backend=attention_mode.get("dense_backend", "comfy_kitchen"),
         )
-        return _patch_h3_sla_attention(model, config)
-
-    patched = model.clone()
-    options = _ensure_transformer_options(patched)
-    options[UNIFIED_ATTENTION_OWNER_KEY] = mode
-    if mode == "FlashAttention":
-        options["optimized_attention_override"] = _call_attention_function(
-            _make_flash_backend(bool(attention_mode.get("allow_compile", False)), _model_compute_dtype(patched))
-        )
-    elif mode == "SageAttention":
-        h3_memory_optimizations = bool(attention_mode.get("h3_memory_optimizations", False))
-        options["optimized_attention_override"] = _call_attention_function(
-            _make_sage_backend(attention_mode.get("sage_mode", "auto"), bool(attention_mode.get("allow_compile", False)))
-        )
-        if h3_memory_optimizations:
-            diffusion_model = patched.get_model_object("diffusion_model")
-            if not isinstance(diffusion_model, minimax_model.MiniMaxH3Model):
-                raise ValueError("MiniMax H3 memory optimizations require a MiniMax H3 diffusion model.")
-            for index, block in enumerate(diffusion_model.blocks):
-                patched_forward = types.MethodType(_h3_sage_forward, block.attn)
-                patched.add_object_patch(f"diffusion_model.blocks.{index}.attn.forward", patched_forward)
+        patched = _patch_h3_sla_attention(model, config)
+    else:
+        patched = model.clone()
+        options = _ensure_transformer_options(patched)
+        options[UNIFIED_ATTENTION_OWNER_KEY] = mode
+        if mode == "FlashAttention":
+            options["optimized_attention_override"] = _call_attention_function(
+                _make_flash_backend(bool(attention_mode.get("allow_compile", False)), _model_compute_dtype(patched))
+            )
+        elif mode == "SageAttention":
+            h3_memory_optimizations = bool(attention_mode.get("h3_memory_optimizations", False))
+            options["optimized_attention_override"] = _call_attention_function(
+                _make_sage_backend(attention_mode.get("sage_mode", "auto"), bool(attention_mode.get("allow_compile", False)))
+            )
+            if h3_memory_optimizations:
+                diffusion_model = patched.get_model_object("diffusion_model")
+                if not isinstance(diffusion_model, minimax_model.MiniMaxH3Model):
+                    raise ValueError("MiniMax H3 memory optimizations require a MiniMax H3 diffusion model.")
+                for index, block in enumerate(diffusion_model.blocks):
+                    patched_forward = types.MethodType(_h3_sage_forward, block.attn)
+                    patched.add_object_patch(f"diffusion_model.blocks.{index}.attn.forward", patched_forward)
+    patched.remove_wrappers_with_key(comfy.patcher_extension.WrappersMP.OUTER_SAMPLE, UNIFIED_ATTENTION_SAMPLING_SCOPE_KEY)
+    patched.add_wrapper_with_key(
+        comfy.patcher_extension.WrappersMP.OUTER_SAMPLE,
+        UNIFIED_ATTENTION_SAMPLING_SCOPE_KEY,
+        _unified_attention_sampling_scope(mode),
+    )
     return patched
 
 
