@@ -849,7 +849,7 @@ def test_block_runner_preserves_double_block_replacements(monkeypatch):
     monkeypatch.setattr(
         patcher_helpers.comfy.model_prefetch,
         "prefetch_queue_pop",
-        lambda queue, device, block: prefetch_events.append(block),
+        lambda queue, device, block, malloc_scope=None: prefetch_events.append((block, malloc_scope)),
     )
 
     class Block:
@@ -873,7 +873,7 @@ def test_block_runner_preserves_double_block_replacements(monkeypatch):
     )
 
     assert torch.equal(output, torch.full((2, 4), 12.0))
-    assert prefetch_events == [blocks[0], blocks[1], None]
+    assert prefetch_events == [(blocks[0], "block"), (blocks[1], "block"), (None, "block")]
 
 
 def test_cached_forward_matches_current_core_audio_output_contract(monkeypatch):
