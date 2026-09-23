@@ -3579,14 +3579,17 @@ def _encode_minimax_h3_image_guide(clip, image, timestamp, vlm_resolution, cache
     )
 
 
-def encode_minimax_h3_ref_vlm(clip, media_type, media, vlm_resolution=384):
+def encode_minimax_h3_ref_vlm(clip, media_type, media, vlm_resolution=384, reference_number=17):
     if not is_minimax_h3_text_encoder(clip):
         raise ValueError("MiniMax H3 Ref VLM requires the qwen3vl_32b text encoder.")
+    if isinstance(reference_number, bool) or not isinstance(reference_number, numbers.Integral) or reference_number < 17:
+        raise ValueError("MiniMax H3 Ref Qwen reference number must be at least 17.")
     with H3EncoderCache("disabled") as invocation:
         clip = invocation.prepare_clip(clip)
         if media_type == "image":
             prepared = prepare_vlm_image(media, vlm_resolution)
-            entries = _minimax_h3_visual_token_entries(clip, prepared)
+            entries = _minimax_h3_text_entries(clip, f"<Picture {reference_number}>: ")
+            entries += _minimax_h3_visual_token_entries(clip, prepared)
             sections = _encode_minimax_h3_section(
                 clip, {"qwen3vl_32b": [entries]}, "grid-deepstack", cache=invocation,
                 section_kind="image", section_id="ref_vlm",
@@ -3602,8 +3605,10 @@ def encode_minimax_h3_ref_vlm(clip, media_type, media, vlm_resolution=384):
             label = _minimax_h3_text_entries(clip, "<Video 1>: ")
             if [entry[0] for entry in entries[:len(label)]] != [entry[0] for entry in label]:
                 raise ValueError("MiniMax H3 tokenizer returned an unexpected video prefix.")
+            numbered = _minimax_h3_text_entries(clip, f"<Video {reference_number}>: ")
+            numbered += entries[len(label):]
             sections = _encode_minimax_h3_section(
-                clip, {"qwen3vl_32b": [entries[len(label):]]}, "grid-deepstack", cache=invocation,
+                clip, {"qwen3vl_32b": [numbered]}, "grid-deepstack", cache=invocation,
                 section_kind="video", section_id="ref_vlm",
             )
         else:

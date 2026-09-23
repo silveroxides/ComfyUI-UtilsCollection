@@ -2662,24 +2662,23 @@ def test_minimax_h3_guide_integration_preserves_conditioning_and_native_timestam
     assert len(clip.encoded_tokens) == 2
 
 
-def test_minimax_h3_ref_vlm_omits_numbered_picture_and_video_labels():
+def test_minimax_h3_ref_vlm_uses_reserved_picture_and_video_numbers():
     clip = _MiniMaxH3TestClip()
     image = torch.zeros(1, 32, 64, 3)
-    image_embedding, image_tags = encoder_helpers.encode_minimax_h3_ref_vlm(clip, "image", image, 0)
+    image_embedding, image_tags = encoder_helpers.encode_minimax_h3_ref_vlm(clip, "image", image, 0, 21)
     image_entries = clip.encoded_tokens[-1]["qwen3vl_32b"][0]
-    assert image_entries[0][0] == 151652
+    assert image_entries[0][0] == "<Picture 21>: "
     assert image_embedding.shape[1] == image_tags.shape[0]
     assert sum(encoder_helpers.is_image_token(entry) for entry in image_entries) == 1
-    assert all(entry[0] != "<Picture 1>: " for entry in image_entries)
 
     video = torch.zeros(22, 32, 64, 3)
-    video_embedding, video_tags = encoder_helpers.encode_minimax_h3_ref_vlm(clip, "video", video, 0)
+    video_embedding, video_tags = encoder_helpers.encode_minimax_h3_ref_vlm(clip, "video", video, 0, 24)
     video_items = next(call["minimax_ref_items"] for call in reversed(clip.tokenize_calls) if call["minimax_ref_items"])
     assert video_items[0]["type"] == "video"
     assert video_items[0]["data"].shape[0] == 2
     assert video_items[0]["timestamps"] == [Fraction(0), Fraction(1, 2)]
     assert video_embedding.shape[1] == video_tags.shape[0]
-    assert all(entry[0] != "<Video 1>: " for entry in clip.encoded_tokens[-1]["qwen3vl_32b"][0])
+    assert clip.encoded_tokens[-1]["qwen3vl_32b"][0][0][0] == "<Video 24>: "
 
 
 def test_minimax_h3_temporal_media_fields_are_additive_and_standard_ignores_them():

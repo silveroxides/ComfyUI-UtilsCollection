@@ -927,11 +927,12 @@ def test_visual_ref_round_trip_restores_qwen_conditioning_and_legacy_file(monkey
     qwen_ref = _image_ref()
     qwen_ref["vlm_embedding"] = torch.arange(12, dtype=torch.float32).reshape(1, 3, 4)
     qwen_ref["vlm_tags"] = torch.tensor([1, 0, 0], dtype=torch.long)
+    qwen_ref["metadata"].update({"vlm_presentation": "image_numbered", "vlm_reference_number": 17})
     saved = model_helpers.save_minimax_h3_ref_collection([qwen_ref, _video_ref()], "qwen")
     loaded, legacy = [model_helpers.load_minimax_h3_ref(path) for path in saved]
     torch.testing.assert_close(loaded["vlm_embedding"], qwen_ref["vlm_embedding"])
     torch.testing.assert_close(loaded["vlm_tags"], qwen_ref["vlm_tags"])
-    assert "Qwen 3 tokens" in model_helpers.format_minimax_h3_ref_info([loaded])
+    assert "Qwen <Picture 17> 3 tokens" in model_helpers.format_minimax_h3_ref_info([loaded])
     assert "vlm_embedding" not in legacy
 
 
@@ -964,21 +965,27 @@ def test_ref_extract_keeps_old_inputs_and_attaches_optional_qwen(monkeypatch):
     clip = object()
     calls = []
 
-    def encode(_clip, media_type, media, resolution):
-        calls.append((_clip, media_type, tuple(media.shape), resolution))
+    def encode(_clip, media_type, media, resolution, number):
+        calls.append((_clip, media_type, tuple(media.shape), resolution, number))
         return torch.ones((1, 2, 4)), torch.tensor([1, 0], dtype=torch.long)
 
     monkeypatch.setattr(model_helpers, "encode_minimax_h3_ref_vlm", encode)
     schema = model_nodes.UC_MiniMaxH3RefExtract.define_schema()
     assert [item.id for item in schema.inputs[:4]] == ["images", "vae", "media_type", "description"]
     assert any(item.id == "clip" and item.optional for item in schema.inputs)
+    assert any(item.id == "vlm_reference_start" for item in schema.inputs)
     assert all(item.id != "timestamp" for item in schema.inputs)
     media_type = {"media_type": "image", "compression": {"compression": "encode"}}
     images = torch.zeros((2, 32, 64, 3))
-    refs = model_nodes.UC_MiniMaxH3RefExtract.execute(images, _VisualVae(), media_type, clip=clip, vlm_resolution=512)[0]
+    refs = model_nodes.UC_MiniMaxH3RefExtract.execute(images, _VisualVae(), media_type, clip=clip, vlm_resolution=512, vlm_reference_start=21)[0]
     assert len(refs) == 2
-    assert calls == [(clip, "image", (1, 32, 64, 3), 512)] * 2
+    assert calls == [(clip, "image", (1, 32, 64, 3), 512, 21), (clip, "image", (1, 32, 64, 3), 512, 22)]
+    assert [ref["metadata"]["vlm_reference_number"] for ref in refs] == [21, 22]
     assert all("vlm_embedding" in ref and "vlm_tags" in ref for ref in refs)
+    video_type = {"media_type": "video", "compression": {"compression": "encode"}}
+    video_ref = model_nodes.UC_MiniMaxH3RefExtract.execute(torch.zeros((22, 32, 64, 3)), _VisualVae(), video_type, clip=clip, vlm_resolution=512, vlm_reference_start=30)[0][0]
+    assert calls[-1] == (clip, "video", (22, 32, 64, 3), 512, 30)
+    assert video_ref["metadata"]["vlm_reference_number"] == 30
 
 
 def test_ref_vlm_requires_matching_tags_and_base_layout(monkeypatch, tmp_path):
@@ -995,6 +1002,16 @@ def test_ref_vlm_requires_matching_tags_and_base_layout(monkeypatch, tmp_path):
     ref["metadata"]["vlm_presentation"] = "image_guide"
     with pytest.raises(ValueError, match="outdated"):
         model_helpers.apply_minimax_h3_refs_to_conditioning([[torch.ones((1, 1, 4)), {"minimax_token_tags": torch.ones(1, dtype=torch.long)}]], [ref])
+
+
+def test_ref_apply_rejects_duplicate_qwen_picture_numbers():
+    refs = [_image_ref(), _image_ref()]
+    for ref in refs:
+        ref["metadata"].update({"vlm_presentation": "image_numbered", "vlm_reference_number": 17})
+        ref["vlm_embedding"] = torch.ones((1, 2, 4))
+        ref["vlm_tags"] = torch.ones(2, dtype=torch.long)
+    with pytest.raises(ValueError, match="duplicate image number 17"):
+        model_helpers.apply_minimax_h3_refs_to_conditioning([[torch.ones((1, 1, 4)), {"minimax_token_tags": torch.ones(1, dtype=torch.long), "uc_minimax_h3_vlm_layout": {"version": 1, "sequence_length": 1, "prompt_start": 0}}]], refs)
 
 
 def test_load_rejects_incomplete_qwen_tensor_pair(monkeypatch, tmp_path):
