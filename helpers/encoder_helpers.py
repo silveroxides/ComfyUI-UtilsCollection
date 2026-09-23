@@ -3565,14 +3565,46 @@ def execute_minimax_h3_vlm_guide(conditioning, clip, image, timestamp, vlm_resol
         with H3EncoderCache(enable_caching) as invocation:
             return execute_minimax_h3_vlm_guide(conditioning, clip, image, timestamp, vlm_resolution, cache=invocation, enable_caching=enable_caching)
     clip = cache.prepare_clip(clip)
+    guide = _encode_minimax_h3_image_guide(clip, image, timestamp, vlm_resolution, cache)
+    return splice_conditioning(conditioning, guide)
+
+
+def _encode_minimax_h3_image_guide(clip, image, timestamp, vlm_resolution, cache):
     prepared = prepare_vlm_image(image, vlm_resolution)
     entries = _minimax_h3_text_entries(clip, f"<{timestamp:.1f} seconds>")
     entries += _minimax_h3_visual_token_entries(clip, prepared)
-    guide = _encode_minimax_h3_section(
+    return _encode_minimax_h3_section(
         clip, {"qwen3vl_32b": [entries]}, "grid-deepstack", cache=cache,
         section_kind="guide", section_id="guide",
     )
-    return splice_conditioning(conditioning, guide)
+
+
+def encode_minimax_h3_ref_vlm(clip, media_type, media, vlm_resolution=384, timestamp=0.0):
+    if not is_minimax_h3_text_encoder(clip):
+        raise ValueError("MiniMax H3 Ref VLM requires the qwen3vl_32b text encoder.")
+    with H3EncoderCache("disabled") as invocation:
+        clip = invocation.prepare_clip(clip)
+        if media_type == "image":
+            if not math.isfinite(timestamp) or timestamp < 0:
+                raise ValueError("MiniMax H3 Ref VLM timestamp must be finite nonnegative seconds.")
+            sections = _encode_minimax_h3_image_guide(clip, media, timestamp, vlm_resolution, invocation)
+        elif media_type == "video":
+            indices = list(range(0, media.shape[0], 12))
+            frames = prepare_minimax_h3_vlm_video_frames(media[indices], vlm_resolution)
+            tokens = clip.tokenize("", minimax_ref_items=[{
+                "type": "video", "data": frames,
+                "timestamps": [Fraction(index, 24) for index in indices],
+            }])
+            sections = _encode_minimax_h3_section(
+                clip, tokens, "grid-deepstack", cache=invocation,
+                section_kind="video", section_id="ref_vlm",
+            )
+        else:
+            raise ValueError("MiniMax H3 Ref VLM media must be image or video.")
+    if len(sections) != 1:
+        raise ValueError("MiniMax H3 Ref VLM requires one CLIP conditioning schedule.")
+    embedding, metadata = sections[0]
+    return embedding, metadata.get("minimax_token_tags")
 
 
 def _encode_minimax_h3_section(clip, tokens, visual_path, cache, *, section_kind, section_id):

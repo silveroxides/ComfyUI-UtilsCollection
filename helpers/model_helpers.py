@@ -47,10 +47,12 @@ import folder_paths
 
 from .encoder_helpers import (
     _encode_minimax_h3_audio_reference,
+    encode_minimax_h3_ref_vlm,
     prepare_minimax_h3_reference_image,
     prepare_minimax_h3_reference_video,
     validate_minimax_h3_clip_continuation_media,
 )
+from .minimax_h3_guide_helpers import splice_conditioning
 
 
 MINIMAX_H3_CONTINUATION_CANDIDATE_COMPARE_TYPE = VideoCompareType.DHASH
@@ -293,7 +295,7 @@ def _refine_mask(sam3_model, frame, coarse_mask, iterations):
 
 MINIMAX_H3_REF_FOLDER = "minimax_h3_refs"
 MINIMAX_H3_REF_METADATA_KEY = "refmod_meta"
-MINIMAX_H3_REF_FORMAT = 4
+MINIMAX_H3_REF_FORMAT = 5
 MINIMAX_H3_CLIP_CONTINUATION_METADATA_KEY = "minimax_h3_clip_continuation"
 MINIMAX_H3_CLIP_CONTINUATION_FORMAT = 1
 
@@ -1062,7 +1064,19 @@ def _validate_minimax_h3_ref(ref: dict) -> dict:
         latent = _validate_audio_latent(latent)
     else:
         latent = _validate_visual_latent(latent, kind)
-    return {"kind": kind, "latent": latent, "metadata": _minimax_h3_ref_metadata(ref)}
+    validated = {"kind": kind, "latent": latent, "metadata": _minimax_h3_ref_metadata(ref)}
+    embedding = ref.get("vlm_embedding")
+    tags = ref.get("vlm_tags")
+    if embedding is not None or tags is not None:
+        if kind == "audio":
+            raise ValueError("MiniMax H3 audio Ref cannot contain VLM conditioning.")
+        if not torch.is_tensor(embedding) or embedding.ndim != 3 or embedding.shape[0] != 1 or min(embedding.shape) < 1 or not torch.is_floating_point(embedding) or not torch.isfinite(embedding).all():
+            raise ValueError("MiniMax H3 Ref VLM embedding must be a finite [1, tokens, features] tensor.")
+        if not torch.is_tensor(tags) or tags.ndim != 1 or tags.dtype != torch.long or tags.shape[0] != embedding.shape[1]:
+            raise ValueError("MiniMax H3 Ref VLM tags must match its embedding sequence.")
+        validated["vlm_embedding"] = embedding.detach()
+        validated["vlm_tags"] = tags.detach()
+    return validated
 
 
 def minimax_h3_ref_resolution_grid(resolution: int) -> int:
@@ -1122,20 +1136,24 @@ def _compress_minimax_h3_visual_ref(ref: dict, compression: str, grid_long_edge:
     return {**ref, "latent": latent, "metadata": metadata}
 
 
-def create_minimax_h3_image_refs(images: torch.Tensor, vae, compression: str = "encode", grid_long_edge: int = 16, refine_steps: int = 100, description: str = "") -> list[dict]:
+def create_minimax_h3_image_refs(images: torch.Tensor, vae, compression: str = "encode", grid_long_edge: int = 16, refine_steps: int = 100, description: str = "", clip=None, vlm_resolution: int = 384, timestamp: float = 0.0) -> list[dict]:
     if not torch.is_tensor(images) or images.ndim != 4 or images.shape[0] < 1:
         raise ValueError("MiniMax H3 Ref images must be a non-empty BHWC image batch.")
     if vae is None or not callable(getattr(vae, "encode", None)):
         raise ValueError("MiniMax H3 Ref images require a visual VAE input.")
     refs = []
     for image in images:
-        prepared = prepare_minimax_h3_reference_image(image.unsqueeze(0), 2048, 2048, "max")
+        source = image.unsqueeze(0)
+        prepared = prepare_minimax_h3_reference_image(source, 2048, 2048, "max")
         ref = {"kind": "image", "latent": _validate_visual_latent(vae.encode(prepared), "image"), "metadata": {"description": description, "source": "image"}}
+        if clip is not None:
+            ref["vlm_embedding"], ref["vlm_tags"] = encode_minimax_h3_ref_vlm(clip, "image", source, vlm_resolution, timestamp)
+            ref["metadata"].update({"vlm_presentation": "image_guide", "vlm_resolution": vlm_resolution, "vlm_timestamp": timestamp})
         refs.append(_compress_minimax_h3_visual_ref(ref, compression, grid_long_edge, None, refine_steps))
     return refs
 
 
-def create_minimax_h3_video_ref(video: torch.Tensor, vae, compression: str = "encode", grid_long_edge: int = 16, latent_frames: int = 16, refine_steps: int = 100, description: str = "") -> dict:
+def create_minimax_h3_video_ref(video: torch.Tensor, vae, compression: str = "encode", grid_long_edge: int = 16, latent_frames: int = 16, refine_steps: int = 100, description: str = "", clip=None, vlm_resolution: int = 384) -> dict:
     if not torch.is_tensor(video) or video.ndim != 4:
         raise ValueError("MiniMax H3 Ref video must be a BHWC frame batch.")
     if vae is None or not callable(getattr(vae, "encode", None)):
@@ -1143,6 +1161,9 @@ def create_minimax_h3_video_ref(video: torch.Tensor, vae, compression: str = "en
     _frames, block = prepare_minimax_h3_reference_video(video, vae, video.shape[0], encode_reference=True)
     latent = _validate_visual_latent(block["latent"], "video")
     ref = {"kind": "video", "latent": latent, "metadata": {"description": description, "source": "video", "source_frames": int(video.shape[0]), "prepared_frames": int(_frames.shape[0])}}
+    if clip is not None:
+        ref["vlm_embedding"], ref["vlm_tags"] = encode_minimax_h3_ref_vlm(clip, "video", _frames, vlm_resolution)
+        ref["metadata"].update({"vlm_presentation": "video_2fps", "vlm_resolution": vlm_resolution})
     return _compress_minimax_h3_visual_ref(ref, compression, grid_long_edge, latent_frames, refine_steps)
 
 
@@ -1169,7 +1190,7 @@ def _minimax_h3_ref_storage_metadata(ref: dict) -> dict:
     compression = metadata.get("compression", "encode")
     mode = "training" if compression in {"pooled", "refined"} else "encode"
     stored = {
-        "_format_version": MINIMAX_H3_REF_FORMAT,
+        "_format_version": MINIMAX_H3_REF_FORMAT if "vlm_embedding" in ref else 4,
         "kind": ref["kind"],
         "name": metadata.get("name", ""),
         "latent_t": latent.shape[-1] if ref["kind"] == "audio" else latent.shape[2],
@@ -1188,6 +1209,9 @@ def _minimax_h3_ref_storage_metadata(ref: dict) -> dict:
         "dimensions": ({"latent_t": latent.shape[2], "latent_h": latent.shape[3], "latent_w": latent.shape[4]} if ref["kind"] != "audio" else {"ref_audio_t": latent.shape[-1]}),
         "metadata": metadata,
     }
+    if "vlm_embedding" in ref:
+        stored["vlm_shape"] = list(ref["vlm_embedding"].shape)
+        stored["vlm_tags"] = ref["vlm_tags"].shape[0]
     if "refmod_config" in metadata:
         stored["refmod_config"] = metadata["refmod_config"]
     return stored
@@ -1264,6 +1288,9 @@ def save_minimax_h3_ref_collection(refs: list[dict], filename_prefix: str) -> li
             try:
                 with IncrementalSafetensorsWriter(temporary, metadata=metadata, max_workers=1) as writer:
                     writer.write("latent", ref["latent"].detach())
+                    if "vlm_embedding" in ref:
+                        writer.write("vlm_embedding", ref["vlm_embedding"])
+                        writer.write("vlm_tags", ref["vlm_tags"])
                 if os.name == "nt":
                     os.rename(temporary, target)
                 else:
@@ -1281,8 +1308,9 @@ def save_minimax_h3_ref_collection(refs: list[dict], filename_prefix: str) -> li
 def load_minimax_h3_ref(filename: str) -> dict:
     path = _minimax_h3_ref_load_path(filename)
     with MemoryEfficientSafeOpen(path, low_memory=True) as handle:
-        if set(handle.keys()) != {"latent"}:
-            raise ValueError("MiniMax H3 Ref file must contain exactly one latent tensor.")
+        tensor_names = set(handle.keys())
+        if tensor_names not in ({"latent"}, {"latent", "vlm_embedding", "vlm_tags"}):
+            raise ValueError("MiniMax H3 Ref file has an invalid tensor set.")
         headers = handle.metadata() or {}
         header = headers.get(MINIMAX_H3_REF_METADATA_KEY, headers.get("ref_meta"))
         if header is None:
@@ -1329,20 +1357,29 @@ def load_minimax_h3_ref(filename: str) -> dict:
         )
         if any(key in stored and stored[key] != value for key, value in expected_header_dimensions.items()):
             raise ValueError("MiniMax H3 Ref header dimensions do not match its latent tensor.")
-        latent = None
-        with closing(handle.async_stream(["latent"], batch_size=1, prefetch_batches=1, pin_memory=False)) as stream:
+        if "vlm_embedding" in tensor_names:
+            vlm_shape = handle.get_shape("vlm_embedding")
+            tag_shape = handle.get_shape("vlm_tags")
+            if kind == "audio" or len(vlm_shape) != 3 or vlm_shape[0] != 1 or min(vlm_shape) < 1 or tag_shape != (vlm_shape[1],):
+                raise ValueError("MiniMax H3 Ref has invalid VLM tensor shapes.")
+            if not handle.get_dtype("vlm_embedding").is_floating_point or handle.get_dtype("vlm_tags") != torch.long:
+                raise ValueError("MiniMax H3 Ref has invalid VLM tensor dtypes.")
+            if ("vlm_shape" in stored and stored["vlm_shape"] != list(vlm_shape)) or ("vlm_tags" in stored and stored["vlm_tags"] != tag_shape[0]):
+                raise ValueError("MiniMax H3 Ref VLM metadata does not match its tensors.")
+        tensors = {}
+        with closing(handle.async_stream(sorted(tensor_names), batch_size=1, prefetch_batches=1, pin_memory=False)) as stream:
             for batch in stream:
                 try:
-                    if len(batch) != 1 or batch[0][0] != "latent":
+                    if len(batch) != 1 or batch[0][0] not in tensor_names:
                         raise ValueError("MiniMax H3 Ref stream returned an unexpected tensor.")
-                    latent = batch[0][1].detach().clone()
+                    tensors[batch[0][0]] = batch[0][1].detach().clone()
                 finally:
                     for index in range(len(batch)):
                         handle.mark_processed(batch[index][0])
                     del batch
-        if latent is None:
-            raise ValueError("MiniMax H3 Ref stream did not return its latent tensor.")
-    return _validate_minimax_h3_ref({"kind": kind, "latent": latent, "metadata": metadata})
+        if set(tensors) != tensor_names:
+            raise ValueError("MiniMax H3 Ref stream did not return its tensors.")
+    return _validate_minimax_h3_ref({"kind": kind, "metadata": metadata, **tensors})
 
 
 def _minimax_h3_ref_lowpass_visual(latent: torch.Tensor) -> torch.Tensor:
@@ -1364,7 +1401,6 @@ def _minimax_h3_ref_lowpass_audio(latent: torch.Tensor) -> torch.Tensor:
 
 
 def _minimax_h3_ref_native_block(ref: dict, retention: float) -> dict | None:
-    ref = _validate_minimax_h3_ref(ref)
     if retention == 0.0:
         return None
     latent = ref["latent"]
@@ -1407,6 +1443,8 @@ def format_minimax_h3_ref_info(refs: list[dict]) -> str:
         latent = ref["latent"]
         token_cost = latent.shape[-1] * 2 if ref["kind"] == "audio" else latent.shape[2] * (latent.shape[3] // 2) * (latent.shape[4] // 2)
         summary = f"{ref['kind']} {tuple(latent.shape)} ({token_cost} tokens)"
+        if "vlm_embedding" in ref:
+            summary += f"; Qwen {ref['vlm_embedding'].shape[1]} tokens"
         metadata = ref["metadata"]
         if ref["kind"] == "video" and "prepared_frames" in metadata and "source_frames" in metadata and metadata["prepared_frames"] != metadata["source_frames"]:
             summary += f"; prepared {metadata['prepared_frames']} of {metadata['source_frames']} frames"
@@ -1421,7 +1459,8 @@ def apply_minimax_h3_refs_to_conditioning(conditioning, refs: list[dict], retent
         raise ValueError("MiniMax H3 Ref retention must be from 0 to 1.")
     if isinstance(max_ref_tokens, bool) or not isinstance(max_ref_tokens, numbers.Integral) or max_ref_tokens < 0:
         raise ValueError("MiniMax H3 Ref max tokens must be zero or a positive integer.")
-    new_blocks = [block for ref in refs if (block := _minimax_h3_ref_native_block(ref, float(retention))) is not None]
+    validated_refs = [_validate_minimax_h3_ref(ref) for ref in refs]
+    new_blocks = [block for ref in validated_refs if (block := _minimax_h3_ref_native_block(ref, float(retention))) is not None]
     output = []
     for embedding, metadata in conditioning:
         if not isinstance(metadata, dict):
@@ -1433,6 +1472,10 @@ def apply_minimax_h3_refs_to_conditioning(conditioning, refs: list[dict], retent
         new_metadata = dict(metadata)
         new_metadata["minimax_refs"] = all_blocks
         output.append([embedding, new_metadata])
+    if float(retention) > 0:
+        for ref in validated_refs:
+            if "vlm_embedding" in ref:
+                output = splice_conditioning(output, [[ref["vlm_embedding"], {"minimax_token_tags": ref["vlm_tags"]}]])
     return output
 
 

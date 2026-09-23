@@ -2662,6 +2662,24 @@ def test_minimax_h3_guide_integration_preserves_conditioning_and_native_timestam
     assert len(clip.encoded_tokens) == 2
 
 
+def test_minimax_h3_ref_vlm_uses_guide_image_and_native_video_presentation():
+    clip = _MiniMaxH3TestClip()
+    image = torch.zeros(1, 32, 64, 3)
+    image_embedding, image_tags = encoder_helpers.encode_minimax_h3_ref_vlm(clip, "image", image, 0, 1.25)
+    image_entries = clip.encoded_tokens[-1]["qwen3vl_32b"][0]
+    assert image_entries[0][0] == "<1.2 seconds>"
+    assert image_embedding.shape[1] == image_tags.shape[0]
+    assert sum(encoder_helpers.is_image_token(entry) for entry in image_entries) == 1
+
+    video = torch.zeros(22, 32, 64, 3)
+    video_embedding, video_tags = encoder_helpers.encode_minimax_h3_ref_vlm(clip, "video", video, 0)
+    video_items = clip.tokenize_calls[-1]["minimax_ref_items"]
+    assert video_items[0]["type"] == "video"
+    assert video_items[0]["data"].shape[0] == 2
+    assert video_items[0]["timestamps"] == [Fraction(0), Fraction(1, 2)]
+    assert video_embedding.shape[1] == video_tags.shape[0]
+
+
 def test_minimax_h3_temporal_media_fields_are_additive_and_standard_ignores_them():
     config = encoder_helpers.build_minimax_h3_media_config(None, temporal_density=[4], temporal_fusion_method=["spatial"])
     assert config["temporal_density"] == 4
