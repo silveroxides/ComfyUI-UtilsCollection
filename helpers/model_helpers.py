@@ -48,6 +48,7 @@ import folder_paths
 from .encoder_helpers import (
     _encode_minimax_h3_audio_reference,
     encode_minimax_h3_ref_vlm,
+    fuse_minimax_h3_ref_vlm_images,
     prepare_minimax_h3_reference_image,
     prepare_minimax_h3_reference_video,
     validate_minimax_h3_clip_continuation_media,
@@ -1146,17 +1147,25 @@ def create_minimax_h3_image_refs(images: torch.Tensor, vae, compression: str = "
         raise ValueError("MiniMax H3 Ref images must be a non-empty BHWC image batch.")
     if vae is None or not callable(getattr(vae, "encode", None)):
         raise ValueError("MiniMax H3 Ref images require a visual VAE input.")
-    refs = []
+    fused = None
+    output_dtype = None
     for index, image in enumerate(images):
         source = image.unsqueeze(0)
         prepared = prepare_minimax_h3_reference_image(source, 2048, 2048, "max")
-        ref = {"kind": "image", "latent": _validate_visual_latent(vae.encode(prepared), "image"), "metadata": {"description": description, "source": "image"}}
-        if clip is not None:
-            number = vlm_reference_start + index
-            ref["vlm_embedding"], ref["vlm_tags"] = encode_minimax_h3_ref_vlm(clip, "image", source, vlm_resolution, number)
-            ref["metadata"].update({"vlm_presentation": "image_numbered", "vlm_resolution": vlm_resolution, "vlm_reference_number": number})
-        refs.append(_compress_minimax_h3_visual_ref(ref, compression, grid_long_edge, None, refine_steps))
-    return refs
+        latent = _validate_visual_latent(vae.encode(prepared), "image")
+        if fused is None:
+            output_dtype = latent.dtype
+            fused = latent.to(device="cpu", dtype=torch.float32).clone() if images.shape[0] > 1 else latent
+        else:
+            if latent.shape != fused.shape:
+                raise ValueError("MiniMax H3 Ref images must produce matching VAE latent shapes for fusion.")
+            fused.lerp_(latent.to(device="cpu", dtype=torch.float32), 1.0 / (index + 1))
+    metadata = {"description": description, "source": "image", "source_images": int(images.shape[0])}
+    ref = {"kind": "image", "latent": fused.to(output_dtype), "metadata": metadata}
+    if clip is not None:
+        ref["vlm_embedding"], ref["vlm_tags"] = fuse_minimax_h3_ref_vlm_images(clip, images, vlm_resolution, vlm_reference_start)
+        metadata.update({"vlm_presentation": "image_numbered", "vlm_resolution": vlm_resolution, "vlm_reference_number": vlm_reference_start})
+    return [_compress_minimax_h3_visual_ref(ref, compression, grid_long_edge, None, refine_steps)]
 
 
 def create_minimax_h3_video_ref(video: torch.Tensor, vae, compression: str = "encode", grid_long_edge: int = 16, latent_frames: int = 16, refine_steps: int = 100, description: str = "", clip=None, vlm_resolution: int = 384, vlm_reference_start: int = 17) -> dict:
@@ -1449,6 +1458,9 @@ def format_minimax_h3_ref_info(refs: list[dict]) -> str:
         latent = ref["latent"]
         token_cost = latent.shape[-1] * 2 if ref["kind"] == "audio" else latent.shape[2] * (latent.shape[3] // 2) * (latent.shape[4] // 2)
         summary = f"{ref['kind']} {tuple(latent.shape)} ({token_cost} tokens)"
+        source_images = ref["metadata"].get("source_images")
+        if ref["kind"] == "image" and isinstance(source_images, numbers.Integral) and source_images > 1:
+            summary += f"; fused {source_images} images"
         if "vlm_embedding" in ref:
             number = ref["metadata"].get("vlm_reference_number")
             label = f"<{'Picture' if ref['kind'] == 'image' else 'Video'} {number}> " if number is not None else ""

@@ -3619,6 +3619,27 @@ def encode_minimax_h3_ref_vlm(clip, media_type, media, vlm_resolution=384, refer
     return embedding, metadata.get("minimax_token_tags")
 
 
+def fuse_minimax_h3_ref_vlm_images(clip, images, vlm_resolution=384, reference_number=17):
+    fused = None
+    tags = None
+    output_dtype = None
+    for index, image in enumerate(images):
+        embedding, image_tags = encode_minimax_h3_ref_vlm(
+            clip, "image", image.unsqueeze(0), vlm_resolution, reference_number,
+        )
+        if not torch.is_tensor(embedding) or not torch.is_tensor(image_tags):
+            raise ValueError("MiniMax H3 Ref Qwen encoding must return embeddings and token tags.")
+        if fused is None:
+            output_dtype = embedding.dtype
+            fused = embedding.detach().to(device="cpu", dtype=torch.float32).clone() if images.shape[0] > 1 else embedding
+            tags = image_tags.detach().cpu().clone() if images.shape[0] > 1 else image_tags
+        else:
+            if embedding.shape != fused.shape or not torch.equal(image_tags.cpu(), tags):
+                raise ValueError("MiniMax H3 Ref images must produce matching Qwen token layouts for fusion.")
+            fused.lerp_(embedding.to(device="cpu", dtype=torch.float32), 1.0 / (index + 1))
+    return fused.to(output_dtype), tags
+
+
 def _encode_minimax_h3_section(clip, tokens, visual_path, cache, *, section_kind, section_id):
     return cache.encode_scheduled(
         clip, tokens, visual_path, lambda: _encode_scheduled_with_visual_path(clip, tokens, visual_path),

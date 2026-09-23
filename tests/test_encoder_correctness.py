@@ -2681,6 +2681,23 @@ def test_minimax_h3_ref_vlm_uses_reserved_picture_and_video_numbers():
     assert clip.encoded_tokens[-1]["qwen3vl_32b"][0][0][0] == "<Video 24>: "
 
 
+def test_minimax_h3_ref_vlm_fuses_image_batch_into_one_section(monkeypatch):
+    seen = []
+
+    def encode(_clip, media_type, image, resolution, number):
+        seen.append((media_type, tuple(image.shape), resolution, number))
+        value = float(image[0, 0, 0, 0])
+        return torch.full((1, 2, 4), value), torch.tensor([1, 0], dtype=torch.long)
+
+    monkeypatch.setattr(encoder_helpers, "encode_minimax_h3_ref_vlm", encode)
+    images = torch.stack((torch.zeros(32, 64, 3), torch.ones(32, 64, 3), torch.full((32, 64, 3), 2.0)))
+    fused, tags = encoder_helpers.fuse_minimax_h3_ref_vlm_images(object(), images, 384, 17)
+    assert seen == [("image", (1, 32, 64, 3), 384, 17)] * 3
+    assert fused.shape == (1, 2, 4)
+    torch.testing.assert_close(fused, torch.ones_like(fused))
+    assert tags.tolist() == [1, 0]
+
+
 def test_minimax_h3_temporal_media_fields_are_additive_and_standard_ignores_them():
     config = encoder_helpers.build_minimax_h3_media_config(None, temporal_density=[4], temporal_fusion_method=["spatial"])
     assert config["temporal_density"] == 4

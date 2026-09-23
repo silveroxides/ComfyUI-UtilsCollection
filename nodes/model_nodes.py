@@ -75,13 +75,13 @@ class UC_MiniMaxH3RefExtract(io.ComfyNode):
     @classmethod
     def define_schema(cls) -> io.Schema:
         image_compression_options = [
-            io.DynamicCombo.Option(key="encode", inputs=[]),
             io.DynamicCombo.Option(
                 key="pooled",
                 inputs=[
                     io.Int.Input("reference_resolution", display_name="Reference resolution", default=256, min=32, step=32, tooltip="Compressed reference size in pixels along the longer edge. Start with 128–512 px; 256 px is the default. Higher values retain more detail but use more memory. The shorter edge follows the source shape. This does not change generation resolution or enlarge the source."),
                 ],
             ),
+            io.DynamicCombo.Option(key="encode", inputs=[]),
             io.DynamicCombo.Option(
                 key="refined",
                 inputs=[
@@ -116,16 +116,16 @@ class UC_MiniMaxH3RefExtract(io.ComfyNode):
             node_id="UC_MiniMaxH3RefExtract",
             display_name="MiniMax H3 Ref Extract",
             category="model/minimax_h3",
-            description="Creates reusable MiniMax H3 references from images or video frames.",
+            description="Fuses an image batch into one reusable MiniMax H3 reference, or encodes one video clip.",
             search_aliases=["minimax", "h3", "reference", "ref", "image", "video"],
             inputs=[
-                io.Image.Input("images", tooltip="Connect images or video frames. Image mode keeps each image separate. Video mode uses the frames as one clip; provide at least five frames at 24 fps."),
+                io.Image.Input("images", tooltip="Image mode fuses the batch into one reference. Video mode treats the batch as one 24 fps clip; provide at least five frames."),
                 io.Vae.Input("vae", display_name="visual vae", tooltip="Connect the MiniMax H3 video VAE for both images and video."),
-                io.DynamicCombo.Input("media_type", options=media_type_options, tooltip="Choose image to keep each image separate, or video to treat the frames as one clip."),
+                io.DynamicCombo.Input("media_type", options=media_type_options, tooltip="Choose image to fuse multiple stills into one reference, or video for one temporal clip."),
                 io.String.Input("description", default="", multiline=True, dynamic_prompts=False, tooltip="Optional notes to save with the reference. These notes do not change your prompt."),
                 io.Clip.Input("clip", optional=True, tooltip="Optional MiniMax H3 qwen3vl_32b encoder. Stores independently encoded Qwen conditioning with each visual reference."),
                 io.Int.Input("vlm_resolution", default=384, min=0, max=4096, step=32, optional=True, tooltip="Qwen image target. 256–4096 resizes; other values keep original resolution. Used only with clip."),
-                io.Int.Input("vlm_reference_start", default=17, min=17, step=1, optional=True, tooltip="First Qwen Picture/Video number stored in the ref. Image batches count upward. Use distinct numbers when combining refs extracted in separate runs."),
+                io.Int.Input("vlm_reference_start", default=17, min=17, step=1, optional=True, tooltip="Qwen Picture/Video number stored in this fused reference. Use distinct numbers when combining refs extracted in separate runs."),
             ],
             outputs=[
                 MiniMaxH3Ref.Output("ref", display_name="ref", tooltip="Connect to Ref Save to keep these references, or Ref Apply to use them."),
