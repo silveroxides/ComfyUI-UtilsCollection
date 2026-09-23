@@ -12,7 +12,7 @@ from ..helpers.model_helpers import (
     format_minimax_h3_ref_info,
     get_minimax_h3_ref_input_fingerprint,
     list_minimax_h3_refs,
-    load_minimax_h3_ref,
+    load_minimax_h3_ref_collection,
     minimax_h3_ref_resolution_grid,
     save_minimax_h3_ref_collection,
 )
@@ -179,10 +179,10 @@ class UC_MiniMaxH3RefLoad(io.ComfyNode):
             node_id="UC_MiniMaxH3RefLoad",
             display_name="MiniMax H3 Ref Load",
             category="model/minimax_h3",
-            description="Loads a saved MiniMax H3 reference for use with Ref Apply.",
+            description="Loads one reference or every member of a saved MiniMax H3 Ref bundle.",
             search_aliases=["minimax", "h3", "reference", "ref", "load"],
             inputs=[
-                io.Combo.Input("filename", options=list_minimax_h3_refs(), tooltip="Choose a saved reference from ComfyUI/models/minimax_h3_refs or your configured reference folders."),
+                io.Combo.Input("filename", options=list_minimax_h3_refs(), tooltip="Choose a saved reference or bundle from ComfyUI/models/minimax_h3_refs or your configured reference folders."),
             ],
             outputs=[
                 MiniMaxH3Ref.Output("ref", display_name="ref", tooltip="Connect to Ref Apply to use this reference, or Ref Save to save another copy."),
@@ -196,7 +196,7 @@ class UC_MiniMaxH3RefLoad(io.ComfyNode):
 
     @classmethod
     def execute(cls, filename) -> io.NodeOutput:
-        refs = [load_minimax_h3_ref(filename)]
+        refs = load_minimax_h3_ref_collection(filename)
         return io.NodeOutput(refs, format_minimax_h3_ref_info(refs))
 
 
@@ -207,11 +207,12 @@ class UC_MiniMaxH3RefSave(io.ComfyNode):
             node_id="UC_MiniMaxH3RefSave",
             display_name="MiniMax H3 Ref Save",
             category="model/minimax_h3",
-            description="Saves each connected reference to its own file. No sampler is needed.",
+            description="Saves connected references separately or together in one bundle file. No sampler is needed.",
             search_aliases=["minimax", "h3", "reference", "ref", "save"],
             inputs=[
                 io.String.Input("filename_prefix", default="ref/MiniMax_H3", tooltip="Name for the saved files. Use a slash to add a subfolder. Files are numbered automatically and existing files are not overwritten."),
-                io.Autogrow.Input("refs", template=io.Autogrow.TemplatePrefix(MiniMaxH3Ref.Input("ref", optional=True), prefix="ref_", min=1, max=100), tooltip="Connect one or more references to save. Each reference is saved separately, in input order."),
+                io.Autogrow.Input("refs", template=io.Autogrow.TemplatePrefix(MiniMaxH3Ref.Input("ref", optional=True), prefix="ref_", min=1, max=100), tooltip="Connect one or more references to save. Their input order is preserved in either save layout."),
+                io.Combo.Input("save_layout", options=["separate", "bundle"], default="separate", optional=True, tooltip="Separate writes one file per ref. Bundle stores all connected refs in one file, preserving their order and kinds."),
             ],
             outputs=[
                 io.String.Output("saved_paths", display_name="saved paths", is_output_list=True, tooltip="Names of the saved files, including any subfolders."),
@@ -220,11 +221,13 @@ class UC_MiniMaxH3RefSave(io.ComfyNode):
         )
 
     @classmethod
-    def execute(cls, filename_prefix, refs: io.Autogrow.Type | None = None) -> io.NodeOutput:
+    def execute(cls, filename_prefix, refs: io.Autogrow.Type | None = None, save_layout="separate") -> io.NodeOutput:
         connected_refs = flatten_minimax_h3_ref_collections(refs)
         if not connected_refs:
             raise ValueError("Connect at least one ref to MiniMax H3 Ref Save.")
-        return io.NodeOutput(save_minimax_h3_ref_collection(connected_refs, filename_prefix))
+        if save_layout not in {"separate", "bundle"}:
+            raise ValueError("MiniMax H3 Ref save layout must be separate or bundle.")
+        return io.NodeOutput(save_minimax_h3_ref_collection(connected_refs, filename_prefix, bundle=save_layout == "bundle"))
 
 
 class UC_MiniMaxH3RefApply(io.ComfyNode):

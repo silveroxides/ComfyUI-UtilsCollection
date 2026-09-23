@@ -1284,11 +1284,44 @@ def _next_minimax_h3_ref_path(root: str, prefix: Path, index: int) -> str:
     return str(resolved)
 
 
-def save_minimax_h3_ref_collection(refs: list[dict], filename_prefix: str) -> list[str]:
+def save_minimax_h3_ref_collection(refs: list[dict], filename_prefix: str, bundle: bool = False) -> list[str]:
     if not isinstance(refs, (list, tuple)) or not refs:
         raise ValueError("MiniMax H3 Ref Save requires at least one Ref input.")
     root = _minimax_h3_ref_output_root()
     prefix = _minimax_h3_ref_relative_prefix(filename_prefix)
+    if bundle:
+        if len(refs) > 256:
+            raise ValueError("MiniMax H3 Ref bundle cannot contain more than 256 references.")
+        refs = [_validate_minimax_h3_ref(ref) for ref in refs]
+        header = {
+            "_format_version": 5, "kind": "bundle", "name": prefix.name,
+            "members": [_minimax_h3_ref_storage_metadata(ref) for ref in refs],
+        }
+        metadata = {MINIMAX_H3_REF_METADATA_KEY: json.dumps(header, separators=(",", ":"), sort_keys=True)}
+        next_index = 1
+        while True:
+            target = _next_minimax_h3_ref_path(root, prefix, next_index)
+            next_index = int(Path(target).stem.rsplit("_", 1)[-1]) + 1
+            os.makedirs(os.path.dirname(target), exist_ok=True)
+            descriptor, temporary = tempfile.mkstemp(prefix=".ref-", suffix=".tmp", dir=os.path.dirname(target))
+            os.close(descriptor)
+            try:
+                with IncrementalSafetensorsWriter(temporary, metadata=metadata, max_workers=1) as writer:
+                    for index, ref in enumerate(refs):
+                        writer.write(f"ref_{index}", ref["latent"])
+                        if "vlm_embedding" in ref:
+                            writer.write(f"ref_{index}.vlm_embedding", ref["vlm_embedding"])
+                            writer.write(f"ref_{index}.vlm_tags", ref["vlm_tags"])
+                if os.name == "nt":
+                    os.rename(temporary, target)
+                else:
+                    os.link(temporary, target)
+                return [os.path.relpath(target, root).replace("\\", "/")]
+            except FileExistsError:
+                pass
+            finally:
+                if os.path.exists(temporary):
+                    os.unlink(temporary)
     saved = []
     next_index = 1
     for ref in refs:
@@ -1395,6 +1428,100 @@ def load_minimax_h3_ref(filename: str) -> dict:
         if set(tensors) != tensor_names:
             raise ValueError("MiniMax H3 Ref stream did not return its tensors.")
     return _validate_minimax_h3_ref({"kind": kind, "metadata": metadata, **tensors})
+
+
+def load_minimax_h3_ref_collection(filename: str) -> list[dict]:
+    path = _minimax_h3_ref_load_path(filename)
+    with MemoryEfficientSafeOpen(path, low_memory=True) as handle:
+        headers = handle.metadata() or {}
+        header = headers.get(MINIMAX_H3_REF_METADATA_KEY, headers.get("ref_meta"))
+        if header is None:
+            raise ValueError("File does not contain MiniMax H3 reference metadata.")
+        try:
+            stored = json.loads(header)
+        except json.JSONDecodeError as exc:
+            raise ValueError("MiniMax H3 Ref metadata is invalid JSON.") from exc
+        if not isinstance(stored, dict):
+            raise ValueError("MiniMax H3 Ref metadata must be a dictionary.")
+        if stored.get("kind") != "bundle":
+            return [load_minimax_h3_ref(filename)]
+        members = stored.get("members")
+        if stored.get("_format_version") != 5 or not isinstance(members, list) or not 1 <= len(members) <= 256:
+            raise ValueError("MiniMax H3 Ref bundle has an unsupported member list.")
+        expected = set()
+        for index, member in enumerate(members):
+            if not isinstance(member, dict) or member.get("kind") not in {"image", "video", "audio"}:
+                raise ValueError("MiniMax H3 Ref bundle has an invalid member.")
+            key = f"ref_{index}"
+            expected.add(key)
+            shape = handle.get_shape(key) if key in handle.keys() else ()
+            if "shape" in member and member["shape"] != list(shape):
+                raise ValueError("MiniMax H3 Ref bundle member shape does not match its tensor.")
+            if "vlm_shape" in member:
+                expected.update({f"{key}.vlm_embedding", f"{key}.vlm_tags"})
+        if set(handle.keys()) != expected:
+            raise ValueError("MiniMax H3 Ref bundle has an invalid tensor set.")
+        for index, member in enumerate(members):
+            key = f"ref_{index}"
+            shape = handle.get_shape(key)
+            if member["kind"] == "audio":
+                valid = len(shape) == 4 and tuple(shape[:3]) == (1, 32, 2) and shape[-1] > 0
+            else:
+                valid = len(shape) == 5 and tuple(shape[:2]) == (1, 24) and shape[2] > 0 and min(shape[3:]) >= 2 and not shape[3] % 2 and not shape[4] % 2
+                valid = valid and (member["kind"] != "image" or shape[2] == 1)
+            if not valid or not handle.get_dtype(key).is_floating_point:
+                raise ValueError("MiniMax H3 Ref bundle member has an invalid latent tensor.")
+            if "vlm_shape" in member:
+                vlm_shape = handle.get_shape(f"{key}.vlm_embedding")
+                tag_shape = handle.get_shape(f"{key}.vlm_tags")
+                if (member["kind"] == "audio" or len(vlm_shape) != 3 or vlm_shape[0] != 1 or min(vlm_shape) < 1
+                        or tag_shape != (vlm_shape[1],) or not handle.get_dtype(f"{key}.vlm_embedding").is_floating_point
+                        or handle.get_dtype(f"{key}.vlm_tags") != torch.long):
+                    raise ValueError("MiniMax H3 Ref bundle member has invalid VLM tensors.")
+        tensors = {}
+        with closing(handle.async_stream(sorted(expected), batch_size=1, prefetch_batches=1, pin_memory=False)) as stream:
+            for batch in stream:
+                try:
+                    if len(batch) != 1 or batch[0][0] not in expected:
+                        raise ValueError("MiniMax H3 Ref bundle stream returned an unexpected tensor.")
+                    tensors[batch[0][0]] = batch[0][1].detach().clone()
+                finally:
+                    for name, _tensor in batch:
+                        handle.mark_processed(name)
+        if set(tensors) != expected:
+            raise ValueError("MiniMax H3 Ref bundle stream did not return all tensors.")
+    refs = []
+    for index, member in enumerate(members):
+        key = f"ref_{index}"
+        latent = tensors[key]
+        if latent.ndim != (4 if member["kind"] == "audio" else 5):
+            raise ValueError("MiniMax H3 Ref bundle member has an invalid latent rank.")
+        dimensions = (
+            {"latent_t": latent.shape[-1], "latent_h": 0, "latent_w": 0}
+            if member["kind"] == "audio"
+            else {"latent_t": latent.shape[2], "latent_h": latent.shape[3], "latent_w": latent.shape[4]}
+        )
+        if any(field in member and member[field] != value for field, value in dimensions.items()):
+            raise ValueError("MiniMax H3 Ref bundle member dimensions do not match its tensor.")
+        metadata = member.get("metadata", {})
+        if not isinstance(metadata, dict):
+            raise ValueError("MiniMax H3 Ref bundle member metadata must be a dictionary.")
+        metadata = dict(metadata)
+        for field in ("name", "description", "source", "source_shape", "tags", "concept_type", "sample_rate", "refmod_config"):
+            if field in member:
+                metadata.setdefault(field, member[field])
+        steps = member.get("optimize_steps", 0)
+        metadata.setdefault("refine_steps", steps)
+        mode = member.get("mode", "encode")
+        metadata.setdefault("compression", "encode" if mode in {"encode", "full"} else "refined" if steps else "pooled")
+        ref = {"kind": member["kind"], "latent": latent, "metadata": metadata}
+        if "vlm_shape" in member:
+            ref["vlm_embedding"] = tensors[f"{key}.vlm_embedding"]
+            ref["vlm_tags"] = tensors[f"{key}.vlm_tags"]
+            if member["vlm_shape"] != list(ref["vlm_embedding"].shape) or member.get("vlm_tags") != ref["vlm_tags"].shape[0]:
+                raise ValueError("MiniMax H3 Ref bundle member VLM metadata does not match its tensors.")
+        refs.append(_validate_minimax_h3_ref(ref))
+    return refs
 
 
 def _minimax_h3_ref_lowpass_visual(latent: torch.Tensor) -> torch.Tensor:
