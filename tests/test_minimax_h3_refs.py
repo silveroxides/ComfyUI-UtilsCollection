@@ -937,6 +937,8 @@ def test_visual_ref_round_trip_restores_qwen_conditioning_and_legacy_file(monkey
 
 def test_qwen_refs_splice_in_socket_order_and_zero_retention_omits_them():
     first, second = _image_ref(), _video_ref()
+    first["metadata"]["vlm_presentation"] = "image_visual"
+    second["metadata"]["vlm_presentation"] = "video_visual_2fps"
     first["vlm_embedding"] = torch.full((1, 2, 1), 3.0)
     first["vlm_tags"] = torch.tensor([1, 0], dtype=torch.long)
     second["vlm_embedding"] = torch.full((1, 1, 1), 4.0)
@@ -962,19 +964,20 @@ def test_ref_extract_keeps_old_inputs_and_attaches_optional_qwen(monkeypatch):
     clip = object()
     calls = []
 
-    def encode(_clip, media_type, media, resolution, timestamp=0.0):
-        calls.append((_clip, media_type, tuple(media.shape), resolution, timestamp))
+    def encode(_clip, media_type, media, resolution):
+        calls.append((_clip, media_type, tuple(media.shape), resolution))
         return torch.ones((1, 2, 4)), torch.tensor([1, 0], dtype=torch.long)
 
     monkeypatch.setattr(model_helpers, "encode_minimax_h3_ref_vlm", encode)
     schema = model_nodes.UC_MiniMaxH3RefExtract.define_schema()
     assert [item.id for item in schema.inputs[:4]] == ["images", "vae", "media_type", "description"]
     assert any(item.id == "clip" and item.optional for item in schema.inputs)
+    assert all(item.id != "timestamp" for item in schema.inputs)
     media_type = {"media_type": "image", "compression": {"compression": "encode"}}
     images = torch.zeros((2, 32, 64, 3))
-    refs = model_nodes.UC_MiniMaxH3RefExtract.execute(images, _VisualVae(), media_type, clip=clip, vlm_resolution=512, timestamp=2.5)[0]
+    refs = model_nodes.UC_MiniMaxH3RefExtract.execute(images, _VisualVae(), media_type, clip=clip, vlm_resolution=512)[0]
     assert len(refs) == 2
-    assert calls == [(clip, "image", (1, 32, 64, 3), 512, 2.5)] * 2
+    assert calls == [(clip, "image", (1, 32, 64, 3), 512)] * 2
     assert all("vlm_embedding" in ref and "vlm_tags" in ref for ref in refs)
 
 
@@ -986,7 +989,11 @@ def test_ref_vlm_requires_matching_tags_and_base_layout(monkeypatch, tmp_path):
     with pytest.raises(ValueError, match="tags must match"):
         model_helpers.save_minimax_h3_ref_collection([ref], "invalid")
     ref["vlm_tags"] = torch.ones(2, dtype=torch.long)
+    ref["metadata"]["vlm_presentation"] = "image_visual"
     with pytest.raises(ValueError, match="layout metadata"):
+        model_helpers.apply_minimax_h3_refs_to_conditioning([[torch.ones((1, 1, 4)), {"minimax_token_tags": torch.ones(1, dtype=torch.long)}]], [ref])
+    ref["metadata"]["vlm_presentation"] = "image_guide"
+    with pytest.raises(ValueError, match="outdated"):
         model_helpers.apply_minimax_h3_refs_to_conditioning([[torch.ones((1, 1, 4)), {"minimax_token_tags": torch.ones(1, dtype=torch.long)}]], [ref])
 
 

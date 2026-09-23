@@ -1136,7 +1136,7 @@ def _compress_minimax_h3_visual_ref(ref: dict, compression: str, grid_long_edge:
     return {**ref, "latent": latent, "metadata": metadata}
 
 
-def create_minimax_h3_image_refs(images: torch.Tensor, vae, compression: str = "encode", grid_long_edge: int = 16, refine_steps: int = 100, description: str = "", clip=None, vlm_resolution: int = 384, timestamp: float = 0.0) -> list[dict]:
+def create_minimax_h3_image_refs(images: torch.Tensor, vae, compression: str = "encode", grid_long_edge: int = 16, refine_steps: int = 100, description: str = "", clip=None, vlm_resolution: int = 384) -> list[dict]:
     if not torch.is_tensor(images) or images.ndim != 4 or images.shape[0] < 1:
         raise ValueError("MiniMax H3 Ref images must be a non-empty BHWC image batch.")
     if vae is None or not callable(getattr(vae, "encode", None)):
@@ -1147,8 +1147,8 @@ def create_minimax_h3_image_refs(images: torch.Tensor, vae, compression: str = "
         prepared = prepare_minimax_h3_reference_image(source, 2048, 2048, "max")
         ref = {"kind": "image", "latent": _validate_visual_latent(vae.encode(prepared), "image"), "metadata": {"description": description, "source": "image"}}
         if clip is not None:
-            ref["vlm_embedding"], ref["vlm_tags"] = encode_minimax_h3_ref_vlm(clip, "image", source, vlm_resolution, timestamp)
-            ref["metadata"].update({"vlm_presentation": "image_guide", "vlm_resolution": vlm_resolution, "vlm_timestamp": timestamp})
+            ref["vlm_embedding"], ref["vlm_tags"] = encode_minimax_h3_ref_vlm(clip, "image", source, vlm_resolution)
+            ref["metadata"].update({"vlm_presentation": "image_visual", "vlm_resolution": vlm_resolution})
         refs.append(_compress_minimax_h3_visual_ref(ref, compression, grid_long_edge, None, refine_steps))
     return refs
 
@@ -1163,7 +1163,7 @@ def create_minimax_h3_video_ref(video: torch.Tensor, vae, compression: str = "en
     ref = {"kind": "video", "latent": latent, "metadata": {"description": description, "source": "video", "source_frames": int(video.shape[0]), "prepared_frames": int(_frames.shape[0])}}
     if clip is not None:
         ref["vlm_embedding"], ref["vlm_tags"] = encode_minimax_h3_ref_vlm(clip, "video", _frames, vlm_resolution)
-        ref["metadata"].update({"vlm_presentation": "video_2fps", "vlm_resolution": vlm_resolution})
+        ref["metadata"].update({"vlm_presentation": "video_visual_2fps", "vlm_resolution": vlm_resolution})
     return _compress_minimax_h3_visual_ref(ref, compression, grid_long_edge, latent_frames, refine_steps)
 
 
@@ -1475,6 +1475,8 @@ def apply_minimax_h3_refs_to_conditioning(conditioning, refs: list[dict], retent
     if float(retention) > 0:
         for ref in validated_refs:
             if "vlm_embedding" in ref:
+                if ref["metadata"].get("vlm_presentation") not in {"image_visual", "video_visual_2fps"}:
+                    raise ValueError("MiniMax H3 Ref Qwen presentation is outdated; re-extract the reference.")
                 output = splice_conditioning(output, [[ref["vlm_embedding"], {"minimax_token_tags": ref["vlm_tags"]}]])
     return output
 

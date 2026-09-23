@@ -125,7 +125,6 @@ class UC_MiniMaxH3RefExtract(io.ComfyNode):
                 io.String.Input("description", default="", multiline=True, dynamic_prompts=False, tooltip="Optional notes to save with the reference. These notes do not change your prompt."),
                 io.Clip.Input("clip", optional=True, tooltip="Optional MiniMax H3 qwen3vl_32b encoder. Stores independently encoded Qwen conditioning with each visual reference."),
                 io.Int.Input("vlm_resolution", default=384, min=0, max=4096, step=32, optional=True, tooltip="Qwen image target. 256–4096 resizes; other values keep original resolution. Used only with clip."),
-                io.Float.Input("timestamp", default=0.0, min=0.0, step=0.1, optional=True, tooltip="Image guide time in seconds. Video keeps timestamps relative to its first frame. Used only with clip."),
             ],
             outputs=[
                 MiniMaxH3Ref.Output("ref", display_name="ref", tooltip="Connect to Ref Save to keep these references, or Ref Apply to use them."),
@@ -134,13 +133,13 @@ class UC_MiniMaxH3RefExtract(io.ComfyNode):
         )
 
     @classmethod
-    def execute(cls, images, vae, media_type, description="", clip=None, vlm_resolution=384, timestamp=0.0) -> io.NodeOutput:
+    def execute(cls, images, vae, media_type, description="", clip=None, vlm_resolution=384) -> io.NodeOutput:
         kind = media_type.get("media_type")
         compression = media_type.get("compression", {})
         mode = compression.get("compression")
         grid_long_edge = minimax_h3_ref_resolution_grid(compression["reference_resolution"]) if mode != "encode" else 16
         if kind == "image":
-            refs = create_minimax_h3_image_refs(images, vae, mode, grid_long_edge, compression.get("refine_steps", 100), description, clip, vlm_resolution, timestamp)
+            refs = create_minimax_h3_image_refs(images, vae, mode, grid_long_edge, compression.get("refine_steps", 100), description, clip, vlm_resolution)
         else:
             refs = [create_minimax_h3_video_ref(images, vae, mode, grid_long_edge, compression.get("temporal_density", 16), compression.get("refine_steps", 100), description, clip, vlm_resolution)]
         return io.NodeOutput(refs, format_minimax_h3_ref_info(refs))

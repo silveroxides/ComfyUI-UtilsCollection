@@ -3579,15 +3579,18 @@ def _encode_minimax_h3_image_guide(clip, image, timestamp, vlm_resolution, cache
     )
 
 
-def encode_minimax_h3_ref_vlm(clip, media_type, media, vlm_resolution=384, timestamp=0.0):
+def encode_minimax_h3_ref_vlm(clip, media_type, media, vlm_resolution=384):
     if not is_minimax_h3_text_encoder(clip):
         raise ValueError("MiniMax H3 Ref VLM requires the qwen3vl_32b text encoder.")
     with H3EncoderCache("disabled") as invocation:
         clip = invocation.prepare_clip(clip)
         if media_type == "image":
-            if not math.isfinite(timestamp) or timestamp < 0:
-                raise ValueError("MiniMax H3 Ref VLM timestamp must be finite nonnegative seconds.")
-            sections = _encode_minimax_h3_image_guide(clip, media, timestamp, vlm_resolution, invocation)
+            prepared = prepare_vlm_image(media, vlm_resolution)
+            entries = _minimax_h3_visual_token_entries(clip, prepared)
+            sections = _encode_minimax_h3_section(
+                clip, {"qwen3vl_32b": [entries]}, "grid-deepstack", cache=invocation,
+                section_kind="image", section_id="ref_vlm",
+            )
         elif media_type == "video":
             indices = list(range(0, media.shape[0], 12))
             frames = prepare_minimax_h3_vlm_video_frames(media[indices], vlm_resolution)
@@ -3595,8 +3598,12 @@ def encode_minimax_h3_ref_vlm(clip, media_type, media, vlm_resolution=384, times
                 "type": "video", "data": frames,
                 "timestamps": [Fraction(index, 24) for index in indices],
             }])
+            entries = _token_entries(tokens, "qwen3vl_32b")
+            label = _minimax_h3_text_entries(clip, "<Video 1>: ")
+            if [entry[0] for entry in entries[:len(label)]] != [entry[0] for entry in label]:
+                raise ValueError("MiniMax H3 tokenizer returned an unexpected video prefix.")
             sections = _encode_minimax_h3_section(
-                clip, tokens, "grid-deepstack", cache=invocation,
+                clip, {"qwen3vl_32b": [entries[len(label):]]}, "grid-deepstack", cache=invocation,
                 section_kind="video", section_id="ref_vlm",
             )
         else:
