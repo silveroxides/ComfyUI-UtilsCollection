@@ -824,6 +824,20 @@ def test_cpu_cache_preserves_output_shape_and_dtype():
     assert output.dtype == image.dtype
 
 
+def test_cache_reset_invalidates_without_releasing_residual_buffer():
+    cache = _cache(device="cpu")
+    cache._store_residual(torch.ones((4, 8)))
+    buffer = cache.cached_residual
+
+    cache.finish()
+
+    assert cache.cached_residual is None
+    assert cache._residual_buffer is buffer
+    cache._store_residual(torch.full((4, 8), 3.0))
+    assert cache.cached_residual is buffer
+    torch.testing.assert_close(buffer, torch.full((4, 8), 3.0))
+
+
 def test_sampling_scope_always_clears_cache_state():
     cache = _cache()
     scope = patcher_helpers.MiniMaxH3SamplingScope(cache)

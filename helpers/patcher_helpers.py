@@ -808,6 +808,8 @@ def patch_minimax_h3_pdd_model(model: Any, pdd_lora: str, nfe: int, partition: s
 
 # Cache heuristic adapted from ComfyUI-MiniMaxH3-Cache by lihaoyun6:
 # https://github.com/lihaoyun6/ComfyUI-MiniMaxH3-Cache (GPL-3.0).
+# Scoped-prefetch and residual-buffer fixes adapted from PlagueKind/ComfyUI-PlagueKind-Nodes
+# revisions e787ecf and 9aad64a.
 class MiniMaxH3Cache:
     """Reuse the residual produced by the complete MiniMax H3 block stack."""
 
@@ -827,10 +829,13 @@ class MiniMaxH3Cache:
         self.device = device
         self.verbose = verbose
         self.total_steps = 1
+        self._residual_buffer: torch.Tensor | None = None
+        self._cache_valid = False
         self.reset()
 
     def reset(self) -> None:
-        self.cached_residual: torch.Tensor | None = None
+        # Invalidate contents while keeping storage stable across block malloc scopes.
+        self._cache_valid = False
         self.previous_feature_signature: torch.Tensor | None = None
         self.layout_signature: tuple[Any, ...] | None = None
         self.last_seen_timestep: float | None = None
@@ -875,8 +880,8 @@ class MiniMaxH3Cache:
         if not signatures:
             stride = max(1, hidden_states.shape[0] // 100)
             sampled = hidden_states[::stride, :max_dim]
-            return sampled.detach().abs().mean(dim=-1).clone()
-        return torch.cat(signatures).clone()
+            return sampled.detach().abs().mean(dim=-1).float().cpu()
+        return torch.cat(signatures).float().cpu()
 
     @staticmethod
     def _timestep_value(timestep: Any) -> float | None:
@@ -888,21 +893,35 @@ class MiniMaxH3Cache:
             return float(timestep)
         return None
 
+    @property
+    def cached_residual(self) -> torch.Tensor | None:
+        return self._residual_buffer if self._cache_valid else None
+
     def _store_residual(self, residual: torch.Tensor) -> None:
         if self.device == "cuda" and residual.device.type != "cuda":
             raise ValueError(
                 "MiniMax H3 cache device is set to cuda, but the model is not running on CUDA."
             )
 
+        target_device = torch.device("cpu") if self.device == "cpu" else residual.device
+        residual = residual.detach()
         try:
-            if self.device == "cpu":
-                self.cached_residual = residual.detach().to("cpu", copy=True)
-            else:
-                self.cached_residual = residual.detach().clone()
+            buffer = self._residual_buffer
+            if (
+                buffer is None
+                or buffer.shape != residual.shape
+                or buffer.dtype != residual.dtype
+                or buffer.device != target_device
+            ):
+                buffer = torch.empty(residual.shape, dtype=residual.dtype, device=target_device)
+                self._residual_buffer = buffer
+            buffer.copy_(residual, non_blocking=(target_device.type == "cuda"))
+            self._cache_valid = True
         except torch.OutOfMemoryError:
             if self.device == "cuda":
                 raise
-            self.cached_residual = residual.detach().to("cpu", copy=True)
+            self._residual_buffer = residual.to("cpu", copy=True)
+            self._cache_valid = True
 
     def _apply_residual(self, hidden_states: torch.Tensor) -> torch.Tensor:
         residual = self.cached_residual
@@ -988,7 +1007,7 @@ class MiniMaxH3Cache:
 
         self.run_count += 1
         self.consecutive_skips = 0
-        self.cached_residual = None
+        self._cache_valid = False
         self.previous_feature_signature = self._feature_signature(hidden_states, cache_ranges)
         start_hidden_states = hidden_states.clone()
         result = original_block(args)
