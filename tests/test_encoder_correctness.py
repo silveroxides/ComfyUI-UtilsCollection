@@ -729,6 +729,11 @@ def test_adv_minimax_h3_ref_media_temporal_fusion_schema():
     assert "fusion_method" in inputs
     assert inputs["fusion_method"].options == ["conds_fusion", "token_fusion"]
     assert inputs["fusion_method"].default == "conds_fusion"
+    assert schema.inputs[-1].id == "reference_images"
+
+    # Also verify base temporal fusion node keeps autogrow at the end
+    image_temporal_schema = encoder_nodes.UC_AdvMiniMaxH3ImageToVideoTemporalFusion.define_schema()
+    assert image_temporal_schema.inputs[-1].id == "reference_images"
 
 
 @pytest.mark.parametrize("fusion_method", ["conds_fusion", "token_fusion"])

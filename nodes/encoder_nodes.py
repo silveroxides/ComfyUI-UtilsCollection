@@ -4325,9 +4325,11 @@ class UC_AdvMiniMaxH3ImageToVideoTemporalFusion(UC_AdvancedMiniMaxH3ImageToVideo
         schema.description = "Experimentally fuses corresponding video visual blocks before or after Qwen encoding, preserving the ordinary video token budget."
         selector = next(value for value in schema.inputs if value.id == "fusion_method")
         selector.tooltip = "Temporal fusion target: corresponding video visual blocks. conds_fusion blends their conditioning after separate Qwen encodes. token_fusion blends their features and DeepStack before one Qwen encode per schedule. Temporal density and consensus/spatial settings remain in their existing configurators."
-        schema.inputs = [value for value in schema.inputs if value.id not in ("fusion_images", "fusion_method")]
+        autogrow = [value for value in schema.inputs if value.id == "reference_images"]
+        schema.inputs = [value for value in schema.inputs if value.id not in ("fusion_images", "fusion_method", "reference_images")]
         schema.inputs.append(TextBlendConfig.Input("text_blend_config", optional=True, tooltip="Temporal consensus settings. Disconnected uses custom index consensus with norm rescaling."))
         schema.inputs.append(selector)
+        schema.inputs.extend(autogrow)
         return schema
 
     @classmethod
@@ -4520,6 +4522,8 @@ class UC_AdvMiniMaxH3RefMediaImageToVideoTemporalFusion(UC_AdvancedMiniMaxH3RefM
         schema.is_experimental = True
         schema.display_name = "Adv MiniMax H3 Reference Media to Video (Temporal Fusion)"
         schema.description = "Experimentally fuses corresponding video visual blocks from reference media before or after Qwen encoding, preserving the ordinary video token budget."
+        autogrow = [value for value in schema.inputs if value.id == "reference_images"]
+        schema.inputs = [value for value in schema.inputs if value.id != "reference_images"]
         schema.inputs.append(VisualFusionConfig.Input(
             "visual_fusion_config",
             optional=True,
@@ -4538,6 +4542,7 @@ class UC_AdvMiniMaxH3RefMediaImageToVideoTemporalFusion(UC_AdvancedMiniMaxH3RefM
             optional=True,
             tooltip="Temporal fusion target: corresponding video visual blocks. conds_fusion blends their conditioning after separate Qwen encodes. token_fusion blends their features and DeepStack before one Qwen encode per schedule. Temporal density and consensus/spatial settings remain in their existing configurators."
         ))
+        schema.inputs.extend(autogrow)
         return schema
 
     @classmethod
