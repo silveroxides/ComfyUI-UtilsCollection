@@ -170,7 +170,7 @@ class H3BaseCanvasPromptEditor {
     return curY;
   }
 
-  button(ctx, x, y, w, h, label, action, accent = false, align = "center", active = false, danger = false, tooltip = null) {
+  button(ctx, x, y, w, h, label, action, accent = false, align = "center", active = false, danger = false, tooltip = null, isFixed = false) {
     let fill = accent ? "#26394e" : "#202329";
     let stroke = accent ? "#709ecc" : "#59606a";
     let textColor = accent ? "#d7ebff" : "#ddd";
@@ -193,7 +193,15 @@ class H3BaseCanvasPromptEditor {
     else if (align === "right") tx = x + w - tw - 8;
 
     this.text(ctx, label, tx, y + h / 2, textColor, "11px sans-serif", w - 8);
-    this.hit(x, y, w, h, action, tooltip);
+    if (isFixed) {
+      this.hitFixed(x, y, w, h, action, tooltip);
+    } else {
+      this.hit(x, y, w, h, action, tooltip);
+    }
+  }
+
+  hitFixed(x, y, w, h, action, tooltip = null) {
+    this.hitRegions.push({ x, y, w, h, action, tooltip });
   }
 
   hit(x, y, w, h, action, tooltip = null) {
@@ -384,6 +392,58 @@ class H3BaseCanvasPromptEditor {
     requestAnimationFrame(() => element.focus());
   }
 
+  openSingleLineEditor(rect, value, apply) {
+    this.closeTextEditor();
+    this.clearHoveredTooltip();
+
+    const container = document.createElement("div");
+    container.dataset.testid = "h3-base-prompt-singleline-container";
+    Object.assign(container.style, {
+      position: "fixed", zIndex: "1000", boxSizing: "border-box", margin: "0",
+      display: "flex", background: "#1f2228",
+      border: "1px solid #709ecc", borderRadius: "4px", padding: "2px",
+    });
+
+    const element = document.createElement("input");
+    element.type = "text";
+    element.value = String(value ?? "");
+    Object.assign(element.style, {
+      width: "100%", height: "100%", boxSizing: "border-box",
+      background: "#121418", color: "#f8fafc", border: "none", outline: "none",
+      borderRadius: "2px", padding: "2px 6px", fontSize: "11px", fontFamily: "sans-serif",
+    });
+
+    container.appendChild(element);
+    this.textEditor = { element, container, rect, isSingle: true };
+
+    this.outsidePointer = (event) => {
+      if (this.textEditor?.container && !this.textEditor.container.contains(event.target)) {
+        this.closeTextEditor();
+      }
+    };
+    requestAnimationFrame(() => {
+      document.addEventListener("pointerdown", this.outsidePointer, true);
+    });
+
+    element.addEventListener("input", () => this.change(() => apply(element.value)));
+    element.addEventListener("keydown", event => {
+      event.stopPropagation();
+      if (event.key === "Enter" || event.key === "Escape") {
+        event.preventDefault();
+        this.closeTextEditor();
+      }
+    });
+
+    element.addEventListener("blur", () => this.closeTextEditor());
+
+    document.body.appendChild(container);
+    this.positionTextEditor();
+    requestAnimationFrame(() => {
+      element.focus();
+      element.select();
+    });
+  }
+
   closeTextEditor() {
     if (this.outsidePointer) {
       document.removeEventListener("pointerdown", this.outsidePointer, true);
@@ -398,14 +458,14 @@ class H3BaseCanvasPromptEditor {
 
   positionTextEditor() {
     if (!this.textEditor || !app.canvas?.canvas) return;
-    const { container, rect } = this.textEditor;
+    const { container, rect, isSingle } = this.textEditor;
     const canvas = app.canvas.canvas;
     const canvasRect = canvas.getBoundingClientRect();
     const scale = app.canvas.ds.scale;
     const x = canvasRect.left + (this.node.pos[0] + rect.x + app.canvas.ds.offset[0]) * scale;
     const y = canvasRect.top + (this.node.pos[1] + rect.y + app.canvas.ds.offset[1]) * scale;
-    const w = Math.max(340, rect.w * scale);
-    const h = Math.max(140, rect.h * scale + 60);
+    const w = isSingle ? Math.max(120, rect.w * scale) : Math.max(340, rect.w * scale);
+    const h = isSingle ? Math.max(26, rect.h * scale) : Math.max(140, rect.h * scale + 60);
 
     Object.assign(container.style, {
       left: `${Math.max(10, Math.min(window.innerWidth - w - 10, x))}px`,
@@ -422,6 +482,8 @@ class H3BaseCanvasPromptEditor {
 
     const nodeHeight = this.node.size[1] || 500;
     const totalHeight = Math.max(380, nodeHeight - y - 10);
+    this.viewportY = y;
+    this.viewportHeight = totalHeight;
     this.box(ctx, 4, y, width - 8, totalHeight, "#181a1f", "#333842", 5);
 
     const left = 10;
@@ -440,7 +502,7 @@ class H3BaseCanvasPromptEditor {
       this.change(() => {
         this.state.precision = this.state.precision === 2 ? 3 : 2;
       });
-    }, true, "center", false, false, "Switches timestamps between two decimal places (00.00s) and three decimal places (00.000s) across the entire prompt.");
+    }, true, "center", false, false, "Switches timestamps between two decimal places (00.00s) and three decimal places (00.000s) across the entire prompt.", true);
 
     // Tab Navigation Bar
     const tabY = y + 28;
@@ -470,7 +532,7 @@ class H3BaseCanvasPromptEditor {
           this.state.activeTab = tab;
           this.scroll = 0;
         });
-      }, false, "center", active, false, tabTooltips[tab]);
+      }, false, "center", active, false, tabTooltips[tab], true);
     });
 
     const contentTopY = tabY + 32;
@@ -672,6 +734,13 @@ class H3BaseCanvasPromptEditor {
         if (!isTimeline) {
           const cur = this.state.description?.continuousText || "";
           this.change(() => { this.state.description.continuousText = cur ? `${cur} ${item.label}` : item.label; });
+        } else {
+          if (!this.state.segments?.length) {
+            addBaseSegment(this.state);
+          }
+          const lastSeg = this.state.segments[this.state.segments.length - 1];
+          const cur = lastSeg.visual || "";
+          this.change(() => { lastSeg.visual = cur ? `${cur} ${item.label}` : item.label; });
         }
       }, true, "center", false, false, item.tip);
       chipX += tagW + 4;
@@ -722,7 +791,16 @@ class H3BaseCanvasPromptEditor {
       if (!this.state.description) this.state.description = {};
       this.state.description.segmentDuration = nextSec;
     }), false, "center", false, false, "Lengthens segment duration by 17 frames (about 0.71 seconds), matching H3 native steps.");
-    this.button(ctx, left + 354, sy(cy), 48, 22, `${segDur.toFixed(2)}s`, () => {}, true, "center", false, false, "Current default segment duration.");
+    const durRect = { x: left + 354, y: sy(cy), w: 56, h: 22 };
+    this.button(ctx, durRect.x, durRect.y, durRect.w, durRect.h, `${segDur.toFixed(2)}s`, () => {
+      this.openSingleLineEditor(durRect, String(segDur.toFixed(2)), (val) => {
+        const s = parseFloat(val);
+        if (s > 0) {
+          if (!this.state.description) this.state.description = {};
+          this.state.description.segmentDuration = s;
+        }
+      });
+    }, true, "center", false, false, "Current default segment duration. Click to edit value.");
     cy += 30;
 
     // Segment List

@@ -147,3 +147,45 @@ test("collapsing dropdown menus route clicks through getWidgetOnPos and support 
   assert.ok(source.includes("this.menuBoundingBox = { x: mx, y: my, w: mw, h: totalH }"));
   assert.ok(source.includes("const disabled = Boolean(opt.disabled)"));
 });
+
+test("navigation tabs and fixed controls use hitFixed to prevent viewport clipping across redraws", () => {
+  const baseSource = readFileSync(new URL("../web/minimax_h3_base_prompt.js", import.meta.url), "utf8");
+  assert.ok(baseSource.includes("hitFixed(x, y, w, h, action, tooltip)"));
+  assert.ok(baseSource.includes("this.hitFixed(x, y, w, h, action, tooltip)"));
+  assert.ok(baseSource.includes("this.viewportY = y;"));
+
+  const dynamicSource = readFileSync(new URL("../web/minimax_h3_prompt.js", import.meta.url), "utf8");
+  assert.ok(dynamicSource.includes("hitFixed(x, y, w, h, action, tooltip)"));
+  assert.ok(dynamicSource.includes("this.hitFixed(x, y, w, h, action, tooltip)"));
+});
+
+test("single-line button edits use inline input overlay instead of non-existent canvas prompt", () => {
+  const dynamicSource = readFileSync(new URL("../web/minimax_h3_prompt.js", import.meta.url), "utf8");
+  assert.ok(dynamicSource.includes("openSingleLineEditor(rect, value, apply)"));
+  assert.ok(dynamicSource.includes("h3-prompt-singleline-container"));
+  assert.ok(dynamicSource.includes("durRect"));
+  assert.ok(dynamicSource.includes("startRect"));
+  assert.ok(dynamicSource.includes("endRect"));
+
+  const baseSource = readFileSync(new URL("../web/minimax_h3_base_prompt.js", import.meta.url), "utf8");
+  assert.ok(baseSource.includes("openSingleLineEditor(rect, value, apply)"));
+  assert.ok(baseSource.includes("h3-base-prompt-singleline-container"));
+});
+
+test("dropdown menus attach document-level pointerdown listener for outside dismissal", () => {
+  const dynamicSource = readFileSync(new URL("../web/minimax_h3_prompt.js", import.meta.url), "utf8");
+  assert.ok(dynamicSource.includes("this.menuOutsidePointer = () =>"));
+  assert.ok(dynamicSource.includes("document.addEventListener(\"pointerdown\", this.menuOutsidePointer, true)"));
+  assert.ok(dynamicSource.includes("document.removeEventListener(\"pointerdown\", this.menuOutsidePointer, true)"));
+});
+
+test("timeline segment cards compute dynamic height avoiding hardcoded vertical overlap", () => {
+  const dynamicSource = readFileSync(new URL("../web/minimax_h3_prompt.js", import.meta.url), "utf8");
+  assert.ok(dynamicSource.includes("const spkActive = Boolean(seg.speech?.enabled);"));
+  assert.ok(dynamicSource.includes("const sndActive = Boolean(seg.sounds?.enabled);"));
+  assert.ok(dynamicSource.includes("const musActive = Boolean(seg.music?.enabled);"));
+  assert.ok(dynamicSource.includes("const cardH = collapsed"));
+  assert.ok(dynamicSource.includes("spkActive ? 34 : 0"));
+  assert.ok(dynamicSource.includes("sndActive ? 34 : 0"));
+  assert.ok(dynamicSource.includes("musActive ? 34 : 0"));
+});

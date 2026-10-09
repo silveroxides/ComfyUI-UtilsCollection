@@ -142,7 +142,7 @@ class H3CanvasPromptEditor {
     ctx.fillText(line.slice(0, end) + "…", x, y);
   }
 
-  button(ctx, x, y, w, h, label, action, accent = false, align = "center", active = false, danger = false, tooltip = null) {
+  button(ctx, x, y, w, h, label, action, accent = false, align = "center", active = false, danger = false, tooltip = null, isFixed = false) {
     let fill = accent ? "#26394e" : "#202329";
     let stroke = accent ? "#709ecc" : "#59606a";
     let textColor = accent ? "#d7ebff" : "#ddd";
@@ -162,7 +162,15 @@ class H3CanvasPromptEditor {
     const tw = ctx.measureText(label).width;
     const tx = align === "left" ? x + 8 : x + Math.max(4, (w - tw) / 2);
     this.text(ctx, label, tx, y + h / 2, textColor, "11px sans-serif", w - 8);
-    this.hit(x, y, w, h, action, tooltip);
+    if (isFixed) {
+      this.hitFixed(x, y, w, h, action, tooltip);
+    } else {
+      this.hit(x, y, w, h, action, tooltip);
+    }
+  }
+
+  hitFixed(x, y, w, h, action, tooltip = null) {
+    this.hitRegions.push({ x, y, w, h, action, tooltip });
   }
 
   chip(ctx, x, y, label, action, active = false, accent = false, tooltip = null) {
@@ -279,6 +287,7 @@ class H3CanvasPromptEditor {
 
   openMenu(x, y, w, options, onSelect) {
     this.closeTextEditor();
+    this.closeMenu();
     this.clearHoveredTooltip();
     this.activeMenu = {
       x,
@@ -287,10 +296,24 @@ class H3CanvasPromptEditor {
       options,
       onSelect,
     };
+
+    this.menuOutsidePointer = () => {
+      if (this.activeMenu) {
+        this.closeMenu();
+      }
+    };
+    requestAnimationFrame(() => {
+      document.addEventListener("pointerdown", this.menuOutsidePointer, true);
+    });
+
     app.canvas?.setDirty(true, true);
   }
 
   closeMenu() {
+    if (this.menuOutsidePointer) {
+      document.removeEventListener("pointerdown", this.menuOutsidePointer, true);
+      this.menuOutsidePointer = null;
+    }
     if (this.activeMenu) {
       this.activeMenu = null;
       this.menuBoundingBox = null;
@@ -378,10 +401,73 @@ class H3CanvasPromptEditor {
       (event, position) => action(event, position, rect), false, "left");
   }
 
-  editSingleLine(title, value, apply, event) {
-    app.canvas.prompt(title, value, text => {
+  editSingleLine(title, value, apply, event, rect = null) {
+    if (rect) {
+      this.openSingleLineEditor(rect, value, apply);
+      return;
+    }
+    if (typeof app.canvas?.prompt === "function") {
+      app.canvas.prompt(title, value, text => {
+        if (text !== null) this.change(() => apply(text));
+      }, event);
+    } else {
+      const text = window.prompt(title, value);
       if (text !== null) this.change(() => apply(text));
-    }, event);
+    }
+  }
+
+  openSingleLineEditor(rect, value, apply) {
+    this.closeTextEditor();
+    this.closeMenu();
+    this.clearHoveredTooltip();
+
+    const container = document.createElement("div");
+    container.className = "comfy-singleline-container";
+    container.dataset.testid = "h3-prompt-singleline-container";
+    Object.assign(container.style, {
+      position: "fixed", zIndex: "1000", boxSizing: "border-box", margin: "0",
+      display: "flex", background: "#1f2228",
+      border: "1px solid #709ecc", borderRadius: "4px", padding: "2px",
+    });
+
+    const element = document.createElement("input");
+    element.type = "text";
+    element.value = String(value ?? "");
+    Object.assign(element.style, {
+      width: "100%", height: "100%", boxSizing: "border-box",
+      background: "#121418", color: "#f8fafc", border: "none", outline: "none",
+      borderRadius: "2px", padding: "2px 6px", fontSize: "11px", fontFamily: "sans-serif",
+    });
+
+    container.appendChild(element);
+    this.textEditor = { element, container, rect, isSingle: true };
+
+    this.outsidePointer = (event) => {
+      if (this.textEditor?.container && !this.textEditor.container.contains(event.target)) {
+        this.closeTextEditor();
+      }
+    };
+    requestAnimationFrame(() => {
+      document.addEventListener("pointerdown", this.outsidePointer, true);
+    });
+
+    element.addEventListener("input", () => this.change(() => apply(element.value)));
+    element.addEventListener("keydown", event => {
+      event.stopPropagation();
+      if (event.key === "Enter" || event.key === "Escape") {
+        event.preventDefault();
+        this.closeTextEditor();
+      }
+    });
+
+    element.addEventListener("blur", () => this.closeTextEditor());
+
+    document.body.appendChild(container);
+    this.positionTextEditor();
+    requestAnimationFrame(() => {
+      element.focus();
+      element.select();
+    });
   }
 
   openTextEditor(value, apply, rect, tagSpawner = null) {
@@ -484,14 +570,14 @@ class H3CanvasPromptEditor {
 
   positionTextEditor() {
     if (!this.textEditor || !app.canvas?.canvas) return;
-    const { container, rect } = this.textEditor;
+    const { container, rect, isSingle } = this.textEditor;
     const canvas = app.canvas.canvas;
     const canvasRect = canvas.getBoundingClientRect();
     const scale = app.canvas.ds.scale;
     const x = canvasRect.left + (this.node.pos[0] + rect.x + app.canvas.ds.offset[0]) * scale;
     const y = canvasRect.top + (this.node.pos[1] + rect.y + app.canvas.ds.offset[1]) * scale;
-    const w = Math.max(340, rect.w * scale);
-    const h = Math.max(140, rect.h * scale + 60);
+    const w = isSingle ? Math.max(120, rect.w * scale) : Math.max(340, rect.w * scale);
+    const h = isSingle ? Math.max(26, rect.h * scale) : Math.max(140, rect.h * scale + 60);
 
     Object.assign(container.style, {
       left: `${Math.max(10, Math.min(window.innerWidth - w - 10, x))}px`,
@@ -526,7 +612,7 @@ class H3CanvasPromptEditor {
       this.change(() => {
         this.state.precision = this.state.precision === 2 ? 3 : 2;
       });
-    }, true, "center", false, false, "Switches timestamps between two decimal places (00.00s) and three decimal places (00.000s) across the entire prompt.");
+    }, true, "center", false, false, "Switches timestamps between two decimal places (00.00s) and three decimal places (00.000s) across the entire prompt.", true);
 
     // Tab Navigation Bar
     const tabY = y + 28;
@@ -558,7 +644,7 @@ class H3CanvasPromptEditor {
           this.state.activeTab = tab;
           this.scroll = 0;
         });
-      }, false, "center", active, false, tabTooltips[tab]);
+      }, false, "center", active, false, tabTooltips[tab], true);
     });
 
     const contentTopY = tabY + 32;
@@ -1046,11 +1132,12 @@ class H3CanvasPromptEditor {
         }, false, "center", false, false, "Shortens segment duration by 17 frames (about 0.71 seconds), matching H3 native steps.");
 
         // Duration display/edit
-        this.button(ctx, left + 160, sy(cy), 110, 24, durLabel, event => {
+        const durRect = { x: left + 160, y: sy(cy), w: 110, h: 24 };
+        this.button(ctx, durRect.x, durRect.y, durRect.w, durRect.h, durLabel, event => {
           this.editSingleLine("Step Duration in Seconds", String(curDur.toFixed(2)), val => {
             const s = parseFloat(val);
             if (s > 0) this.state.detailed.segmentDuration = s;
-          }, event);
+          }, event, durRect);
         }, true, "center", false, false, "Current default segment duration. Click to edit manually.");
 
         // Increment button (+17 frames)
@@ -1069,7 +1156,12 @@ class H3CanvasPromptEditor {
         // Segments List
         this.state.segments.forEach((seg, sIdx) => {
           const collapsed = this.collapsed.has(sIdx);
-          const cardH = collapsed ? 34 : 260;
+          const spkActive = Boolean(seg.speech?.enabled);
+          const sndActive = Boolean(seg.sounds?.enabled);
+          const musActive = Boolean(seg.music?.enabled);
+          const cardH = collapsed
+            ? 34
+            : (144 + (spkActive ? 34 : 0) + (sndActive ? 34 : 0) + (musActive ? 34 : 0) + 12);
           const cardY = sy(cy);
           this.box(ctx, left, cardY, available, cardH, "#22262e", "#444b56", 4);
 
@@ -1097,11 +1189,13 @@ class H3CanvasPromptEditor {
 
             // Start & End editing
             const halfW = (available - 20) / 2;
-            this.button(ctx, left + 8, scy, halfW, 22, `Start: ${seg.start}`, event => {
-              this.editSingleLine("Segment Start Time", String(seg.start), val => { seg.start = val; }, event);
+            const startRect = { x: left + 8, y: scy, w: halfW, h: 22 };
+            this.button(ctx, startRect.x, startRect.y, startRect.w, startRect.h, `Start: ${seg.start}`, event => {
+              this.editSingleLine("Segment Start Time", String(seg.start), val => { seg.start = val; }, event, startRect);
             });
-            this.button(ctx, left + 12 + halfW, scy, halfW, 22, `End: ${seg.end}`, event => {
-              this.editSingleLine("Segment End Time", String(seg.end), val => { seg.end = val; }, event);
+            const endRect = { x: left + 12 + halfW, y: scy, w: halfW, h: 22 };
+            this.button(ctx, endRect.x, endRect.y, endRect.w, endRect.h, `End: ${seg.end}`, event => {
+              this.editSingleLine("Segment End Time", String(seg.end), val => { seg.end = val; }, event, endRect);
             });
             scy += 26;
 
@@ -1142,7 +1236,6 @@ class H3CanvasPromptEditor {
             scy += 48;
 
             // [SPEECH] Channel
-            const spkActive = Boolean(seg.speech?.enabled);
             this.button(ctx, left + 8, scy + 8, 80, 22, `[SPEECH]`, () => {
               this.change(() => {
                 seg.speech = seg.speech || {};
@@ -1151,11 +1244,13 @@ class H3CanvasPromptEditor {
             }, false, "center", spkActive, false, "Enables spoken dialogue, speaker identity, and spoken language for this segment.");
 
             if (spkActive) {
-              this.button(ctx, left + 92, scy + 8, 50, 22, seg.speech.speaker || "S1", event => {
-                this.editSingleLine("Speaker ID (e.g. S1)", seg.speech.speaker || "S1", val => { seg.speech.speaker = val; }, event);
+              const spkRect = { x: left + 92, y: scy + 8, w: 50, h: 22 };
+              this.button(ctx, spkRect.x, spkRect.y, spkRect.w, spkRect.h, seg.speech.speaker || "S1", event => {
+                this.editSingleLine("Speaker ID (e.g. S1)", seg.speech.speaker || "S1", val => { seg.speech.speaker = val; }, event, spkRect);
               }, false, "center", false, false, "Speaker ID for this line (e.g. S1 or S2).");
-              this.button(ctx, left + 146, scy + 8, 60, 22, seg.speech.language || "English", event => {
-                this.editSingleLine("Language", seg.speech.language || "English", val => { seg.speech.language = val; }, event);
+              const langRect = { x: left + 146, y: scy + 8, w: 60, h: 22 };
+              this.button(ctx, langRect.x, langRect.y, langRect.w, langRect.h, seg.speech.language || "English", event => {
+                this.editSingleLine("Language", seg.speech.language || "English", val => { seg.speech.language = val; }, event, langRect);
               }, false, "center", false, false, "Spoken language name inside the dialogue tag.");
               this.field(ctx, "Spoken Words", seg.speech.text, left + 210, scy - 8, available - 218, (_ev, _pos, rect) => {
                 this.openTextEditor(seg.speech.text, val => { seg.speech.text = val; }, rect, availableTags);
@@ -1164,7 +1259,6 @@ class H3CanvasPromptEditor {
             scy += 34;
 
             // [SOUNDS] Channel
-            const sndActive = Boolean(seg.sounds?.enabled);
             this.button(ctx, left + 8, scy + 8, 80, 22, `[SOUNDS]`, () => {
               this.change(() => {
                 seg.sounds = seg.sounds || {};
@@ -1180,7 +1274,6 @@ class H3CanvasPromptEditor {
             scy += 34;
 
             // [MUSIC] Channel
-            const musActive = Boolean(seg.music?.enabled);
             this.button(ctx, left + 8, scy + 8, 80, 22, `[MUSIC]`, () => {
               this.change(() => {
                 seg.music = seg.music || {};
