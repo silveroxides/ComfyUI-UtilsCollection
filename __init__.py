@@ -59,6 +59,7 @@ class SamplingUtils(ComfyExtension):
             UC_MiniMaxH3RefApply,
             UC_AdvancedMiniMaxH3ImageToVideo,
             UC_AdvancedMiniMaxH3RefMediaImageToVideo,
+            UC_AdvMiniMaxH3RefMediaImageToVideoTemporalFusion,
             UC_MiniMaxH3ClipContinuationEncoder,
             UC_MiniMaxH3ClipContinuationSave,
             UC_MiniMaxH3ClipContinuationLoad,

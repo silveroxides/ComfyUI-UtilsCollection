@@ -16,8 +16,25 @@ import comfy.utils
 from comfy.text_encoders.minimax import token_tags_from_embeds_info
 import node_helpers
 
-from .minimax_h3_cache_helpers import H3EncoderCache, H3_CACHE_MODES
+from .minimax_h3_cache_helpers import H3EncoderCache, H3_CACHE_MODES, temporal_cache_settings
 from .minimax_h3_guide_helpers import LAYOUT_KEY, build_layout
+from .minimax_h3_temporal_helpers import (
+    encode_temporal_conditioning,
+    fuse_temporal_block,
+    minimax_h3_temporal_frame_pairs,
+)
+from .encoder_helpers import (
+    _active_clip_model,
+    _encode_preprocessed_clip_model,
+    _encode_scheduled_with_visual_path,
+    _position_biased_similarity_scores,
+    build_token_to_conditioning_map,
+    encode_embedding_classical_scaled_bias,
+    fuse_visual_token_sources,
+    qwen3vl_visual_encoder_path,
+    resolve_consensus_blend_settings,
+    visual_fusion_grid,
+)
 
 
 def is_minimax_h3_text_encoder(clip) -> bool:
@@ -264,9 +281,37 @@ def execute_advanced_minimax_h3_reference_media_image_to_video(
     cache=None,
     enable_caching: str = "all",
     reference_media=None,
+    visual_fusion_config=None,
+    temporal_fusion=False,
+    temporal_token_fusion=False,
+    text_blend_config=None,
     **kwargs,
 ):
-    """Build coordinated Qwen conditioning, H3 controls, and AV latent strictly from reference_media."""
+    """Build coordinated Qwen conditioning, H3 controls, and AV latent strictly from reference_media.
+
+    Execution Pipeline:
+        1. Validates CLIP text encoder matches Qwen3-VL 32B (qwen3vl_32b).
+        2. Unpacks reference_media into parsed reference videos and audios.
+        3. Encodes latent video and audio references with VAE (pooled, refined, or full).
+        4. Gathers static images (first/last frame, reference images) and dynamic video frames
+           into reference items for Qwen multimodal tokenization.
+        5. If temporal_fusion is active and reference videos exist:
+           - Derives temporal_density (1-24) and temporal_fusion_method ("consensus" vs "spatial")
+             from media_config.
+           - Resolves mathematical consensus settings from text_blend_config (or default median).
+           - When temporal_fusion_method is "spatial", spatial interleaving is governed by
+             visual_fusion_config.
+           - Builds multi-lane temporal frame pairs with minimax_h3_temporal_frame_pairs.
+           - If temporal_token_fusion is True (token_fusion), fuses visual features and DeepStack
+             before a single joint Qwen encode pass.
+           - If temporal_token_fusion is False (conds_fusion), encodes each temporal lane separately
+             and fuses conditioning tensors post-Qwen.
+        6. Processes classical prompt weights e.g. (word:1.2) via encode_embedding_classical_scaled_bias.
+        7. Attaches layout metadata, keyframes, reference descriptors, and AV empty latents.
+
+    Returns:
+        tuple[list[list[Tensor, dict]], dict]: (conditioning, latent)
+    """
     if not is_minimax_h3_text_encoder(clip):
         raise ValueError(
             "Advanced MiniMax H3 Reference Media to Video requires the qwen3vl_32b text encoder."
@@ -281,6 +326,10 @@ def execute_advanced_minimax_h3_reference_media_image_to_video(
                 media_config=media_config, audio_vae=audio_vae,
                 cache=invocation, enable_caching=enable_caching,
                 reference_media=reference_media,
+                visual_fusion_config=visual_fusion_config,
+                temporal_fusion=temporal_fusion,
+                temporal_token_fusion=temporal_token_fusion,
+                text_blend_config=text_blend_config,
                 **kwargs,
             )
 
@@ -416,9 +465,77 @@ def execute_advanced_minimax_h3_reference_media_image_to_video(
     for _aud, _ in prepared_reference_audios:
         reference_items.append({"type": "audio"})
 
+    temporal_encode = None
+    if temporal_fusion and prepared_reference_videos:
+        temporal_config = media_config or {}
+        density = temporal_config.get("temporal_density", 1)
+        method = temporal_config.get("temporal_fusion_method", "consensus")
+        if isinstance(density, bool) or not isinstance(density, numbers.Integral) or not 1 <= density <= 24:
+            raise ValueError("MiniMax H3 temporal density must be an integer from 1 to 24.")
+        if method not in ("consensus", "spatial"):
+            raise ValueError("Unsupported MiniMax H3 temporal fusion method.")
+        default_consensus = {
+            "blend_preset": "custom", "alignment_method": "index", "consensus_type": "median",
+            "power_alpha": 2.0, "diversity_beta": 0.0, "rescale_norm": True, "global_scale": 1.0,
+        }
+        settings = resolve_consensus_blend_settings(default_consensus if text_blend_config is None else text_blend_config)
+        visual_config = visual_fusion_config or {}
+        visual_method = visual_config.get("visual_fusion_method", "off")
+        enabled = settings["blend_preset"] != "off" if method == "consensus" else visual_method != "off"
+
+        if density > 1 and enabled:
+            all_frame_pairs = []
+            for v_frames, _s_track, _v_ref, _a_ref in prepared_reference_videos:
+                indices = minimax_h3_video_sample_indices(v_frames.shape[0], video_fps)
+                v_pairs = minimax_h3_temporal_frame_pairs(v_frames.shape[0], indices, int(density))
+                for block in v_pairs:
+                    all_frame_pairs.append([(v_frames, pair) for pair in block])
+
+            def fuse_video_block(sources, grids, deepstack):
+                def compute():
+                    return fuse_temporal_block(
+                        sources, method, settings, visual_config, grids,
+                        spatial_fuse_callback=fuse_visual_token_sources,
+                        position_score_callback=_position_biased_similarity_scores,
+                        deepstack_layers=deepstack,
+                    )
+                if len(sources) == 1 or temporal_token_fusion:
+                    return compute()
+                return cache.get_or_compute("encoded_section", {
+                    "sources": sources, "grids": grids, "deepstack": deepstack,
+                    "method": method, "settings": temporal_cache_settings(method, settings, visual_config),
+                    "section": "temporal_post_qwen", "device": str(sources[0].device),
+                }, compute)
+
+            def temporal_encode(tokens, encode_tokens_callback=None):
+                return encode_temporal_conditioning(
+                    clip, tokens, all_frame_pairs,
+                    lambda pair_info: prepare_minimax_h3_vlm_video_frames(
+                        pair_info[0][list(pair_info[1])], vlm_video_resolution
+                    ),
+                    token_fusion=temporal_token_fusion,
+                    fusion_callback=fuse_video_block,
+                    encode_tokens_callback=encode_tokens_callback or (
+                        lambda value: _encode_scheduled_with_visual_path(clip, value, "grid-deepstack", cache=cache)
+                    ),
+                    active_clip_model_callback=_active_clip_model,
+                    encode_preprocessed_callback=_encode_preprocessed_clip_model,
+                    visual_context_callback=lambda: qwen3vl_visual_encoder_path(clip, "grid-deepstack"),
+                    video_grid_callback=lambda data, size: visual_fusion_grid(data, size, False),
+                    token_spans_callback=build_token_to_conditioning_map,
+                    cache=cache,
+                )
+
     # Presentation tokenization
-    tokens = clip.tokenize(prompt, minimax_ref_items=reference_items)
-    conditioning = clip.encode_from_tokens_scheduled(tokens)
+    tokenize_callback = lambda text: clip.tokenize(text, minimax_ref_items=reference_items)
+    conditioning = encode_embedding_classical_scaled_bias(
+        clip,
+        prompt,
+        tokenize_callback=tokenize_callback,
+        visual_encoder_path="grid-deepstack",
+        encode_callback=temporal_encode,
+        cache=cache,
+    )
 
     # Wrap conditioning with modality tags and layout
     layout_conditioning = []

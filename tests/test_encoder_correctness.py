@@ -28,6 +28,7 @@ try:
         TextEncodeKrea2SysEditScaledAdvAttn,
         UC_AdvancedMiniMaxH3ImageToVideo,
         UC_AdvancedMiniMaxH3RefMediaImageToVideo,
+        UC_AdvMiniMaxH3RefMediaImageToVideoTemporalFusion,
         UC_MiniMaxH3ReferenceMedia,
         UC_MiniMaxH3MediaConfig,
         UC_AdvancedVisualConditioningEncode,
@@ -712,6 +713,103 @@ def test_advanced_minimax_h3_ref_media_node_schema():
     assert "audio_vae" in inputs
     assert "video" not in inputs
     assert "audio" not in inputs
+
+
+def test_adv_minimax_h3_ref_media_temporal_fusion_schema():
+    schema = UC_AdvMiniMaxH3RefMediaImageToVideoTemporalFusion.define_schema()
+    inputs = {value.id: value for value in schema.inputs}
+    assert schema.node_id == "UC_AdvMiniMaxH3RefMediaImageToVideoTemporalFusion"
+    assert schema.is_experimental is True
+    assert "reference_media" in inputs
+    assert inputs["reference_media"].io_type == "MINIMAX_H3_REFERENCE_MEDIA"
+    assert "text_blend_config" in inputs
+    assert inputs["text_blend_config"].io_type == "TEXT_BLEND_CONFIG"
+    assert "visual_fusion_config" in inputs
+    assert inputs["visual_fusion_config"].io_type == "VISUAL_FUSION_CONFIG"
+    assert "fusion_method" in inputs
+    assert inputs["fusion_method"].options == ["conds_fusion", "token_fusion"]
+    assert inputs["fusion_method"].default == "conds_fusion"
+
+
+@pytest.mark.parametrize("fusion_method", ["conds_fusion", "token_fusion"])
+@pytest.mark.parametrize("bypass", ["density_one", "no_video", "consensus_off", "spatial_off"])
+def test_ref_media_temporal_fusion_bypass(monkeypatch, fusion_method, bypass):
+    from utils_collection_encoder_test.helpers import minimax_h3_temporal_helpers
+    def unexpected(*args, **kwargs):
+        raise AssertionError("Bypass must not enter temporal lane encoding")
+    monkeypatch.setattr(minimax_h3_temporal_helpers, "encode_temporal_conditioning", unexpected)
+
+    kwargs = {"ref_image_size": "none", "vlm_video_resolution": 0, "fusion_method": fusion_method}
+    config = encoder_helpers.build_minimax_h3_media_config(
+        None,
+        video_latent_mode="off",
+        temporal_density=1 if bypass == "density_one" else 3,
+        temporal_fusion_method="spatial" if bypass == "spatial_off" else "consensus",
+    )
+    if bypass != "no_video":
+        ref_media = {"reference_videos": {"reference_video_1": torch.zeros(25, 32, 64, 3)}}
+        kwargs.update(reference_media=ref_media, media_config=config)
+    if bypass == "consensus_off":
+        kwargs["text_blend_config"] = {"blend_preset": "off"}
+    if bypass == "spatial_off":
+        kwargs["visual_fusion_config"] = {"visual_fusion_method": "off"}
+
+    clip = _MiniMaxH3TestClip()
+    result, latent = UC_AdvMiniMaxH3RefMediaImageToVideoTemporalFusion.execute(
+        clip, None, "subject", 64, 32, 25, **kwargs, enable_caching="disabled"
+    ).args
+    assert len(clip.encoded_tokens) == 1
+
+    ordinary = dict(kwargs)
+    ordinary.pop("text_blend_config", None)
+    ordinary.pop("visual_fusion_config", None)
+    ordinary.pop("fusion_method", None)
+    expected, expected_latent = UC_AdvancedMiniMaxH3RefMediaImageToVideo.execute(
+        _MiniMaxH3TestClip(), None, "subject", 64, 32, 25, **ordinary, enable_caching="disabled"
+    ).args
+    assert torch.equal(result[0][0], expected[0][0])
+    assert result[0][1]["uc_minimax_h3_vlm_layout"] == expected[0][1]["uc_minimax_h3_vlm_layout"]
+    assert latent.keys() == expected_latent.keys()
+
+
+def test_ref_media_temporal_fusion_execution():
+    class VideoClip(_MiniMaxH3TestClip):
+        def encode_from_tokens_scheduled(self, tokens):
+            output = super().encode_from_tokens_scheduled(tokens)
+            tensor = output[0][0]
+            entries = tokens["qwen3vl_32b"][0]
+            spans = encoder_helpers.build_token_to_conditioning_map(entries, tensor)
+            for entry, (start, end) in zip(entries, spans):
+                if isinstance(entry[0], dict) and entry[0].get("minimax_video_block"):
+                    tensor[:, start:end] = float(entry[0]["data"].mean())
+            return output
+
+    video = torch.arange(25, dtype=torch.float32)[:, None, None, None].expand(25, 32, 64, 3) / 25
+    ref_media = {"reference_videos": {"reference_video_1": video}}
+    config = encoder_helpers.build_minimax_h3_media_config(None, video_latent_mode="off", temporal_density=2)
+    clip = VideoClip()
+    conditioning, _ = UC_AdvMiniMaxH3RefMediaImageToVideoTemporalFusion.execute(
+        clip, None, "(subject:2)", 64, 32, 25,
+        reference_media=ref_media, media_config=config,
+        ref_image_size="none", vlm_video_resolution=0,
+        text_blend_config={"blend_preset": "custom", "blend_method": "linear", "global_scale": 1.0},
+        enable_caching="disabled",
+    ).args
+    tensor, metadata = conditioning[0]
+    assert len(clip.encoded_tokens) == 2
+    canonical, alternate = [value["qwen3vl_32b"][0] for value in clip.encoded_tokens]
+    spans = encoder_helpers.build_token_to_conditioning_map(canonical, tensor)
+    count = 0
+    for entry, alt, (start, end) in zip(canonical, alternate, spans):
+        if isinstance(entry[0], dict) and entry[0].get("minimax_video_block"):
+            expected = (float(entry[0]["data"].mean()) + float(alt[0]["data"].mean())) / 2
+            assert torch.allclose(tensor[:, start:end], torch.full_like(tensor[:, start:end], expected))
+            count += 1
+        else:
+            assert entry == alt
+            assert torch.all(tensor[:, start:end] == (2.0 if entry[0] == "subject" else 1.0))
+    assert count == 1
+    assert metadata["uc_minimax_h3_vlm_layout"]["prompt_start"] == tensor.shape[1]
 
 
 def test_minimax_h3_ref_media_image_to_video_with_all_reference_types():
