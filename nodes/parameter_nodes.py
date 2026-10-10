@@ -89,7 +89,7 @@ class UC_ResolutionSelectorExtended(io.ComfyNode):
                     default=1.0,
                     min=0.1,
                     max=16.0,
-                    step=0.05,
+                    step=0.025,
                     tooltip="Target total megapixels. 1.0 MP ≈ 1024×1024 for square.",
                 ),
                 io.Int.Input(
@@ -154,7 +154,7 @@ class UC_VideoResolutionSelector(io.ComfyNode):
                     default=1.0,
                     min=0.1,
                     max=16.0,
-                    step=0.05,
+                    step=0.025,
                     tooltip="Nominal target total megapixels used to choose the nearest viable resolution.",
                 ),
                 io.Int.Input(
@@ -341,7 +341,7 @@ class UC_VideoResolutionAndLengthPicker(io.ComfyNode):
                     default=AspectRatio.SQUARE,
                     tooltip="The aspect ratio for the output dimensions and cropping.",
                 ),
-                io.Float.Input("megapixels", default=1.0, min=0.01, max=16.0, step=0.05),
+                io.Float.Input("megapixels", default=1.0, min=0.01, max=16.0, step=0.025),
                 io.Int.Input(
                     "resolution_steps",
                     default=1,
