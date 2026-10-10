@@ -841,6 +841,121 @@ def test_sampling_scope_always_clears_cache_state():
     assert cache.step_counter == 0
 
 
+def test_diffusion_cache_schema_exposes_physical_controls():
+    schema = patcher_nodes.UC_MiniMaxH3DiffusionCache.define_schema()
+    inputs = {value.id: value for value in schema.inputs}
+
+    assert schema.node_id == "UC_MiniMaxH3DiffusionCache"
+    assert not schema.is_experimental
+    assert [value.id for value in schema.inputs] == [
+        "model",
+        "preset",
+        "composition_cutoff",
+        "detail_protection",
+        "drift_tolerance",
+        "max_noise_span",
+        "device",
+        "verbose",
+    ]
+    assert inputs["preset"].default == "balanced"
+    assert inputs["preset"].options == ["balanced", "high_fidelity", "high_speed", "custom"]
+    assert inputs["composition_cutoff"].default == 0.75
+    assert inputs["detail_protection"].default == 0.15
+    assert inputs["drift_tolerance"].default == 1.0
+    assert inputs["max_noise_span"].default == 0.20
+    assert inputs["device"].default == "auto"
+
+
+def test_diffusion_cache_presets_and_custom_validation():
+    balanced = patcher_helpers.MiniMaxH3DiffusionCache(preset="balanced")
+    assert balanced.composition_cutoff == 0.75
+    assert balanced.detail_protection == 0.15
+    assert balanced.reuse_threshold == 0.05
+    assert balanced.max_noise_span == 0.20
+
+    high_fidelity = patcher_helpers.MiniMaxH3DiffusionCache(preset="high_fidelity", drift_tolerance=0.8)
+    assert high_fidelity.composition_cutoff == 0.65
+    assert high_fidelity.detail_protection == 0.25
+    assert high_fidelity.reuse_threshold == pytest.approx(0.03 * 0.8)
+    assert high_fidelity.max_noise_span == 0.12
+
+    high_speed = patcher_helpers.MiniMaxH3DiffusionCache(preset="high_speed", drift_tolerance=1.5)
+    assert high_speed.composition_cutoff == 0.85
+    assert high_speed.detail_protection == 0.10
+    assert high_speed.reuse_threshold == pytest.approx(0.08 * 1.5)
+    assert high_speed.max_noise_span == 0.30
+
+    custom = patcher_helpers.MiniMaxH3DiffusionCache(
+        preset="custom", composition_cutoff=0.80, detail_protection=0.20, drift_tolerance=2.0, max_noise_span=0.25
+    )
+    assert custom.composition_cutoff == 0.80
+    assert custom.detail_protection == 0.20
+    assert custom.reuse_threshold == pytest.approx(0.10)
+    assert custom.max_noise_span == 0.25
+
+    with pytest.raises(ValueError, match="Composition cutoff noise level"):
+        patcher_helpers.patch_minimax_h3_diffusion_cache_model(
+            None, preset="custom", composition_cutoff=0.10, detail_protection=0.80
+        )
+
+
+def test_diffusion_cache_phase_gating_and_span_limits():
+    cache = patcher_helpers.MiniMaxH3DiffusionCache(preset="balanced", drift_tolerance=1.0)
+    sigmas = torch.linspace(1.0, 0.0, 11)
+    cache.begin(sigmas)
+
+    calls = []
+
+    def original(args):
+        calls.append(args["img"].clone())
+        return {"img": args["img"] + 2.0}
+
+    # Step 1: noise = 0.90 (in composition phase > 0.75) -> must RUN
+    first = torch.ones((4, 8))
+    out1 = cache(_cache_args(first, 900.0), {"original_block": original})
+    assert len(calls) == 1
+    assert torch.equal(out1["img"], first + 2.0)
+
+    # Step 2: noise = 0.70 (in cache window [0.15, 0.75]) -> runs to establish first residual in window
+    second = first + 0.001
+    out2 = cache(_cache_args(second, 700.0), {"original_block": original})
+    assert len(calls) == 2
+    assert torch.equal(out2["img"], second + 2.0)
+
+    # Step 3: noise = 0.65 (delta 0.70 - 0.65 = 0.05 <= 0.20 max span, low drift) -> must SKIP
+    third = second + 0.0005
+    out3 = cache(_cache_args(third, 650.0), {"original_block": original})
+    assert len(calls) == 2  # No new call, skipped!
+    assert torch.allclose(out3["img"], third + 2.0)
+
+    # Step 4: noise = 0.45 (delta 0.70 - 0.45 = 0.25 > 0.20 max span!) -> must RUN to refresh
+    fourth = third + 0.0005
+    out4 = cache(_cache_args(fourth, 450.0), {"original_block": original})
+    assert len(calls) == 3
+    assert torch.equal(out4["img"], fourth + 2.0)
+
+    # Step 5: noise = 0.10 (in micro detail phase < 0.15) -> must RUN
+    fifth = fourth + 0.0005
+    out5 = cache(_cache_args(fifth, 100.0), {"original_block": original})
+    assert len(calls) == 4
+    assert torch.equal(out5["img"], fifth + 2.0)
+
+
+def test_diffusion_cache_sampling_scope_resets_on_error():
+    cache = patcher_helpers.MiniMaxH3DiffusionCache(preset="balanced")
+    scope = patcher_helpers.MiniMaxH3DiffusionSamplingScope(cache)
+
+    def fail(*args, **kwargs):
+        raise RuntimeError("diffusion sampling failed")
+
+    sigmas = torch.tensor([1.0, 0.5, 0.0])
+    with pytest.raises(RuntimeError, match="diffusion sampling failed"):
+        scope(fail, None, None, None, sigmas)
+
+    assert cache.cached_residual is None
+    assert cache.step_counter == 0
+
+
 def test_block_runner_preserves_double_block_replacements(monkeypatch):
     prefetch_events = []
     monkeypatch.setattr(

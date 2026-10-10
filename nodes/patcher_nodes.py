@@ -17,6 +17,7 @@ from ..helpers.patcher_helpers import (
     patch_minimax_h3_pdd_model,
     patch_unified_attention_model,
     patch_minimax_h3_cache_model,
+    patch_minimax_h3_diffusion_cache_model,
     patch_minimax_h3_spectrum_model,
 )
 
@@ -399,6 +400,141 @@ class UC_MiniMaxH3Cache(io.ComfyNode):
                 start_percent=start_percent,
                 end_percent=end_percent,
                 max_steps=max_steps,
+                device=device,
+                verbose=verbose,
+            )
+        )
+
+
+class UC_MiniMaxH3DiffusionCache(io.ComfyNode):
+    """Applies a diffusion-aware residual cache to a cloned MiniMax H3 model.
+
+    Unlike loop-counter caching which counts arbitrary step indices, this node
+    anchors cache reuse directly to physical diffusion noise phases (sigma).
+    This ensures identical, predictable caching behavior regardless of whether
+    a normal, karras, exponential, or custom scheduler is selected.
+    """
+
+    @classmethod
+    def define_schema(cls) -> io.Schema:
+        return io.Schema(
+            node_id="UC_MiniMaxH3DiffusionCache",
+            display_name="MiniMax H3 Diffusion-Aware Cache",
+            category="advanced/model/patches",
+            description=(
+                "Applies a scheduler-invariant residual cache to MiniMax H3 by coupling "
+                "cache reuse directly to physical diffusion noise phases (sigma) instead "
+                "of arbitrary step indices."
+            ),
+            inputs=[
+                io.Model.Input("model"),
+                io.Combo.Input(
+                    "preset",
+                    options=["balanced", "high_fidelity", "high_speed", "custom"],
+                    default="balanced",
+                    tooltip=(
+                        "Physical diffusion profile presets.\n"
+                        "• 'balanced' (Recommended): ~1.5x speedup with negligible perceptual loss; "
+                        "caches during middle semantic formation (sigma 0.75 -> 0.15).\n"
+                        "• 'high_fidelity': Restricts caching to deep mid-steps (sigma 0.65 -> 0.25) "
+                        "with tight drift tolerance to protect subtle motion and textures.\n"
+                        "• 'high_speed': Aggressive ~2.0x speedup caching across a wider window "
+                        "(sigma 0.85 -> 0.10).\n"
+                        "• 'custom': Unlocks the specific noise thresholds below."
+                    ),
+                ),
+                io.Float.Input(
+                    "composition_cutoff",
+                    default=0.75,
+                    min=0.0,
+                    max=1.0,
+                    step=0.01,
+                    tooltip=(
+                        "Normalized noise level (0.0 = clean, 1.0 = pure noise) below which cache reuse may begin. "
+                        "During early high-noise steps (> cutoff), the model establishes global composition, "
+                        "character anatomy, and camera motion; keeping this at or below 0.80 prevents double "
+                        "heads, anatomical warping, and motion jitter. Active in 'custom' preset."
+                    ),
+                ),
+                io.Float.Input(
+                    "detail_protection",
+                    default=0.15,
+                    min=0.0,
+                    max=1.0,
+                    step=0.01,
+                    tooltip=(
+                        "Normalized noise level (0.0 = clean, 1.0 = pure noise) below which cache reuse stops. "
+                        "During late low-noise steps (< protection), the model renders micro-textures, fine hair, "
+                        "skin pores, and sharp audio transients; setting this above 0.10 prevents smearing and blurriness. "
+                        "Setting to 0.0 caches until the very last step. Active in 'custom' preset."
+                    ),
+                ),
+                io.Float.Input(
+                    "drift_tolerance",
+                    default=1.0,
+                    min=0.1,
+                    max=5.0,
+                    step=0.1,
+                    tooltip=(
+                        "Sensitivity multiplier for feature drift (1.0 = standard calibrated tolerance). "
+                        "Lower values (< 1.0) enforce strict feature matching, forcing fresh transformer runs "
+                        "whenever fast motion or sudden visual changes occur. Higher values (> 1.0) permit more "
+                        "skips in static or slow-motion scenes. Scales preset thresholds as well."
+                    ),
+                ),
+                io.Float.Input(
+                    "max_noise_span",
+                    default=0.20,
+                    min=0.01,
+                    max=0.60,
+                    step=0.01,
+                    tooltip=(
+                        "Maximum cumulative noise distance (delta-sigma fraction) the cache may skip consecutively "
+                        "before forcing a full model refresh. Automatically adapts across step counts: on a 15-step "
+                        "run it limits skips to 1-2 steps, while on a 50-step run it safely allows skipping 7-8 micro-steps. "
+                        "Active in 'custom' preset."
+                    ),
+                ),
+                io.Combo.Input(
+                    "device",
+                    options=["auto", "cuda", "cpu"],
+                    default="auto",
+                    tooltip=(
+                        "Storage location for the cached block residual tensor.\n"
+                        "• 'auto': Keeps residual in VRAM alongside the model for maximum speed.\n"
+                        "• 'cuda': Requires CUDA VRAM.\n"
+                        "• 'cpu': Offloads residual to system RAM between steps to conserve VRAM (small transfer overhead)."
+                    ),
+                ),
+                io.Boolean.Input(
+                    "verbose",
+                    default=False,
+                    tooltip="Print detailed per-step cache decisions, physical noise values (sigma), and cumulative speedup to the console.",
+                ),
+            ],
+            outputs=[io.Model.Output("model", display_name="model")],
+        )
+
+    @classmethod
+    def execute(
+        cls,
+        model,
+        preset: str,
+        composition_cutoff: float,
+        detail_protection: float,
+        drift_tolerance: float,
+        max_noise_span: float,
+        device: str,
+        verbose: bool,
+    ) -> io.NodeOutput:
+        return io.NodeOutput(
+            patch_minimax_h3_diffusion_cache_model(
+                model=model,
+                preset=preset,
+                composition_cutoff=composition_cutoff,
+                detail_protection=detail_protection,
+                drift_tolerance=drift_tolerance,
+                max_noise_span=max_noise_span,
                 device=device,
                 verbose=verbose,
             )

@@ -1378,6 +1378,304 @@ def patch_minimax_h3_cache_model(
     )
     return patched_model
 
+
+DIFFUSION_CACHE_PRESETS = {
+    "balanced": {
+        "composition_cutoff": 0.75,
+        "detail_protection": 0.15,
+        "base_threshold": 0.05,
+        "max_noise_span": 0.20,
+    },
+    "high_fidelity": {
+        "composition_cutoff": 0.65,
+        "detail_protection": 0.25,
+        "base_threshold": 0.03,
+        "max_noise_span": 0.12,
+    },
+    "high_speed": {
+        "composition_cutoff": 0.85,
+        "detail_protection": 0.10,
+        "base_threshold": 0.08,
+        "max_noise_span": 0.30,
+    },
+}
+
+
+class MiniMaxH3DiffusionCache(MiniMaxH3Cache):
+    """Reuse MiniMax H3 block residual anchored to physical diffusion noise phases."""
+
+    def __init__(
+        self,
+        preset: str = "balanced",
+        composition_cutoff: float = 0.75,
+        detail_protection: float = 0.15,
+        drift_tolerance: float = 1.0,
+        max_noise_span: float = 0.20,
+        device: str = "auto",
+        verbose: bool = False,
+    ) -> None:
+        self.preset = preset
+        self.device = device
+        self.verbose = verbose
+        self.drift_tolerance = max(0.01, float(drift_tolerance))
+
+        if preset in DIFFUSION_CACHE_PRESETS:
+            cfg = DIFFUSION_CACHE_PRESETS[preset]
+            self.composition_cutoff = float(cfg["composition_cutoff"])
+            self.detail_protection = float(cfg["detail_protection"])
+            self.reuse_threshold = float(cfg["base_threshold"]) * self.drift_tolerance
+            self.max_noise_span = float(cfg["max_noise_span"])
+        else:
+            self.composition_cutoff = float(composition_cutoff)
+            self.detail_protection = float(detail_protection)
+            self.reuse_threshold = 0.05 * self.drift_tolerance
+            self.max_noise_span = float(max_noise_span)
+
+        self.start_percent = 0.0
+        self.end_percent = 1.0
+        self.max_steps = 100
+        self.sigmas: torch.Tensor | None = None
+        self.sigma_max: float = 1.0
+        self.sigma_min: float = 0.0
+        self.total_steps: int = 1
+        self._residual_buffer: torch.Tensor | None = None
+        self._cache_valid = False
+        self.cached_at_sigma: float | None = None
+        self.reset()
+
+    def reset(self) -> None:
+        super().reset()
+        self.cached_at_sigma = None
+
+    def begin(self, schedule: Any) -> None:
+        self.reset()
+        if isinstance(schedule, torch.Tensor) and schedule.ndim == 1 and len(schedule) >= 2:
+            self.sigmas = schedule.detach().cpu().float()
+            self.total_steps = len(schedule) - 1
+            self.sigma_max = float(self.sigmas[0].item())
+            self.sigma_min = float(self.sigmas[-1].item())
+        elif isinstance(schedule, (int, float)):
+            self.total_steps = max(1, int(schedule))
+            self.sigmas = None
+            self.sigma_max = 1.0
+            self.sigma_min = 0.0
+        else:
+            self.total_steps = 1
+            self.sigmas = None
+            self.sigma_max = 1.0
+            self.sigma_min = 0.0
+
+    def finish(self) -> None:
+        if self.verbose and self.run_count + self.skip_count:
+            total = self.run_count + self.skip_count
+            speedup = total / max(1, self.run_count)
+            logging.info(
+                "[UtilsCollection MiniMax H3 Diffusion Cache] Skipped %s/%s block-stack "
+                "executions (%.2fx speedup).",
+                self.skip_count,
+                total,
+                speedup,
+            )
+        self.reset()
+
+    def _normalize_sigma(self, timestep: float) -> float:
+        if self.sigmas is not None:
+            s_max = self.sigma_max
+            s_min = self.sigma_min
+            high = max(s_max, s_min)
+            low = min(s_max, s_min)
+            if timestep > 1.5 and high <= 1.05:
+                current = timestep / 1000.0
+            elif timestep <= 1.5 and high > 50.0:
+                current = timestep * 1000.0
+            else:
+                current = timestep
+            span = max(1e-6, high - low)
+            norm = (current - low) / span
+            return float(max(0.0, min(1.0, norm)))
+        else:
+            current = timestep / 1000.0 if timestep > 1.5 else timestep
+            return float(max(0.0, min(1.0, current)))
+
+    def __call__(self, args: dict[str, Any], extra_options: dict[str, Any]) -> dict[str, Any]:
+        original_block = extra_options["original_block"]
+        hidden_states = args["img"]
+        cache_ranges = tuple(tuple(pair) for pair in args.get("cache_ranges", ()))
+        current_layout = (
+            tuple(hidden_states.shape),
+            hidden_states.dtype,
+            hidden_states.device,
+            args.get("block_count"),
+            cache_ranges,
+        )
+
+        if self.layout_signature is None:
+            self.layout_signature = current_layout
+        elif self.layout_signature != current_layout:
+            total_steps = self.total_steps
+            sigmas = self.sigmas
+            self.reset()
+            self.total_steps = total_steps
+            self.sigmas = sigmas
+            if sigmas is not None:
+                self.sigma_max = float(sigmas[0].item())
+                self.sigma_min = float(sigmas[-1].item())
+            self.layout_signature = current_layout
+
+        timestep = self._timestep_value(args.get("timestep"))
+        if timestep is None:
+            return original_block(args)
+        if self.last_seen_timestep != timestep:
+            self.last_seen_timestep = timestep
+            self.step_counter += 1
+
+        normalized_noise = self._normalize_sigma(timestep)
+        in_cache_phase = self.detail_protection <= normalized_noise <= self.composition_cutoff
+        skip_reason = "initial step"
+        noise_delta = 0.0
+
+        if self.cached_residual is not None and self.previous_feature_signature is not None:
+            current_signature = self._feature_signature(hidden_states, cache_ranges)
+            current_float = current_signature.float()
+            previous_float = self.previous_feature_signature.float()
+            difference = (current_float - previous_float).abs().mean().item()
+            denominator = previous_float.abs().mean().item() + 1e-6
+            self.accumulated_relative_l1 += difference / denominator
+
+            cached_sigma = self.cached_at_sigma if self.cached_at_sigma is not None else normalized_noise
+            noise_delta = abs(cached_sigma - normalized_noise)
+            within_noise_budget = noise_delta <= self.max_noise_span
+            below_threshold = self.accumulated_relative_l1 < self.reuse_threshold
+
+            if in_cache_phase and within_noise_budget and below_threshold:
+                self.skip_count += 1
+                self.consecutive_skips += 1
+                if self.verbose:
+                    logging.info(
+                        "[UtilsCollection MiniMax H3 Diffusion Cache] Step %s (noise %.3f) SKIP "
+                        "(relative L1 %.4f < %.4f, delta noise %.3f <= %.3f).",
+                        self.step_counter,
+                        normalized_noise,
+                        self.accumulated_relative_l1,
+                        self.reuse_threshold,
+                        noise_delta,
+                        self.max_noise_span,
+                    )
+                return {"img": self._apply_residual(hidden_states)}
+
+            reasons = []
+            if not in_cache_phase:
+                if normalized_noise > self.composition_cutoff:
+                    reasons.append(
+                        f"macro composition phase (noise {normalized_noise:.3f} > {self.composition_cutoff:.3f})"
+                    )
+                else:
+                    reasons.append(
+                        f"micro detail phase (noise {normalized_noise:.3f} < {self.detail_protection:.3f})"
+                    )
+            if not within_noise_budget:
+                reasons.append(
+                    f"max noise span reached (delta {noise_delta:.3f} > {self.max_noise_span:.3f})"
+                )
+            if not below_threshold:
+                reasons.append(
+                    f"drift threshold reached (L1 {self.accumulated_relative_l1:.4f} >= {self.reuse_threshold:.4f})"
+                )
+            skip_reason = ", ".join(reasons)
+
+        if self.verbose:
+            logging.info(
+                "[UtilsCollection MiniMax H3 Diffusion Cache] Step %s (noise %.3f) RUN (%s).",
+                self.step_counter,
+                normalized_noise,
+                skip_reason,
+            )
+
+        self.run_count += 1
+        self.consecutive_skips = 0
+        self._cache_valid = False
+        self.cached_at_sigma = normalized_noise
+        self.previous_feature_signature = self._feature_signature(hidden_states, cache_ranges)
+        start_hidden_states = hidden_states.clone()
+        result = original_block(args)
+        output = result["img"]
+        self._store_residual(output - start_hidden_states)
+        self.accumulated_relative_l1 = 0.0
+        return result
+
+
+class MiniMaxH3DiffusionSamplingScope:
+    """Give one diffusion cache object an exact outer-sampling lifecycle."""
+
+    def __init__(self, cache: MiniMaxH3DiffusionCache) -> None:
+        self.cache = cache
+
+    def __call__(self, sample_fn: Callable[..., Any], *args: Any, **kwargs: Any) -> Any:
+        sigmas = kwargs.get("sigmas")
+        if sigmas is None and len(args) > 3:
+            sigmas = args[3]
+        if not isinstance(sigmas, torch.Tensor) or sigmas.ndim != 1 or len(sigmas) < 2:
+            self.cache.reset()
+            raise ValueError("MiniMax H3 Diffusion Cache could not read the sampler sigma schedule.")
+
+        self.cache.begin(sigmas)
+        try:
+            return sample_fn(*args, **kwargs)
+        finally:
+            self.cache.finish()
+
+
+def patch_minimax_h3_diffusion_cache_model(
+    model: Any,
+    preset: str = "balanced",
+    composition_cutoff: float = 0.75,
+    detail_protection: float = 0.15,
+    drift_tolerance: float = 1.0,
+    max_noise_span: float = 0.20,
+    device: str = "auto",
+    verbose: bool = False,
+) -> Any:
+    """Return a cloned patcher with a physical diffusion-aware H3 block-loop cache."""
+
+    if preset == "custom" and composition_cutoff < detail_protection:
+        raise ValueError(
+            f"Composition cutoff noise level ({composition_cutoff}) must be greater than "
+            f"or equal to detail protection level ({detail_protection})."
+        )
+
+    if getattr(model, "model_options", {}).get(MINIMAX_H3_SPECTRUM_OWNER_KEY):
+        raise ValueError("MiniMax H3 Diffusion Cache cannot be combined with MiniMax H3 Spectrum.")
+    if getattr(model, "model_options", {}).get(MINIMAX_H3_CACHE_OWNER_KEY):
+        raise ValueError("MiniMax H3 Diffusion Cache cannot be combined with another MiniMax H3 Cache.")
+
+    patched_model = model.clone()
+    diffusion_model = patched_model.model.diffusion_model
+    if not isinstance(diffusion_model, minimax_model.MiniMaxH3Model):
+        raise ValueError(
+            "MiniMax H3 Diffusion Cache requires a MiniMax H3 diffusion model; "
+            f"received {diffusion_model.__class__.__name__}."
+        )
+
+    cache = MiniMaxH3DiffusionCache(
+        preset=preset,
+        composition_cutoff=composition_cutoff,
+        detail_protection=detail_protection,
+        drift_tolerance=drift_tolerance,
+        max_noise_span=max_noise_span,
+        device=device,
+        verbose=verbose,
+    )
+    if hasattr(patched_model, "model_options"):
+        patched_model.model_options[MINIMAX_H3_CACHE_OWNER_KEY] = True
+    bound_forward = types.MethodType(minimax_h3_block_patch_forward, diffusion_model)
+    patched_model.add_object_patch("diffusion_model._forward", bound_forward)
+    patched_model.set_model_patch_replace(cache, "dit", "block_loop", 0)
+    patched_model.add_wrapper(
+        comfy.patcher_extension.WrappersMP.OUTER_SAMPLE,
+        MiniMaxH3DiffusionSamplingScope(cache),
+    )
+    return patched_model
+
 # Spectrum runtime adapted from xmarre/ComfyUI-Spectrum-MiniMax-H3
 # revision 1a8930d662f4f66694d06275bff40c002e0d451d (GPL-3.0-or-later).
 
