@@ -1892,6 +1892,13 @@ def test_minimax_h3_scene_image_any2va_contract():
         assert "Only when the user instruction explicitly specifies" in instruction
         assert "referenced from <Picture N>" in instruction
         assert "#### retention_analysis (Conditional on User Instruction)" in instruction
+        assert "Segment Visual and Motion Density Requirement:" in instruction
+        assert "Detailed 3-5 sentence" in instruction
+        assert "short single sentence" not in instruction
+        assert "never write `of the video`" in instruction
+        assert "First and foremost, when an <Audio N> item supplies the soundtrack, background music, or musical beat for the video" in instruction
+        assert "`non_diegetic_music:` must begin with `<Audio N>`" in instruction
+        assert "Never use the word 'both' or 'Both' in any context inside [VISUAL]" in instruction
         assert "In-Place Character Replacement Rule (No Replacement Instructions):" in instruction
         assert "never write a prompt that instructs replacement, swapping, editing, or transfer" in instruction
         assert "completely replace the character in the full description across all instances" in instruction
@@ -1923,6 +1930,10 @@ def test_minimax_h3_scene_image_t2va_contract():
         assert "subject_definitions:" not in instruction
         assert "summary:" not in instruction
         assert "retention_analysis:" not in instruction
+        assert "Segment Visual and Motion Density Requirement:" in instruction
+        assert "Detailed 3-5 sentence" in instruction
+        assert "short single sentence" not in instruction
+        assert "Never use the word 'both' or 'Both' in any context inside [VISUAL]" in instruction
         assert re.search(r"\{[^{}]*\{[^{}]*\}[^{}]*\}", instruction) is None
 
 
@@ -1948,6 +1959,13 @@ def test_minimax_h3_storyboard_any2va_contract():
         assert "Only when the user instruction explicitly specifies" in instruction
         assert "referenced from <Picture N>" in instruction
         assert "#### retention_analysis (Conditional on User Instruction)" in instruction
+        assert "Segment Visual and Motion Density Requirement:" in instruction
+        assert "Detailed 3-5 sentence" in instruction
+        assert "short single sentence" not in instruction
+        assert "never write `of the video`" in instruction
+        assert "First and foremost, when an <Audio N> item supplies the soundtrack, background music, or musical beat for the video" in instruction
+        assert "`non_diegetic_music:` must begin with `<Audio N>`" in instruction
+        assert "Never use the word 'both' or 'Both' in any context inside [VISUAL]" in instruction
         assert "In-Place Character Replacement Rule (No Replacement Instructions):" in instruction
         assert "never write a prompt that instructs replacement, swapping, editing, or transfer" in instruction
         assert "completely replace the character in the full description across all instances" in instruction
@@ -1982,6 +2000,10 @@ def test_minimax_h3_storyboard_t2va_contract():
         assert "subject_definitions:" not in instruction
         assert "summary:" not in instruction
         assert "retention_analysis:" not in instruction
+        assert "Segment Visual and Motion Density Requirement:" in instruction
+        assert "Detailed 3-5 sentence" in instruction
+        assert "short single sentence" not in instruction
+        assert "Never use the word 'both' or 'Both' in any context inside [VISUAL]" in instruction
         assert re.search(r"\{[^{}]*\{[^{}]*\}[^{}]*\}", instruction) is None
 
 
