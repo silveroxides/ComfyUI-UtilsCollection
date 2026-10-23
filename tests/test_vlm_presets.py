@@ -1899,6 +1899,7 @@ def test_minimax_h3_scene_image_any2va_contract():
         assert "summary:" in instruction
         assert "retention_analysis:" in instruction
         assert "detailed_description:" in instruction
+        assert re.search(r"\{[^{}]*\{[^{}]*\}[^{}]*\}", instruction) is None
 
 
 def test_minimax_h3_scene_image_t2va_contract():
@@ -1922,6 +1923,7 @@ def test_minimax_h3_scene_image_t2va_contract():
         assert "subject_definitions:" not in instruction
         assert "summary:" not in instruction
         assert "retention_analysis:" not in instruction
+        assert re.search(r"\{[^{}]*\{[^{}]*\}[^{}]*\}", instruction) is None
 
 
 def test_minimax_h3_storyboard_any2va_contract():
@@ -1935,8 +1937,11 @@ def test_minimax_h3_storyboard_any2va_contract():
         assert "a stitched-together row of images outlining the timeline progression" in instruction
         assert "multiple separate images showing the progression of the timeline" in instruction
         assert "a video showing a detailed progression" in instruction
+        assert "The storyboard is seen only by the VLM and is never seen by the downstream video model" in instruction
+        assert "every single motion, action, interaction, dialogue, song, sound, and music" in instruction
+        assert "The target video translates the sequential storyboard panels" not in instruction
         assert "Strict Graphic Strip Rule:" in instruction
-        assert "comic book or graphic conventions be described or included in the output prompt" in instruction
+        assert "comic book or graphic conventions, or the storyboard itself, be described or included in the output prompt" in instruction
         assert "Strip panel borders, speech bubbles, sound effect lettering, and graphic conventions." in instruction
         assert "Dialogue text visibly printed in speech bubbles must be transcribed into `[SPEECH]` rows" in instruction
         assert "Conditional User-Instructed Reference Rule:" in instruction
@@ -1950,6 +1955,7 @@ def test_minimax_h3_storyboard_any2va_contract():
         assert "summary:" in instruction
         assert "retention_analysis:" in instruction
         assert "detailed_description:" in instruction
+        assert re.search(r"\{[^{}]*\{[^{}]*\}[^{}]*\}", instruction) is None
 
 
 def test_minimax_h3_storyboard_t2va_contract():
@@ -1963,8 +1969,10 @@ def test_minimax_h3_storyboard_t2va_contract():
         assert "a stitched-together row of images outlining the timeline progression" in instruction
         assert "multiple separate images showing the progression of the timeline" in instruction
         assert "a video showing a detailed progression" in instruction
+        assert "The storyboard is seen only by the VLM and is never seen by the downstream video model" in instruction
+        assert "every single motion, action, interaction, dialogue, song, sound, and music" in instruction
         assert "Strict Graphic Strip Rule:" in instruction
-        assert "comic book or graphic conventions be described or included in the output prompt" in instruction
+        assert "comic book or graphic conventions, or the storyboard itself, be described or included in the output prompt" in instruction
         assert "Strip panel borders, speech bubbles, sound effect lettering, and graphic conventions." in instruction
         assert "Dialogue text visibly printed in speech bubbles must be transcribed into `[SPEECH]` rows" in instruction
         assert "In-Place Character Replacement Rule (No Replacement Instructions):" in instruction
@@ -1974,6 +1982,7 @@ def test_minimax_h3_storyboard_t2va_contract():
         assert "subject_definitions:" not in instruction
         assert "summary:" not in instruction
         assert "retention_analysis:" not in instruction
+        assert re.search(r"\{[^{}]*\{[^{}]*\}[^{}]*\}", instruction) is None
 
 
 def test_minimax_h3_ref2va_attribute_transfer_variants_contracts():
