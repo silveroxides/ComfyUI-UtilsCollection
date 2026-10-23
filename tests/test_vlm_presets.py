@@ -1895,6 +1895,7 @@ def test_minimax_h3_scene_image_any2va_contract():
         assert "Segment Visual and Motion Density Requirement:" in instruction
         assert "Detailed 3-5 sentence" in instruction
         assert "short single sentence" not in instruction
+        assert "when no `<Video N>` reference is explicitly specified by the user instruction" in instruction
         assert "never write `of the video`" in instruction
         assert "First and foremost, when an <Audio N> item supplies the soundtrack, background music, or musical beat for the video" in instruction
         assert "`non_diegetic_music:` must begin with `<Audio N>`" in instruction
@@ -1962,6 +1963,7 @@ def test_minimax_h3_storyboard_any2va_contract():
         assert "Segment Visual and Motion Density Requirement:" in instruction
         assert "Detailed 3-5 sentence" in instruction
         assert "short single sentence" not in instruction
+        assert "when no `<Video N>` reference is explicitly specified by the user instruction" in instruction
         assert "never write `of the video`" in instruction
         assert "First and foremost, when an <Audio N> item supplies the soundtrack, background music, or musical beat for the video" in instruction
         assert "`non_diegetic_music:` must begin with `<Audio N>`" in instruction
