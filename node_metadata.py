@@ -183,6 +183,8 @@ DESCRIPTIONS = {
     "UC_MiniMaxH3ClipContinuationEncoder": "Encodes MiniMax H3 prompts and reference media while pinning a saved clip's ending so motion and sound continue seamlessly across clips.",
     "UC_MiniMaxH3ClipContinuationApply": "Pins the ending frames and sound of your previous clip onto the start of the new clip so motion, characters, and music continue seamlessly across the cut without re-encoding.",
     "UC_MiniMaxH3ClipContinuationSampler": "Samples a list of MiniMax H3 video segments in a single run, automatically slicing each finished segment's latent video and audio tail into the next segment without re-encoding media.",
+    "UC_MiniMaxH3RefVid": "Prepares video frames, audio, and matching generation dimensions for MiniMax H3 reference video workflows.",
+    "UC_H3RefVideoSegments": "Prepares all sequential H3 reference segments as list outputs for multi-chunk captioning and conditioning workflows.",
 }
 
 
@@ -244,6 +246,8 @@ EXTRA_ALIASES = {
     "UC_YOLODetect": ["yolo detect", "yolov8", "yolo11", "watermark detector", "face detector", "hand detector", "person segmentation", "hair segmentation", "skin segmentation", "segs"],
     "UC_DepthAnythingV3Loader": ["depth anything", "depth anything v3", "da3", "depth loader", "monocular depth", "multiview depth"],
     "UC_DepthAnythingV3": ["depth anything", "depth anything v3", "da3", "depth map", "controlnet depth", "disparity", "camera pose", "sky mask"],
+    "UC_MiniMaxH3RefVid": ["minimax", "h3", "reference video", "h3 ref video", "24 fps"],
+    "UC_H3RefVideoSegments": ["minimax", "h3", "reference", "video", "segments", "list", "h3 segments"],
 }
 
 

@@ -756,3 +756,147 @@ def encode_keyframe_optimized_video_clip(
     return InputImpl.VideoFromFile(buffer)
 
 
+class _H3SegmentInt(int):
+    """Integer subclass that preserves per-segment overlap and padding metadata across ComfyUI INT wires."""
+    _uc_overlap_frames: int = 0
+    _uc_padded_frames: int = 0
+
+
+def split_h3_video_components_into_segments(
+    video: Any,
+    megapixels: float = 0.5,
+    duration_seconds: float = 0.0,
+    start_at_timestamp: float = 0.0,
+    segment_count: int = 0,
+    overlap_frames: int = 22,
+    whisper_model: Any = None,
+    timestamp_format: str = "00.000s",
+    enable_whisper: bool = True,
+    *,
+    return_trim_metadata: bool = False,
+):
+    """Split reference video components across sequential H3 windows with exact overlap and trailing-padding tracking."""
+    from comfy_api.latest import InputImpl
+    from .image_helpers import cached_h3_reference_components, h3_video_length_from_seconds
+    from .model_helpers import transcribe_reference_audio
+    from .sampling_helpers import h3_snap_frame_count
+
+    components = cached_h3_reference_components(video, megapixels)
+    source_frames = components.images
+    source_rate = float(components.frame_rate)
+    source_count = source_frames.shape[0]
+    source_seconds = source_count / source_rate
+    total_frames = max(1, round(source_seconds * 24))
+    out_h, out_w = int(source_frames.shape[1]), int(source_frames.shape[2])
+
+    start_offset = max(0, round(float(start_at_timestamp) * 24)) if start_at_timestamp > 0 else 0
+    if start_offset >= total_frames:
+        raise ValueError("Start timestamp rounds past the end of the reference video.")
+
+    ov_frames = max(0, int(overlap_frames))
+    rem_total = max(1, total_frames - start_offset)
+    if segment_count > 0:
+        target_f = (rem_total + max(0, int(segment_count) - 1) * ov_frames) / int(segment_count)
+        window_frames = h3_snap_frame_count(math.ceil(target_f))
+    elif duration_seconds > 0:
+        window_frames = h3_video_length_from_seconds(duration_seconds)
+    else:
+        window_frames = 124
+
+    if ov_frames >= window_frames:
+        ov_frames = max(0, window_frames - 17)
+
+    windows: list[tuple[int, int, int, int, int]] = []
+    curr = start_offset
+    while curr < total_frames:
+        if segment_count > 0 and len(windows) == int(segment_count) - 1:
+            real_end = total_frames
+        else:
+            real_end = min(total_frames, curr + window_frames)
+        real_len = max(1, real_end - curr)
+        seg_overlap = 0 if not windows else max(0, windows[-1][1] - curr)
+        min_needed_len = max(real_len, seg_overlap + 1) if seg_overlap > 0 else real_len
+        seg_length = h3_snap_frame_count(min_needed_len)
+        padded_frames = max(0, seg_length - real_len)
+        windows.append((curr, real_end, seg_length, seg_overlap, padded_frames))
+        if real_end >= total_frames or (segment_count > 0 and len(windows) >= int(segment_count)):
+            break
+        next_curr = real_end - ov_frames
+        if next_curr <= curr:
+            next_curr = curr + max(1, window_frames - ov_frames)
+        curr = next_curr
+
+    frames_list = []
+    audio_list = []
+    length_list = []
+    video_list = []
+    transcript_list = []
+    trim_trailing_list = []
+    soundtrack = components.audio
+
+    for f_start, real_end, seg_length, seg_overlap, padded_frames in tqdm(windows, desc="Preparing H3 Video Segments", unit="seg"):
+        frame_positions = [min(pos, max(f_start, real_end - 1)) for pos in range(f_start, f_start + seg_length)]
+        frame_indices = [min(max(0, round(pos * source_rate / 24)), source_count - 1) for pos in frame_positions]
+        frames = source_frames[frame_indices]
+
+        audio_window = round(seg_length / 24 * 32000)
+        aligned_samples = ((audio_window + 799) // 800) * 800
+        if soundtrack is not None and soundtrack.get("waveform") is not None and soundtrack["waveform"].numel() > 0:
+            sr = int(soundtrack["sample_rate"])
+            start_sample = round(f_start / 24 * sr)
+            end_sample = round(real_end / 24 * sr)
+            audio_samples = soundtrack["waveform"][..., start_sample:max(start_sample, end_sample)]
+            if sr != 32000 and audio_samples.numel():
+                audio_samples = torchaudio.functional.resample(audio_samples, sr, 32000)
+            audio_samples = audio_samples[..., :audio_window]
+            if audio_samples.shape[-1] < aligned_samples:
+                audio_samples = F.pad(audio_samples, (0, aligned_samples - audio_samples.shape[-1]))
+        else:
+            audio_samples = torch.zeros(1, 2, aligned_samples)
+
+        audio = {
+            "waveform": audio_samples,
+            "sample_rate": 32000,
+            "_uc_overlap_frames": int(seg_overlap),
+            "_uc_padded_frames": int(padded_frames),
+        }
+        t_audio = transcribe_reference_audio(whisper_model, components.audio, audio, timestamp_format, seg_length) if enable_whisper else ""
+        prep_video = encode_keyframe_optimized_video_clip(images=frames, fps=24.0, audio=audio)
+        frames._uc_overlap_frames = int(seg_overlap)
+        frames._uc_padded_frames = int(padded_frames)
+        seg_len_obj = _H3SegmentInt(seg_length)
+        seg_len_obj._uc_overlap_frames = int(seg_overlap)
+        seg_len_obj._uc_padded_frames = int(padded_frames)
+        try:
+            prep_video._uc_overlap_frames = int(seg_overlap)
+            prep_video._uc_padded_frames = int(padded_frames)
+        except Exception:
+            pass
+        frames_list.append(frames)
+        audio_list.append(audio)
+        length_list.append(seg_len_obj)
+        video_list.append(prep_video)
+        transcript_list.append(t_audio)
+        trim_trailing_list.append(int(padded_frames))
+
+    has_src_audio = soundtrack is not None and soundtrack.get("waveform") is not None and soundtrack["waveform"].numel() > 0
+    logging.info(
+        "[UC_H3RefVideoSegments] Source %d frame(s) (%.2fs at %.2f fps) -> %d segment(s) at %dx%d | lengths=%s | overlap=%d frame(s) | padded=%s | audio=%s",
+        source_count, source_seconds, source_rate, len(windows), out_w, out_h,
+        [int(x) for x in length_list], ov_frames, trim_trailing_list,
+        "32kHz" if has_src_audio else "silence-filled",
+    )
+
+    if return_trim_metadata:
+        return (
+            frames_list,
+            audio_list,
+            out_w,
+            out_h,
+            length_list,
+            video_list,
+            transcript_list,
+            str(ov_frames if ov_frames in (5, 22, 39, 56) else 22),
+            trim_trailing_list,
+        )
+    return frames_list, audio_list, out_w, out_h, length_list, video_list, transcript_list
