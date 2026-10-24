@@ -3,6 +3,7 @@ import sys
 import types
 
 import av
+from PIL import Image
 import pytest
 
 
@@ -151,6 +152,7 @@ def test_save_video_schema_and_execution(tmp_path, monkeypatch):
     _, output_path_audio, video_obj_audio, audio_out_audio = result_audio.args
     assert output_path_audio.endswith("test_save_00002-audio.mp4")
     assert pathlib.Path(output_path_audio).is_file()
+    assert pathlib.Path(output_path_audio.replace("-audio.mp4", ".png")).is_file()
     assert video_obj_audio is not None
     assert audio_out_audio is audio
     with av.open(output_path_audio) as container:
@@ -158,15 +160,17 @@ def test_save_video_schema_and_execution(tmp_path, monkeypatch):
         assert len(container.streams.audio) == 1
         assert sum(1 for _ in container.demux(container.streams.audio[0])) > 0
 
-    # Next execution without audio: should increment counter to 00003 without -audio
+    # Next execution without audio and save_workflow_image=False: should increment counter to 00003 without -audio or PNG
     result_no_audio = video_nodes.UC_SaveVideo.execute(
         images=images,
         fps=24.0,
         codec="libx264",
         filename_prefix="test_save",
+        save_workflow_image=False,
     )
     _, output_path_no_audio, video_obj3, _ = result_no_audio.args
     assert output_path_no_audio.endswith("test_save_00003.mp4")
+    assert not pathlib.Path(output_path_no_audio.replace(".mp4", ".png")).exists()
 
     # Default prefix creates formatted date structure and preserves workflow/prompt metadata
     monkeypatch.setattr(
@@ -186,6 +190,12 @@ def test_save_video_schema_and_execution(tmp_path, monkeypatch):
     _, output_path_default, _, _ = result_default.args
     assert "vid_" in output_path_default
     assert "_default_00001.mp4" in output_path_default
+    workflow_png = pathlib.Path(output_path_default.replace(".mp4", ".png"))
+    assert workflow_png.is_file()
+    with Image.open(workflow_png) as saved_img:
+        assert "prompt" in saved_img.info
+        assert "workflow" in saved_img.info
+        assert "UC_SaveVideo" in saved_img.info["workflow"]
     with av.open(output_path_default) as container:
         assert "prompt" in container.metadata
         assert "workflow" in container.metadata

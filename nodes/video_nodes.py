@@ -196,6 +196,12 @@ class UC_SaveVideo(io.ComfyNode):
                     default="video/%date:yyyy-MM-dd%/vid_%date:yyyy-MM-dd%_default",
                     tooltip="Output folder and filename. Supports date stamps like %date:yyyy-MM-dd% to organize files automatically by day.",
                 ),
+                io.Boolean.Input(
+                    "save_workflow_image",
+                    default=True,
+                    optional=True,
+                    tooltip="Saves the first frame as a PNG image with embedded ComfyUI workflow metadata alongside the video.",
+                ),
             ],
             hidden=[io.Hidden.prompt, io.Hidden.extra_pnginfo],
             is_output_node=True,
@@ -220,6 +226,7 @@ class UC_SaveVideo(io.ComfyNode):
         crf: float = 19.0,
         audio: Any = None,
         filename_prefix: str = "video/%date:yyyy-MM-dd%/vid_%date:yyyy-MM-dd%_default",
+        save_workflow_image: bool = True,
     ) -> io.NodeOutput:
         actual_images = images
         actual_audio = audio
@@ -249,6 +256,7 @@ class UC_SaveVideo(io.ComfyNode):
             filename_prefix=filename_prefix,
             prompt=prompt,
             extra_pnginfo=extra_pnginfo,
+            save_workflow_image=save_workflow_image,
         )
         video_obj = InputImpl.VideoFromFile(output_path)
         return io.NodeOutput(

@@ -18,8 +18,11 @@ import re
 from typing import Any
 
 import av
+from comfy.cli_args import args
 import folder_paths
 import numpy as np
+from PIL import Image
+from PIL.PngImagePlugin import PngInfo
 import torch
 import torch.nn.functional as F
 import torchaudio
@@ -390,6 +393,7 @@ def save_keyframe_optimized_video(
     filename_prefix: str = "video/%date:yyyy-MM-dd%/vid_%date:yyyy-MM-dd%_default",
     prompt: Any = None,
     extra_pnginfo: Any = None,
+    save_workflow_image: bool = True,
 ) -> tuple[str, str, str]:
     """Encode video frames to MP4 using native PyAV with Avidemux-matching GOP and scene-cut keyframes."""
     if images is None or not torch.is_tensor(images) or images.ndim != 4 or images.shape[0] == 0:
@@ -554,6 +558,20 @@ def save_keyframe_optimized_video(
 
     finally:
         container.close()
+
+    if save_workflow_image:
+        first_frame = 255.0 * images[0, ..., :3].detach().cpu().numpy()
+        img = Image.fromarray(np.clip(first_frame, 0, 255).astype(np.uint8))
+        metadata = None
+        if not args.disable_metadata:
+            metadata = PngInfo()
+            if prompt is not None:
+                metadata.add_text("prompt", prompt if isinstance(prompt, str) else json.dumps(prompt))
+            if extra_pnginfo is not None and isinstance(extra_pnginfo, dict):
+                for x in extra_pnginfo:
+                    metadata.add_text(x, extra_pnginfo[x] if isinstance(extra_pnginfo[x], str) else json.dumps(extra_pnginfo[x]))
+        image_path = os.path.join(full_output_folder, f"{filename}_{counter:05}.png")
+        img.save(image_path, pnginfo=metadata, compress_level=4)
 
     audio_desc = f"aac {audio_sample_rate}Hz stereo" if audio_np is not None else "none"
     logging.info(
