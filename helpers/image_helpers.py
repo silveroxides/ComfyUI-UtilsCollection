@@ -14,6 +14,8 @@ import uuid
 import zipfile
 import folder_paths
 from comfy.model_management import throw_exception_if_processing_interrupted
+from unifiedefficientloader import IncrementalSafetensorsWriter, MemoryEfficientSafeOpen
+from .helper_functions import atomic_uel_writer, read_uel_safetensors_dict
 import colorsys
 import comfy.model_management
 import comfy.utils
@@ -1208,6 +1210,9 @@ def run_yolo_detect(images, *, bbox_detector=None, segm_detector=None, threshold
     return masks_out, bboxes_out
 
 
+_VIDEO_FILE_CONTENT_HASHES: dict[tuple[str, int, int], str] = {}
+
+
 def _hash_stream(stream):
     digest = hashlib.sha256()
     while chunk := stream.read(8 * 1024 * 1024):
@@ -1229,8 +1234,18 @@ def video_source_hash(video):
         finally:
             source.seek(position)
     else:
-        with open(source, "rb") as stream:
-            content = _hash_stream(stream)
+        try:
+            stat = os.stat(source)
+            stat_key = (os.path.abspath(source), stat.st_mtime_ns, stat.st_size)
+            if stat_key in _VIDEO_FILE_CONTENT_HASHES:
+                content = _VIDEO_FILE_CONTENT_HASHES[stat_key]
+            else:
+                with open(source, "rb") as stream:
+                    content = _hash_stream(stream)
+                _VIDEO_FILE_CONTENT_HASHES[stat_key] = content
+        except OSError:
+            with open(source, "rb") as stream:
+                content = _hash_stream(stream)
     # Core has no public crop accessor. Include the verified wrapper fields,
     # not just dimensions: equally sized crops can contain different pixels.
     settings = [video._VideoFromFile__start_time, video._VideoFromFile__duration,
@@ -1250,13 +1265,15 @@ def _frame_storage(video):
 
 
 class CachedVideoFrames:
-    """Array-shaped disk view; H3 indexing reads only requested frame entries."""
+    """Array-shaped disk view; H3 indexing reads only requested frame entries asynchronously via UEL."""
 
     def __init__(self, path, shape, storage):
-        self.path, self.shape, self.storage = path, tuple(shape), storage
+        self.path = Path(path)
+        self.shape = tuple(shape)
+        self.storage = storage
         self.ndim = len(self.shape)
 
-    def __getitem__(self, indices):
+    def _getitem_zip(self, indices):
         scalar = isinstance(indices, int)
         if scalar:
             indices = [indices]
@@ -1290,6 +1307,51 @@ class CachedVideoFrames:
                     frames[position].copy_(frames[positions[index]])
         if frames is None:
             frames = torch.empty((0, *self.shape[1:]), dtype=torch.float32)
+        if scalar:
+            return frames[0]
+        return frames
+
+    def __getitem__(self, indices):
+        if str(self.path).endswith(".zip"):
+            return self._getitem_zip(indices)
+        scalar = isinstance(indices, int)
+        if scalar:
+            indices = [indices]
+        elif isinstance(indices, slice):
+            indices = range(*indices.indices(self.shape[0]))
+        indices = [int(index) % self.shape[0] for index in indices]
+        if not indices:
+            return torch.empty((0, *self.shape[1:]), dtype=torch.float32)
+
+        unique_indices = sorted(set(indices))
+        target_keys = [f"frame_{i:08d}" for i in unique_indices]
+        loaded_frames = {}
+
+        with closing(MemoryEfficientSafeOpen(str(self.path), low_memory=True)) as handle:
+            stream = handle.async_stream(
+                target_keys,
+                batch_size=1,
+                prefetch_batches=1,
+                pin_memory=False,
+            )
+            try:
+                for batch in stream:
+                    for name, tensor in batch:
+                        try:
+                            if tensor.dtype == torch.uint8:
+                                tensor = tensor.float().div_(255.0)
+                            loaded_frames[name] = tensor
+                        finally:
+                            handle.mark_processed(name)
+            finally:
+                close_stream = getattr(stream, "close", None)
+                if callable(close_stream):
+                    close_stream()
+
+        frames = torch.empty((len(indices), *self.shape[1:]), dtype=torch.float32)
+        for position, index in enumerate(indices):
+            frames[position].copy_(loaded_frames[f"frame_{index:08d}"])
+
         if scalar:
             return frames[0]
         return frames
@@ -1337,52 +1399,79 @@ def read_legacy_components(path, key):
 
 
 def _read_components(path, key):
-    with zipfile.ZipFile(path) as archive:
-        manifest = json.loads(archive.read("manifest.json"))
-        if manifest["version"] != 2 or manifest["source_hash"] != key:
-            raise ValueError("Video cache source hash/version mismatch")
-        frames = CachedVideoFrames(path, manifest["shape"], manifest["storage"])
+    path = Path(path)
+    if path.suffix == ".safetensors":
+        with closing(MemoryEfficientSafeOpen(str(path), low_memory=True)) as handle:
+            metadata = handle.metadata() or {}
+            if metadata.get("version") != "4" or metadata.get("source_hash") != key:
+                raise ValueError("Video cache source hash/version mismatch")
+            shape = json.loads(metadata["shape"])
+            storage = metadata.get("storage", "uint8")
+            frame_rate = Fraction(metadata["frame_rate"])
+            sample_rate_str = metadata.get("sample_rate", "")
+            sample_rate = int(sample_rate_str) if sample_rate_str else None
+            has_audio = "audio" in handle.keys()
+
+        frames = CachedVideoFrames(path, shape, storage)
         audio = None
-        if manifest["sample_rate"] is not None:
-            with archive.open("audio.npy") as entry:
-                audio = {"waveform": torch.from_numpy(np.load(entry, allow_pickle=False)),
-                         "sample_rate": manifest["sample_rate"]}
-    return Types.VideoComponents(images=frames, audio=audio, frame_rate=Fraction(manifest["frame_rate"]))
+        if has_audio and sample_rate is not None:
+            audio_tensors, _ = read_uel_safetensors_dict(path, ["audio"])
+            if "audio" in audio_tensors:
+                audio = {
+                    "waveform": audio_tensors["audio"],
+                    "sample_rate": sample_rate,
+                }
+        return Types.VideoComponents(images=frames, audio=audio, frame_rate=frame_rate)
+    elif path.suffix == ".zip":
+        with zipfile.ZipFile(path) as archive:
+            manifest = json.loads(archive.read("manifest.json"))
+            if manifest["version"] != 2 or manifest["source_hash"] != key:
+                raise ValueError("Video cache source hash/version mismatch")
+            frames = CachedVideoFrames(path, manifest["shape"], manifest["storage"])
+            audio = None
+            if manifest["sample_rate"] is not None:
+                with archive.open("audio.npy") as entry:
+                    audio = {"waveform": torch.from_numpy(np.load(entry, allow_pickle=False)),
+                             "sample_rate": manifest["sample_rate"]}
+        return Types.VideoComponents(images=frames, audio=audio, frame_rate=Fraction(manifest["frame_rate"]))
+    else:
+        raise ValueError(f"Unknown video cache file format: {path}")
 
 
 def _write_components(path, key, frames, shape, audio, rate, storage):
-    path.parent.mkdir(parents=True, exist_ok=True)
-    temporary = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
-    try:
-        with zipfile.ZipFile(temporary, "w", allowZip64=True) as archive:
-            for index in tqdm(range(shape[0]), desc="Caching Video Components", unit="frame"):
-                if index % 16 == 0:
-                    throw_exception_if_processing_interrupted()
-                array = frames[index].detach().cpu().numpy()
-                if storage == "png8":
-                    rgb = np.rint(np.clip(array, 0, 1) * 255).astype(np.uint8)
-                    ok, encoded = cv2.imencode(".png", cv2.cvtColor(rgb, cv2.COLOR_RGB2BGR), [cv2.IMWRITE_PNG_COMPRESSION, 3])
-                    if not ok:
-                        raise ValueError("Video frame PNG encoding failed")
-                    data = encoded.tobytes()
+    path = Path(path)
+    if path.suffix != ".safetensors":
+        path = path.with_suffix(".safetensors")
+    is_uint8 = storage in ("png8", "uint8")
+    storage_type = "uint8" if is_uint8 else "float32"
+    metadata = {
+        "version": "4",
+        "source_hash": str(key),
+        "shape": json.dumps(list(shape)),
+        "storage": storage_type,
+        "frame_rate": str(rate),
+        "sample_rate": str(audio["sample_rate"]) if audio is not None and audio.get("sample_rate") is not None else "",
+    }
+    with atomic_uel_writer(path, metadata) as writer:
+        batch_size = 32
+        for start in tqdm(range(0, shape[0], batch_size), desc="Caching Video Components", unit="batch"):
+            if start % 64 == 0:
+                throw_exception_if_processing_interrupted()
+            batch_end = min(start + batch_size, shape[0])
+            batch_items = []
+            for index in range(start, batch_end):
+                frame = frames[index].detach().cpu()
+                if is_uint8:
+                    if frame.dtype != torch.uint8:
+                        frame = (frame.clamp(0, 1) * 255.0).round().to(torch.uint8)
                 else:
-                    buffer = io.BytesIO()
-                    np.savez_compressed(buffer, frame=array)
-                    data = buffer.getvalue()
-                archive.writestr(f"frames/{index:08d}.{storage}", data)
-                del array
-            if audio is not None:
-                info = zipfile.ZipInfo("audio.npy")
-                info.compress_type = zipfile.ZIP_DEFLATED
-                with archive.open(info, "w", force_zip64=True) as entry:
-                    np.save(entry, audio["waveform"].cpu().numpy(), allow_pickle=False)
-            archive.writestr("manifest.json", json.dumps({
-                "version": 2, "source_hash": key, "shape": list(shape), "storage": storage,
-                "frame_rate": str(rate), "sample_rate": audio["sample_rate"] if audio is not None else None,
-            }))
-        os.replace(temporary, path)
-    finally:
-        temporary.unlink(missing_ok=True)
+                    if frame.dtype != torch.float32:
+                        frame = frame.to(torch.float32)
+                batch_items.append((f"frame_{index:08d}", frame.contiguous()))
+            writer.write_batch(batch_items)
+            del batch_items
+        if audio is not None and audio.get("waveform") is not None:
+            writer.write_batch([("audio", audio["waveform"].detach().cpu().to(torch.float32).contiguous())])
 
 
 def _h3_batch_capacity(source_shape, target_shape, dtype):
@@ -1582,92 +1671,94 @@ def _decode_h3_batches(video, megapixels, audio_file, details, stopped):
             yield _resize_h3_batch(staging[:used], width, height)
 
 
-def _write_spooled_h3_audio(archive, audio_file, details):
-    """Convert interleaved spool to existing channel-major NPY in bounded reads."""
+def _read_spooled_h3_audio_tensor(audio_file, details) -> torch.Tensor:
     channels, samples = details["channels"], details["samples"]
-    info = zipfile.ZipInfo("audio.npy")
-    info.compress_type = zipfile.ZIP_DEFLATED
-    with archive.open(info, "w", force_zip64=True) as entry:
-        np.lib.format.write_array_header_1_0(entry, {"descr": "<f4", "fortran_order": False, "shape": (1, channels, samples)})
-        for channel in range(channels):
-            audio_file.seek(0)
-            for start in range(0, samples, 65536):
-                throw_exception_if_processing_interrupted()
-                count = min(65536, samples - start)
-                chunk = np.frombuffer(audio_file.read(count * channels * 4), dtype=np.float32).reshape(count, channels)
-                entry.write(np.ascontiguousarray(chunk[:, channel]).data)
+    audio_file.seek(0)
+    chunk = np.frombuffer(audio_file.read(channels * samples * 4), dtype=np.float32).reshape(samples, channels)
+    waveform = torch.from_numpy(np.ascontiguousarray(chunk.T)).unsqueeze(0).to(torch.float32)
+    return waveform
 
 
 def _write_streamed_h3_components(path, key, video, megapixels, storage):
+    path = Path(path)
+    if path.suffix != ".safetensors":
+        path = path.with_suffix(".safetensors")
+    is_uint8 = storage in ("png8", "uint8")
+    storage_type = "uint8" if is_uint8 else "float32"
     path.parent.mkdir(parents=True, exist_ok=True)
-    temporary = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
     details = {}
-    try:
-        with tempfile.TemporaryFile(dir=path.parent) as audio_file, zipfile.ZipFile(temporary, "w", allowZip64=True) as archive:
-            # Closing the generator releases its container even on consumer failure.
-            def factory(stopped):
-                return closing(_decode_h3_batches(video, megapixels, audio_file, details, stopped))
-            count = 0
+    with tempfile.TemporaryFile(dir=path.parent) as audio_file:
+        def factory(stopped):
+            return closing(_decode_h3_batches(video, megapixels, audio_file, details, stopped))
+        count = 0
+        metadata = {
+            "version": "4",
+            "source_hash": str(key),
+            "storage": storage_type,
+        }
+        with atomic_uel_writer(path, metadata) as writer:
             with _prefetch_h3_batches(factory) as batches, tqdm(desc="Decoding & Caching H3 Video Components", unit="frame") as pbar:
                 for batch in batches:
+                    batch_items = []
                     for frame in batch:
                         throw_exception_if_processing_interrupted()
-                        array = frame.numpy()
-                        if storage == "png8":
-                            rgb = np.rint(np.clip(array, 0, 1) * 255).astype(np.uint8)
-                            ok, encoded = cv2.imencode(".png", cv2.cvtColor(rgb, cv2.COLOR_RGB2BGR), [cv2.IMWRITE_PNG_COMPRESSION, 3])
-                            if not ok:
-                                raise ValueError("Video frame PNG encoding failed")
-                            archive.writestr(f"frames/{count:08d}.png8", encoded)
+                        if is_uint8:
+                            frame_t = (frame.clamp(0, 1) * 255.0).round().to(torch.uint8)
                         else:
-                            with archive.open(f"frames/{count:08d}.npz", "w", force_zip64=True) as entry:
-                                np.savez_compressed(entry, frame=array)
+                            frame_t = frame.to(torch.float32)
+                        batch_items.append((f"frame_{count:08d}", frame_t.contiguous()))
                         count += 1
                         pbar.update(1)
+                    writer.write_batch(batch_items)
                     shape = (count, *batch.shape[1:])
-                    del frame, array, batch
+                    del batch, batch_items
             if not count:
                 raise ValueError("Reference video must contain non-empty frames.")
-            if details["sample_rate"] is not None:
-                _write_spooled_h3_audio(archive, audio_file, details)
-            archive.writestr("manifest.json", json.dumps({
-                "version": 2, "source_hash": key, "shape": list(shape), "storage": storage,
-                "frame_rate": str(details["rate"]), "sample_rate": details["sample_rate"],
-            }))
-        os.replace(temporary, path)
+            if details.get("sample_rate") is not None and details.get("samples", 0) > 0:
+                audio_tensor = _read_spooled_h3_audio_tensor(audio_file, details)
+                writer.write_batch([("audio", audio_tensor.contiguous())])
+            metadata["shape"] = json.dumps(list(shape))
+            metadata["frame_rate"] = str(details["rate"])
+            metadata["sample_rate"] = str(details["sample_rate"]) if details.get("sample_rate") is not None else ""
+
         audio_desc = f"{details['sample_rate']}Hz ({details.get('samples', 0)} samples)" if details.get("sample_rate") else "none"
         logging.info(
             "[VideoComponents] Cached %d frame(s) at %dx%d (%s fps, storage=%s, audio=%s) -> %s",
-            shape[0], shape[2], shape[1], details["rate"], storage, audio_desc, path.name,
+            shape[0], shape[2], shape[1], details["rate"], storage_type, audio_desc, path.name,
         )
-    finally:
-        temporary.unlink(missing_ok=True)
 
 
 def cached_video_components(video, preparation=None, prepare=None):
-    """Cache all source frames compressed; return a lazy range-readable view."""
+    """Cache all source frames via UEL safetensors; return a lazy async-readable view."""
     key = video_source_hash(video)
     if key is None:
         components = video.get_components()
         return prepare(components) if prepare is not None else components
     source_key = key
     if preparation is not None:
-        key = hashlib.sha256(json.dumps([3, key, preparation], sort_keys=True).encode()).hexdigest()
+        key = hashlib.sha256(json.dumps([4, key, preparation], sort_keys=True).encode()).hexdigest()
     root = Path(folder_paths.get_temp_directory()) / "utilscollection_video_components"
-    path = root / ("v3" if preparation is not None else "v2") / f"{key}.zip"
+    path = root / ("v4" if preparation is not None else "v4_raw") / f"{key}.safetensors"
     try:
         return _read_components(path, key)
     except FileNotFoundError:
         pass
-    except (zipfile.BadZipFile, KeyError, ValueError) as error:
+    except Exception as error:
         logging.warning("Rebuilding invalid video cache: %s", error)
     storage = _frame_storage(video)
     legacy = root / "v1" / f"{source_key}.safetensors"
-    previous = root / "v2" / f"{source_key}.zip"
-    if preparation is not None and previous.is_file():
-        components = _read_components(previous, source_key)
+    previous_v4_raw = root / "v4_raw" / f"{source_key}.safetensors"
+    previous_zip = root / ("v3" if preparation is not None else "v2") / f"{key}.zip"
+    if previous_zip.is_file():
+        try:
+            return _read_components(previous_zip, key)
+        except Exception:
+            pass
+    if preparation is not None and previous_v4_raw.is_file():
+        components = _read_components(previous_v4_raw, source_key)
+    elif preparation is not None and (root / "v2" / f"{source_key}.zip").is_file():
+        components = _read_components(root / "v2" / f"{source_key}.zip", source_key)
     elif legacy.is_file():
-        # Migrate frame-by-frame, never materializing the old multi-GB tensor.
         components = read_legacy_components(legacy, source_key)
     elif preparation is not None and preparation.get("resize") == "h3-bicubic-center-v2":
         if not preparation.get("cache_long_window") and hasattr(video, "get_duration") and float(video.get_duration()) > 15.0:

@@ -1324,33 +1324,32 @@ def test_h3_video_disk_cache_reuses_full_decode_across_ranges(tmp_path, monkeypa
     copied.write_bytes(source.read_bytes())
     image_helpers.cached_h3_reference_components(cache.InputImpl.VideoFromFile(str(copied)), 0.01)
     assert len(calls) == 1
-    assert len(list((tmp_path / "cache" / "utilscollection_video_components" / "v3").glob("*.zip"))) == 1
+    assert len(list((tmp_path / "cache" / "utilscollection_video_components" / "v4").glob("*.safetensors"))) == 1
     changed = image_helpers.cached_h3_reference_components(video, 0.02)
     assert changed.images.shape[1:3] != stored.images.shape[1:3]
     assert len(calls) == 1
     assert len(resizes) > resize_calls
-    assert len(list((tmp_path / "cache" / "utilscollection_video_components" / "v3").glob("*.zip"))) == 2
-    assert (tmp_path / "cache" / "utilscollection_video_components" / "v2").exists()
+    assert len(list((tmp_path / "cache" / "utilscollection_video_components" / "v4").glob("*.safetensors"))) == 2
+    assert (tmp_path / "cache" / "utilscollection_video_components" / "v4_raw").exists()
 
 
 def test_h3_png_cache_reads_only_selected_frames_and_preserves_audio(tmp_path, monkeypatch):
-    import zipfile
     from utils_collection_video_frame_sampler_test.helpers import image_helpers as cache
 
     frames = torch.arange(4 * 8 * 16 * 3).reshape(4, 8, 16, 3).remainder(256).float() / 255
     audio = {"waveform": torch.tensor([[[0.1, -0.2, 0.3]]]), "sample_rate": 32000}
-    path = tmp_path / "frames.zip"
+    path = tmp_path / "frames.safetensors"
     cache._write_components(path, "test", frames, frames.shape, audio, Fraction(24), "png8")
     components = cache._read_components(path, "test")
     torch.testing.assert_close(components.audio["waveform"], audio["waveform"], rtol=0, atol=0)
     reads = []
-    original = zipfile.ZipFile.read
+    original = cache.MemoryEfficientSafeOpen.async_stream
 
-    def read(archive, name, *args, **kwargs):
-        reads.append(name)
-        return original(archive, name, *args, **kwargs)
+    def stream(self, keys, *args, **kwargs):
+        reads.append(list(keys))
+        return original(self, keys, *args, **kwargs)
 
-    monkeypatch.setattr(zipfile.ZipFile, "read", read)
+    monkeypatch.setattr(cache.MemoryEfficientSafeOpen, "async_stream", stream)
     expected = frames[[3, 1, 3]]
 
     def forbidden_stack(*args, **kwargs):
@@ -1358,7 +1357,7 @@ def test_h3_png_cache_reads_only_selected_frames_and_preserves_audio(tmp_path, m
 
     monkeypatch.setattr(torch, "stack", forbidden_stack)
     torch.testing.assert_close(components.images[[3, 1, 3]], expected, rtol=0, atol=0)
-    assert reads == ["frames/00000003.png8", "frames/00000001.png8"]
+    assert reads == [["frame_00000001", "frame_00000003"]]
     torch.testing.assert_close(components.images[-1], frames[-1], rtol=0, atol=0)
     assert components.images[0:0].shape == (0, 8, 16, 3)
 
@@ -1435,7 +1434,7 @@ def test_h3_streamed_decode_matches_core(tmp_path, monkeypatch, codec, tracks, t
 
     monkeypatch.setattr(cache.InputImpl.VideoFromFile, "get_components", forbidden)
     monkeypatch.setattr(cache, "_h3_batch_capacity", lambda *args: 3)
-    target = tmp_path / "streamed.zip"
+    target = tmp_path / "streamed.safetensors"
     cache._write_streamed_h3_components(target, "fixture", video, 0.01, storage)
     actual = cache._read_components(target, "fixture")
     torch.testing.assert_close(actual.images[:], expected, rtol=0, atol=0)
@@ -1463,8 +1462,8 @@ def test_h3_streamed_writer_failure_joins_decoder(tmp_path, monkeypatch):
     def fail(*args, **kwargs):
         raise OSError("test disk failure")
 
-    monkeypatch.setattr(image_helpers.cv2, "imencode", fail)
-    target = tmp_path / "failed.zip"
+    monkeypatch.setattr(image_helpers.IncrementalSafetensorsWriter, "write_batch", fail)
+    target = tmp_path / "failed.safetensors"
     with pytest.raises(OSError, match="test disk failure"):
         image_helpers._write_streamed_h3_components(target, "fixture", image_helpers.InputImpl.VideoFromFile(str(source)), 0.01, "png8")
     assert not target.exists()
@@ -1588,7 +1587,7 @@ def test_h3_video_cache_invalidates_content_trim_crop_and_recovers(tmp_path, mon
     cache.cached_video_components(cache.InputImpl.VideoFromFile(str(source), crop=(0, 0, 4, 4)))
     cache.cached_video_components(cache.InputImpl.VideoFromFile(str(source), crop=(4, 0, 4, 4)))
     assert len(calls) == 5
-    path = tmp_path / "cache" / "utilscollection_video_components" / "v2" / f"{cache.video_source_hash(video)}.zip"
+    path = tmp_path / "cache" / "utilscollection_video_components" / "v4_raw" / f"{cache.video_source_hash(video)}.safetensors"
     path.write_bytes(b"incomplete cache")
     restored = cache.cached_video_components(video)
     assert len(calls) == 6
