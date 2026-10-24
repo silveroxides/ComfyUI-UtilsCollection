@@ -100,7 +100,7 @@ DESCRIPTIONS = {
     "UC_AdvancedConsensusConfiguration": "Extends Text Consensus Blend Configurator with resolution count and offset controls.",
     "UC_VLMInputEmbeds": "Exports raw input embeddings from a supported vision-language model encoder.",
     "UC_Krea2TokenAttentionWeight": "Applies phrase-level attention weights while encoding Krea2 visual conditioning.",
-    "UC_TextGenerate": "Generates text from images and timestamped Qwen3-VL video frames, with optional visual-token fusion and structured JSON schema enforcement.",
+    "UC_TextGenerate": "Generates text from images and timestamped Qwen3-VL or Qwen3.5 video frames, with optional visual-token fusion and structured JSON schema enforcement.",
     "UC_TextGenerateQwen35SystemPrompt": "Generates Qwen3.5 text with optional image input, custom system message, and structured JSON schema enforcement.",
     "UC_SwitchInverseNode": "Selects between two inputs using an inverted boolean switch.",
     "UC_SoftSwitchInverseNode": "Selects available inputs using an inverted soft switch.",

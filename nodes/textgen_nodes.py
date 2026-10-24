@@ -368,7 +368,7 @@ class UC_TextGenerate(io.ComfyNode):
                     min=0,
                     max=4096,
                     step=32,
-                    tooltip="Qwen3-VL resolution for video frames. Higher values use more visual tokens.",
+                    tooltip="Qwen3-VL / Qwen3.5 resolution for video frames. Higher values use more visual tokens.",
                 ),
                 io.Int.Input("max_length", default=512, min=1, max=32768, tooltip="Maximum response length."),
                 io.String.Input(
@@ -418,7 +418,7 @@ class UC_TextGenerate(io.ComfyNode):
                     min=0.01,
                     max=1000.0,
                     step=0.01,
-                    tooltip="Frames per second presented to Qwen3-VL.",
+                    tooltip="Frames per second presented to Qwen3-VL or Qwen3.5.",
                 ),
                 io.Autogrow.Input("image_inputs", template=autogrow_template, tooltip="Add images in order. Each image in a batch is added in order."),
             ],
@@ -565,8 +565,8 @@ class UC_TextGenerate(io.ComfyNode):
 
         video_frames = None
         if video is not None:
-            if template_name != "qwen3vl":
-                raise ValueError("Video input is supported only by Core Qwen3-VL 4B, 8B, and 32B models.")
+            if template_name not in {"qwen3vl", "qwen35"}:
+                raise ValueError("Video input is supported only by Core Qwen3-VL and Qwen3.5 models.")
             video_frames, sampled_indices = prepare_qwen3vl_video_frames(
                 video,
                 vlm_video_resolution,

@@ -423,7 +423,7 @@ def test_text_generate_fuses_images_but_keeps_video_on_mixed_generation_path(mon
 
 
 def test_text_generate_rejects_video_for_non_qwen3vl_model():
-    with pytest.raises(ValueError, match="only by Core Qwen3-VL 4B, 8B, and 32B"):
+    with pytest.raises(ValueError, match="only by Core Qwen3-VL and Qwen3.5"):
         textgen_nodes.UC_TextGenerate.execute(
             _GenerateClip("gemma3_12b"),
             "describe",
@@ -433,6 +433,105 @@ def test_text_generate_rejects_video_for_non_qwen3vl_model():
             {"sampling_mode": "off"},
             video=torch.zeros((4, 4, 4, 3)),
         )
+
+
+def test_qwen35_video_generation_supports_primary_visual_blocks_and_mrope():
+    class Transformer:
+        def __init__(self):
+            self.generated = None
+
+        @staticmethod
+        def preprocess_embed(_entry, device):
+            return (
+                torch.full((1, 4, 3), 2.0, device=device),
+                torch.tensor([[1, 4, 4]], device=device),
+            )
+
+        @staticmethod
+        def visual(_flatten, grid):
+            size = int(grid[0, 0] * grid[0, 1] * grid[0, 2] // 4)
+            return torch.full((size, 3), 3.0)
+
+        def generate(self, embeds, **kwargs):
+            self.generated = (embeds, kwargs)
+            return [9]
+
+    class Model:
+        def __init__(self):
+            self.transformer = Transformer()
+            self.execution_device = torch.device("cpu")
+
+        def reset_clip_options(self):
+            pass
+
+        def set_clip_options(self, options):
+            self.execution_device = options["execution_device"]
+
+        def process_tokens(self, rows, device):
+            chunks = []
+            info = []
+            cursor = 0
+            for value in rows[0]:
+                if isinstance(value, dict):
+                    block = value["data"].reshape(-1, value["data"].shape[-1]).to(device)
+                    chunks.append(block)
+                    info.append({"type": "embedding", "index": cursor, "size": block.shape[0], "extra": None})
+                    cursor += block.shape[0]
+                else:
+                    chunks.append(torch.zeros((1, 3), device=device))
+                    cursor += 1
+            return torch.cat(chunks).unsqueeze(0), None, None, info
+
+    model = Model()
+    stage = types.SimpleNamespace(clip="qwen35_9b", qwen35_9b=model)
+
+    class Clip:
+        cond_stage_model = stage
+        tokenizer = types.SimpleNamespace(clip_name="qwen35_9b")
+        patcher = types.SimpleNamespace(load_device=torch.device("cpu"))
+
+        @staticmethod
+        def load_model():
+            pass
+
+        @staticmethod
+        def tokenize(_prompt, **_kwargs):
+            return {
+                "qwen35_9b": [[
+                    (248053, 1.0),
+                    (textgen_helpers.QWEN35_VIDEO_PAD_ID, 1.0),
+                    (248054, 1.0),
+                    (248053, 1.0),
+                    (textgen_helpers.QWEN35_IMAGE_PAD_ID, 1.0),
+                    (248054, 1.0),
+                ]]
+            }
+
+        @staticmethod
+        def decode(ids, **_kwargs):
+            return f"decoded:{ids}"
+
+    output, seed = textgen_nodes.UC_TextGenerate.execute(
+        Clip(),
+        "describe",
+        "",
+        384,
+        12,
+        {"sampling_mode": "off"},
+        image_inputs={"image_1": torch.ones((1, 32, 32, 3))},
+        video=torch.zeros((2, 32, 32, 3)),
+        vlm_video_resolution=0,
+    ).args
+
+    assert output == "decoded:[9]"
+    assert seed == 0
+    embeds, forwarded = model.transformer.generated
+    assert embeds.shape[1] == 12
+    assert embeds[0, 1:5, 0].tolist() == [3.0, 3.0, 3.0, 3.0]
+    assert embeds[0, 7:11, 0].tolist() == [2.0, 2.0, 2.0, 2.0]
+    assert forwarded["position_ids"].shape == (3, 12)
+    assert forwarded["mtp"] is True
+    assert "deepstack_embeds" not in forwarded
 
 
 def test_qwen3vl_video_generation_inserts_temporal_and_image_blocks_in_prompt_order():

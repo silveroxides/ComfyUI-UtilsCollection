@@ -16,6 +16,7 @@ except ImportError:
 import comfy.ops
 from comfy import model_management
 from comfy.text_encoders.minimax import process_video_block
+from comfy.text_encoders.qwen_vl import qwen2vl_mrope_position_ids
 
 from .encoder_helpers import (
     fuse_deepstack_layers,
@@ -26,6 +27,10 @@ from .encoder_helpers import (
 
 QWEN_IMAGE_PAD_ID = 151655
 QWEN_VIDEO_PAD_ID = 151656
+QWEN35_IMAGE_PAD_ID = 248056
+QWEN35_VIDEO_PAD_ID = 248057
+QWEN_IMAGE_PAD_IDS = frozenset({QWEN_IMAGE_PAD_ID, QWEN35_IMAGE_PAD_ID})
+QWEN_VIDEO_PAD_IDS = frozenset({QWEN_VIDEO_PAD_ID, QWEN35_VIDEO_PAD_ID})
 QWEN_VIDEO_TOKEN = "<|vision_start|><|video_pad|><|vision_end|>"
 
 
@@ -172,29 +177,50 @@ def _preprocess_qwen3vl_image(model, device, image):
     embedding, extra = model.transformer.preprocess_embed(
         {"type": "image", "data": image, "original_type": "image"}, device=device
     )
-    if (
-        embedding is None
-        or not isinstance(extra, dict)
-        or extra.get("grid") is None
-        or not extra.get("deepstack")
-    ):
-        raise ValueError("Qwen3-VL image preprocessing did not return grid and DeepStack metadata.")
-    return {"kind": "image", "embedding": embedding, "extra": extra}
+    if hasattr(model.transformer, "build_image_inputs"):
+        if (
+            embedding is None
+            or not isinstance(extra, dict)
+            or extra.get("grid") is None
+            or not extra.get("deepstack")
+        ):
+            raise ValueError("Qwen3-VL image preprocessing did not return grid and DeepStack metadata.")
+        return {"kind": "image", "embedding": embedding, "extra": extra}
+    grid = extra.get("grid") if isinstance(extra, dict) else extra
+    if embedding is None or grid is None:
+        raise ValueError("Qwen3.5 image preprocessing did not return grid metadata.")
+    return {"kind": "image", "embedding": embedding, "extra": {"grid": grid}}
 
 
 def _preprocess_qwen3vl_video_pair(model, device, frames):
     flatten, grid = process_video_block(frames)
-    embedding, deepstack = model.transformer.visual(
+    visual_out = model.transformer.visual(
         flatten.to(device, dtype=torch.float32), grid
     )
-    if embedding is None or not deepstack:
+    if hasattr(model.transformer, "build_image_inputs"):
+        if not isinstance(visual_out, tuple) or len(visual_out) != 2:
+            raise ValueError(
+                "Qwen3-VL video preprocessing did not return temporal and DeepStack embeddings."
+            )
+        embedding, deepstack = visual_out
+        if embedding is None or not deepstack:
+            raise ValueError(
+                "Qwen3-VL video preprocessing did not return temporal and DeepStack embeddings."
+            )
+        return {
+            "kind": "video",
+            "embedding": embedding,
+            "extra": {"grid": grid, "deepstack": deepstack},
+        }
+    embedding = visual_out[0] if isinstance(visual_out, tuple) else visual_out
+    if embedding is None:
         raise ValueError(
-            "Qwen3-VL video preprocessing did not return temporal and DeepStack embeddings."
+            "Qwen3.5 video preprocessing did not return temporal embeddings."
         )
     return {
         "kind": "video",
         "embedding": embedding,
-        "extra": {"grid": grid, "deepstack": deepstack},
+        "extra": {"grid": grid},
     }
 
 
@@ -207,16 +233,16 @@ def _fuse_preprocessed_qwen3vl_images(blocks, config, device):
         block["embedding"].reshape(-1, block["embedding"].shape[-1]).to(device)
         for block in blocks
     ]
-    deepstacks = {
-        index: block["extra"]["deepstack"] for index, block in enumerate(blocks)
-    }
     mask_cache = {}
     fused = fuse_visual_token_sources(primary, config, device, mask_cache, size, shapes)
-    fused_deepstack = fuse_deepstack_layers(
-        deepstacks, config, device, mask_cache, size, shapes
-    )
     extra = dict(blocks[0]["extra"])
-    extra["deepstack"] = fused_deepstack
+    deepstacks = {
+        index: block["extra"].get("deepstack") for index, block in enumerate(blocks)
+    }
+    if all(deepstacks.values()):
+        extra["deepstack"] = fuse_deepstack_layers(
+            deepstacks, config, device, mask_cache, size, shapes
+        )
     return {"kind": "image", "embedding": fused, "extra": extra}
 
 
@@ -228,9 +254,9 @@ def _attach_preprocessed_visuals(rows, image_blocks, video_blocks):
     tagged = []
     for index, value in enumerate(rows[0]):
         block = None
-        if isinstance(value, numbers.Integral) and int(value) == QWEN_IMAGE_PAD_ID and image_queue:
+        if isinstance(value, numbers.Integral) and int(value) in QWEN_IMAGE_PAD_IDS and image_queue:
             block = image_queue.pop(0)
-        elif isinstance(value, numbers.Integral) and int(value) == QWEN_VIDEO_PAD_ID and video_queue:
+        elif isinstance(value, numbers.Integral) and int(value) in QWEN_VIDEO_PAD_IDS and video_queue:
             block = video_queue.pop(0)
         if block is not None:
             marker = {
@@ -257,8 +283,12 @@ def generate_qwen3vl_video(
     thinking=False,
 ):
     model, device = _load_qwen_generation_model(clip)
-    if not hasattr(model.transformer, "build_image_inputs"):
-        raise ValueError("Video input requires a Core Qwen3-VL 4B, 8B, or 32B model wrapper.")
+    has_deepstack = hasattr(model.transformer, "build_image_inputs")
+    if not has_deepstack and (
+        not hasattr(model.transformer, "visual")
+        or not callable(getattr(model.transformer, "preprocess_embed", None))
+    ):
+        raise ValueError("Video input requires a Core Qwen3-VL or Qwen3.5 model wrapper.")
 
     with _qwen_execution_context(clip, device):
         image_blocks = [
@@ -324,16 +354,29 @@ def generate_qwen3vl_video(
             ],
         )
 
-        position_ids, visual_mask, deepstack = model.transformer.build_image_inputs(
-            embeds, embeds_info
+        if has_deepstack:
+            position_ids, visual_mask, deepstack = model.transformer.build_image_inputs(
+                embeds, embeds_info
+            )
+            transformer_args = {k: v for k, v in generation_args.items() if k != "mtp"}
+            return model.transformer.generate(
+                embeds,
+                **transformer_args,
+                position_ids=position_ids,
+                visual_pos_masks=visual_mask,
+                deepstack_embeds=deepstack,
+            )
+        position_ids = qwen2vl_mrope_position_ids(
+            embeds_info, embeds.shape[1], embeds.device
         )
-        transformer_args = {k: v for k, v in generation_args.items() if k != "mtp"}
+        if position_ids is None:
+            raise ValueError(
+                "Qwen3.5 video generation could not rebuild multimodal MRoPE positions."
+            )
         return model.transformer.generate(
             embeds,
-            **transformer_args,
+            **generation_args,
             position_ids=position_ids,
-            visual_pos_masks=visual_mask,
-            deepstack_embeds=deepstack,
         )
 
 
