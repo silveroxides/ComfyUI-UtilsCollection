@@ -1,6 +1,6 @@
 """Native Whisper architecture adapted from OpenAI Whisper (MIT).
 
-Checkpoint names are unchanged. See whisper_assets/LICENSE for attribution.
+Checkpoint names are unchanged.
 """
 from dataclasses import dataclass
 

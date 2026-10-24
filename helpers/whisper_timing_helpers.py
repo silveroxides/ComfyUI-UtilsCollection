@@ -1,4 +1,4 @@
-"""Word alignment adapted from OpenAI Whisper (MIT); see models/whisper_assets/LICENSE.
+"""Word alignment adapted from OpenAI Whisper (MIT).
 
 Native attention stays on ComfyUI's selected backend. The alignment pass captures
 only the calibrated cross-attention heads; DTW runs on CPU without Triton/Numba.

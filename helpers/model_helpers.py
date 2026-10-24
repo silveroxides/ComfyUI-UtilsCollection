@@ -2844,7 +2844,7 @@ def detect_sam3(model, image, conditioning=None, bboxes=None, positive_coords=No
     return (torch.cat(masks) if individual_masks else torch.stack(masks), all_bboxes)
 
 
-# Whisper helpers adapted from OpenAI Whisper (MIT); see models/whisper_assets/LICENSE.
+# Whisper helpers adapted from OpenAI Whisper (MIT).
 WHISPER_SAMPLE_RATE = 16000
 WHISPER_N_FFT = 400
 WHISPER_HOP_LENGTH = 160
@@ -2857,13 +2857,13 @@ def prepare_whisper_audio(audio):
     waveform = audio["waveform"]
     sample_rate = audio["sample_rate"]
     if waveform.ndim != 3 or min(waveform.shape) < 1:
-        raise ValueError("Whisper AUDIO waveform must be non-empty [batch, channels, samples].")
-    if not isinstance(sample_rate, int) or sample_rate <= 0:
-        raise ValueError("Whisper AUDIO sample_rate must be a positive integer.")
-    waveform = waveform.to(dtype=torch.float32).mean(dim=1)
-    if sample_rate != WHISPER_SAMPLE_RATE:
-        waveform = torchaudio.functional.resample(waveform, sample_rate, WHISPER_SAMPLE_RATE)
-    return waveform
+        raise ValueError("Whisper expects AUDIO with shape [batch, channels, samples].")
+    if sample_rate <= 0:
+        raise ValueError("Whisper expects a positive audio sample rate.")
+    mono = waveform.detach().to(dtype=torch.float32).mean(dim=1)
+    if int(sample_rate) != WHISPER_SAMPLE_RATE:
+        mono = torchaudio.functional.resample(mono, int(sample_rate), WHISPER_SAMPLE_RATE)
+    return mono.contiguous()
 
 
 def whisper_pad_or_trim(array, length=WHISPER_N_SAMPLES):
@@ -2879,7 +2879,7 @@ def whisper_log_mel_spectrogram(audio, n_mels=80, padding=0):
     window = torch.hann_window(WHISPER_N_FFT, device=audio.device, dtype=audio.dtype)
     stft = torch.stft(audio, WHISPER_N_FFT, WHISPER_HOP_LENGTH, window=window, return_complex=True)
     magnitudes = stft[..., :-1].abs().square()
-    with np.load(Path(__file__).parent.parent / "models" / "whisper_assets" / "mel_filters.npz", allow_pickle=False) as archive:
+    with np.load(load_whisper_asset_path("mel_filters.npz"), allow_pickle=False) as archive:
         filters = torch.from_numpy(archive[f"mel_{n_mels}"]).to(device=audio.device, dtype=audio.dtype)
     log_spec = (filters @ magnitudes).clamp(min=1e-10).log10()
     log_spec = torch.maximum(log_spec, log_spec.max() - 8.0)
@@ -3210,11 +3210,12 @@ class WhisperTokenizer:
 def whisper_get_encoding(name: str = "gpt2", num_languages: int = 99):
     if tiktoken is None:
         raise RuntimeError("Whisper requires tiktoken. Install tiktoken in ComfyUI's Python environment and restart ComfyUI.")
-    vocab_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "models", "whisper_assets", f"{name}.tiktoken")
-    ranks = {
-        base64.b64decode(token): int(rank)
-        for token, rank in (line.split() for line in open(vocab_path) if line)
-    }
+    vocab_path = load_whisper_asset_path(f"{name}.tiktoken")
+    with open(vocab_path, encoding="utf-8") as vocab_file:
+        ranks = {
+            base64.b64decode(token): int(rank)
+            for token, rank in (line.split() for line in vocab_file if line)
+        }
     n_vocab = len(ranks)
     special_tokens = {}
 
@@ -4094,15 +4095,21 @@ WHISPER_REPO = "silveroxides/ComfyUI-UtilsCollection-Models"
 def register_whisper_paths():
     folder_paths.add_model_folder_path("whisper", os.path.join(folder_paths.models_dir, "whisper"))
     paths, extensions = folder_paths.folder_names_and_paths["whisper"]
-    folder_paths.folder_names_and_paths["whisper"] = (paths, extensions | {".safetensors"})
+    folder_paths.folder_names_and_paths["whisper"] = (
+        paths,
+        extensions | {".safetensors", ".tiktoken", ".npz", ".dict"},
+    )
+
+
+def load_whisper_asset_path(filename: str) -> str:
+    register_whisper_paths()
+    return download_huggingface_model("whisper", filename, WHISPER_REPO, f"audio/whisper/{filename}")
 
 
 def load_whisper_model(model_name):
     if model_name not in WHISPER_MODELS:
         raise ValueError(f"Unknown Whisper model: {model_name}")
-    register_whisper_paths()
-    filename = f"{model_name}.safetensors"
-    path = download_huggingface_model("whisper", filename, WHISPER_REPO, f"audio/whisper/{filename}")
+    path = load_whisper_asset_path(f"{model_name}.safetensors")
     return load_whisper_safetensors(path, model_name)
 
 
@@ -4276,7 +4283,7 @@ def reference_syllable_key(text):
 def reference_syllable_counts(keys):
     """Read only requested counts; differing pronunciation counts remain unknown."""
     counts = {}
-    with (Path(__file__).parent.parent / "models" / "whisper_assets" / "cmudict" / "cmudict.dict").open(encoding="utf-8") as dictionary:
+    with Path(load_whisper_asset_path("cmudict.dict")).open(encoding="utf-8") as dictionary:
         for line in dictionary:
             entry, _, pronunciation = line.partition(" ")
             key = entry.split("(", 1)[0]
