@@ -1,3 +1,4 @@
+import datetime
 import pytest
 import torch
 import pathlib
@@ -14,6 +15,7 @@ from utils_collection_video_helpers_test.helpers.video_helpers import (
     VideoCompareType,
     compute_video_signatures,
     cross_correlate_video_signatures,
+    expand_filename_date_tokens,
     find_video_overlap,
 )
 
@@ -91,3 +93,11 @@ def test_video_cross_correlation_signed_offsets(offset):
     assert result.distance == 0.0
     assert result.second_best_distance > 0.0
     assert result.overlap_frames == min(5, 5 - offset)
+
+
+def test_filename_date_tokens_expand_like_frontend():
+    now = datetime.datetime(2026, 3, 7, 9, 5, 4)
+    assert expand_filename_date_tokens(
+        "video/%date:yyyy-MM-dd%/vid_%date:yyyy-MM-dd%_default", now,
+    ) == "video/2026-03-07/vid_2026-03-07_default"
+    assert expand_filename_date_tokens("%date:yy.M.d_hhmmss%_%year%", now) == "26.3.7_090504_%year%"

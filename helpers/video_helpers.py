@@ -8,6 +8,7 @@ File discovery uses ComfyUI's PyAV decoder to identify video streams.
 
 from collections.abc import Mapping
 from dataclasses import dataclass
+from datetime import datetime
 from enum import Enum
 from fractions import Fraction
 import json
@@ -381,6 +382,33 @@ def prepare_video_audio_for_h3(audio: Any) -> dict[str, Any] | None:
     return {"waveform": waveform, "sample_rate": 32000}
 
 
+_FILENAME_DATE_TOKEN = re.compile(r"%date:([^%]+)%")
+_FILENAME_DATE_PART = re.compile(r"(yyyy|yy|(\w)\2?)")
+
+
+def expand_filename_date_tokens(filename_prefix: str, now: datetime | None = None) -> str:
+    """Expand ``%date:FORMAT%`` the way the ComfyUI frontend does.
+
+    The frontend only rewrites these tokens for core save nodes, and
+    ``folder_paths.get_save_image_path`` does not know them, so custom save
+    nodes otherwise write the literal token (with its colon) into the path.
+    """
+    now = now or datetime.now()
+    parts = {"d": now.day, "M": now.month, "h": now.hour, "m": now.minute, "s": now.second}
+
+    def format_part(match: re.Match) -> str:
+        token, letter = match.group(1), match.group(2)
+        if token == "yyyy":
+            return str(now.year)
+        if token == "yy":
+            return str(now.year)[2:]
+        if letter in parts:
+            return str(parts[letter]).zfill(len(token))
+        return token
+
+    return _FILENAME_DATE_TOKEN.sub(lambda m: _FILENAME_DATE_PART.sub(format_part, m.group(1)), filename_prefix)
+
+
 def save_keyframe_optimized_video(
     images: torch.Tensor,
     fps: float = 24.0,
@@ -411,6 +439,7 @@ def save_keyframe_optimized_video(
 
     if not filename_prefix:
         filename_prefix = "video/%date:yyyy-MM-dd%/vid_%date:yyyy-MM-dd%_default"
+    filename_prefix = expand_filename_date_tokens(filename_prefix)
 
     has_audio = False
     audio_np = None
