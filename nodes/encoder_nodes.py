@@ -59,6 +59,7 @@ from ..helpers.encoder_helpers import(
     MINIMAX_H3_MEDIA_STRUCTURE,
     MINIMAX_H3_VIDEO_LATENT_MODES,
     execute_token_fusion_visual_conditioning,
+    build_context_attention_bias,
 )
 from ..helpers.minimax_h3_reference_media_helpers import execute_advanced_minimax_h3_reference_media_image_to_video
 from ..helpers.image_helpers import VIDEO_FRAME_TIMESTAMP_FORMATS
@@ -2181,6 +2182,15 @@ class UC_AdvancedVisualConditioningEncode(io.ComfyNode):
                 ),
                 io.Vae.Input("vae", optional=True),
                 io.Float.Input("multiplier", default=1.0, min=-1000.0, max=1000.0, step=0.1, tooltip="Overall multiplier applied to the final conditioning vector."),
+                io.Float.Input(
+                    "image_strength",
+                    default=1.0,
+                    min=0.0,
+                    max=100.0,
+                    step=0.05,
+                    advanced=True,
+                    tooltip="Scales attention allocated to visual tokens encoded for reference image(s) via context_attention_bias (e.g. MOSS-Image): 0 ignores them, 1 is unchanged, above 1 emphasizes them.",
+                ),
                 io.Int.Input("vae_dimension_multiple", default=8, min=4, max=256, step=4, advanced=True, tooltip="Pixel multiple used to align reference images before VAE encoding."),
                 io.Boolean.Input("semantic_anchor", default=False, tooltip="Prefixes each encoded visual slot with its numbered <Picture N>: semantic anchor."),
                 io.Autogrow.Input("image_inputs", template=autogrow_template, tooltip="Multimodal images. Maps active inputs sequentially to variables (a, b, c, ...)."),
@@ -2192,7 +2202,7 @@ class UC_AdvancedVisualConditioningEncode(io.ComfyNode):
         )
 
     @classmethod
-    def execute(cls, clip, prompt, system_prompt, vlm_resolution, image_inputs: io.Autogrow.Type, visual_fusion_config: dict = None, formula: str = "", padding_method: str = "zero-pad", vae_resolution="Fast (1024)", ref_latent_mode="off", vae=None, multiplier: float = 1.0, vae_dimension_multiple=8, semantic_anchor: bool = False, fusion_method=None) -> io.NodeOutput:
+    def execute(cls, clip, prompt, system_prompt, vlm_resolution, image_inputs: io.Autogrow.Type, visual_fusion_config: dict = None, formula: str = "", padding_method: str = "zero-pad", vae_resolution="Fast (1024)", ref_latent_mode="off", vae=None, multiplier: float = 1.0, image_strength: float = 1.0, vae_dimension_multiple=8, semantic_anchor: bool = False, fusion_method=None) -> io.NodeOutput:
         if is_qwen_image21_text_encoder(clip) and ref_latent_mode != "off":
             raise ValueError("Qwen-Image-2.1 VAE-reference fusion is not supported yet; set ref_latent_mode to off.")
         method = cls.DEFAULT_FUSION_METHOD if fusion_method is None else fusion_method
@@ -2212,12 +2222,13 @@ class UC_AdvancedVisualConditioningEncode(io.ComfyNode):
             ref_latent_mode=ref_latent_mode,
             vae=vae,
             multiplier=multiplier,
+            image_strength=image_strength,
             vae_dimension_multiple=vae_dimension_multiple,
             semantic_anchor=semantic_anchor,
         )
 
     @classmethod
-    def _execute_conds_fusion(cls, clip, prompt, system_prompt, vlm_resolution, image_inputs: io.Autogrow.Type, visual_fusion_config: dict = None, formula: str = "", padding_method: str = "zero-pad", vae_resolution="Fast (1024)", ref_latent_mode="off", vae=None, multiplier: float = 1.0, vae_dimension_multiple=8, semantic_anchor: bool = False) -> io.NodeOutput:
+    def _execute_conds_fusion(cls, clip, prompt, system_prompt, vlm_resolution, image_inputs: io.Autogrow.Type, visual_fusion_config: dict = None, formula: str = "", padding_method: str = "zero-pad", vae_resolution="Fast (1024)", ref_latent_mode="off", vae=None, multiplier: float = 1.0, image_strength: float = 1.0, vae_dimension_multiple=8, semantic_anchor: bool = False) -> io.NodeOutput:
         # Collect, extract, and parse all active (non-null) connected images sequentially (including batched images)
         _, active_images, _ = extract_and_flatten_images(image_inputs)
         minimax_h3 = is_minimax_h3_text_encoder(clip)
@@ -2357,7 +2368,7 @@ class UC_AdvancedVisualConditioningEncode(io.ComfyNode):
                 if pooled_output is not None:
                     pooled_tensors["a"] = pooled_output
                 reference_cond_dict = inline_cond[0][1]
-                if save_visual_embedding:
+                if save_visual_embedding or image_strength != 1.0:
                     tokens_dict["a"] = inline_tokens
                     visual_ranges["a"] = find_visual_token_range(
                         inline_tokens,
@@ -2414,7 +2425,7 @@ class UC_AdvancedVisualConditioningEncode(io.ComfyNode):
             P_X = cond_X[0][1].get("pooled_output")
             cond_metadata = cond_X[0][1]
 
-            if visual_method != "off" or save_visual_embedding:
+            if visual_method != "off" or save_visual_embedding or image_strength != 1.0:
                 try:
                     tokens = (
                         tokenize_minimax_h3_prompt(clip, full_prompt, [processed_img])
@@ -2511,6 +2522,17 @@ class UC_AdvancedVisualConditioningEncode(io.ComfyNode):
             if "pooled_output" in final_cond_dict and final_cond_dict["pooled_output"] is not None:
                 final_cond_dict["pooled_output"] *= multiplier
 
+        if image_strength != 1.0 and active_images:
+            source_tokens = inline_tokens if inline_mode else tokens_dict.get("a")
+            ctx_bias = build_context_attention_bias(
+                source_tokens,
+                C_blended,
+                image_strength=image_strength,
+                visual_ranges=visual_ranges,
+            )
+            if ctx_bias is not None:
+                final_cond_dict["context_attention_bias"] = ctx_bias
+
         conditioning = [[C_blended, final_cond_dict]]
 
         ref_latents = []
@@ -2550,6 +2572,7 @@ class UC_AdvancedVisualConditioningEncode(io.ComfyNode):
         ref_latent_mode="off",
         vae=None,
         multiplier=1.0,
+        image_strength=1.0,
         vae_dimension_multiple=8,
         semantic_anchor=False,
         system_prompt="",
@@ -2568,6 +2591,7 @@ class UC_AdvancedVisualConditioningEncode(io.ComfyNode):
                 ref_latent_mode=ref_latent_mode,
                 vae=vae,
                 multiplier=multiplier,
+                image_strength=image_strength,
                 vae_dimension_multiple=vae_dimension_multiple,
                 semantic_anchor=semantic_anchor,
             )
@@ -2588,6 +2612,7 @@ class UC_AdvancedVisualConditioningEncode(io.ComfyNode):
                 ref_latent_mode=ref_latent_mode,
                 vae=vae,
                 multiplier=multiplier,
+                image_strength=image_strength,
                 vae_dimension_multiple=vae_dimension_multiple,
                 semantic_anchor=semantic_anchor,
             )
@@ -2597,7 +2622,7 @@ class UC_AdvancedVisualConditioningEncode(io.ComfyNode):
             raise ValueError(
                 "MiniMax H3 reference latents require Core's MiniMax H3 reference conditioning node; set ref_latent_mode to off."
             )
-        conditioning, _ = execute_token_fusion_visual_conditioning(
+        conditioning, token_sources = execute_token_fusion_visual_conditioning(
             clip,
             prompt,
             active_images,
@@ -2607,6 +2632,18 @@ class UC_AdvancedVisualConditioningEncode(io.ComfyNode):
             multiplier,
             True,
         )
+        if image_strength != 1.0 and active_images:
+            t_src = token_sources[0] if token_sources else None
+            for item in conditioning:
+                c_tensor = item[0]
+                c_meta = item[1]
+                ctx_bias = build_context_attention_bias(
+                    t_src,
+                    c_tensor,
+                    image_strength=image_strength,
+                )
+                if ctx_bias is not None:
+                    c_meta["context_attention_bias"] = ctx_bias
         ref_latents = []
         if vae is not None and ref_latent_mode != "off":
             resolutions = {
@@ -4140,6 +4177,15 @@ class UC_AdvancedVisConEncoder(io.ComfyNode):
                 ),
                 io.Vae.Input("vae", optional=True),
                 io.Float.Input("multiplier", default=1.0, min=-1000.0, max=1000.0, step=0.1),
+                io.Float.Input(
+                    "image_strength",
+                    default=1.0,
+                    min=0.0,
+                    max=100.0,
+                    step=0.05,
+                    advanced=True,
+                    tooltip="Scales attention allocated to visual tokens encoded for reference image(s) via context_attention_bias (e.g. MOSS-Image): 0 ignores them, 1 is unchanged, above 1 emphasizes them.",
+                ),
                 io.Int.Input("vae_dimension_multiple", default=8, min=4, max=256, step=4, advanced=True),
                 io.Boolean.Input("semantic_anchor", default=False, tooltip="Prefixes each encoded visual slot with its numbered <Picture N>: semantic anchor."),
                 io.Combo.Input("fusion_method", options=["conds_fusion", "token_fusion"], default=cls.DEFAULT_FUSION_METHOD, optional=True, tooltip="Select pre- or post-encoding spatial fusion at each resolution and batch lane. Subsequent complete-conditioning consensus is unchanged."),
@@ -4165,6 +4211,7 @@ class UC_AdvancedVisConEncoder(io.ComfyNode):
         ref_latent_mode="off",
         vae=None,
         multiplier=1.0,
+        image_strength=1.0,
         vae_dimension_multiple=8,
         semantic_anchor=False,
         fusion_method=None,
@@ -4187,6 +4234,7 @@ class UC_AdvancedVisConEncoder(io.ComfyNode):
             apply_parallel_ref_latents,
             token_fusion=method == "token_fusion",
             semantic_anchor=semantic_anchor,
+            image_strength=image_strength,
         )
         return io.NodeOutput(conditioning)
 
@@ -4281,8 +4329,9 @@ class UC_AdvancedVisualConditioningEncodeTokenFusion(UC_AdvancedVisualConditioni
     def execute(
         cls, clip, prompt, vlm_resolution, image_inputs, visual_fusion_config=None,
         formula="", padding_method="zero-pad", vae_resolution="Fast (1024)",
-        ref_latent_mode="off", vae=None, multiplier=1.0, vae_dimension_multiple=8,
-        semantic_anchor=False, system_prompt="", fusion_method=None,
+        ref_latent_mode="off", vae=None, multiplier=1.0, image_strength=1.0,
+        vae_dimension_multiple=8, semantic_anchor=False, system_prompt="",
+        fusion_method=None,
     ):
         return super().execute(
             clip=clip, prompt=prompt, system_prompt=system_prompt,
@@ -4290,7 +4339,7 @@ class UC_AdvancedVisualConditioningEncodeTokenFusion(UC_AdvancedVisualConditioni
             visual_fusion_config=visual_fusion_config, formula=formula,
             padding_method=padding_method, vae_resolution=vae_resolution,
             ref_latent_mode=ref_latent_mode, vae=vae, multiplier=multiplier,
-            vae_dimension_multiple=vae_dimension_multiple,
+            image_strength=image_strength, vae_dimension_multiple=vae_dimension_multiple,
             semantic_anchor=semantic_anchor, fusion_method=fusion_method,
         )
 

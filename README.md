@@ -485,7 +485,7 @@ a guider without a negative input.
 
 `UC_MOSSImageEditPatcher` configures a MOSS-Image diffusion model for reference-guided image editing, character or style transfer, and masked inpainting using clean reference attention across all 42 transformer blocks and spatial structure retention on the Flux 2 latent grid.
 
-Connect the MOSS-Image `model` (after `ModelSamplingAuraFlow` with `shift = 5.0`) through `UC_MOSSImageEditPatcher` to your sampler. You can supply the reference image in any of three ways: connect a `Flux 2` `VAEEncode` latent to `reference_latent` on the patcher, attach reference images to your positive conditioning with `ReferenceLatent` or `UC_AdvancedVisualConditioningEncode` (with `vae` connected), or pass the `VAEEncode` latent directly into your sampler's `latent_image` input at `denoise = 1.0`.
+Connect the MOSS-Image `model` (after `ModelSamplingAuraFlow` with `shift = 5.0`) through `UC_MOSSImageEditPatcher` to your sampler. You can supply the reference image in any of three ways: connect a `Flux 2` `VAEEncode` latent to `reference_latent` on the patcher, attach reference images to your positive conditioning with `ReferenceLatent` or `UC_AdvancedVisualConditioningEncode` (with `vae` connected and optional `image_strength` attention scaling), or pass the `VAEEncode` latent directly into your sampler's `latent_image` input at `denoise = 1.0`.
 
 - `preset`: selects the editing profile (`balanced_edit`, `preserve_structure`, `subject_reference`, `style_reference`, or `inpaint_only`).
 - `strength`: controls how strongly the 42 transformer blocks pull visual details and appearance from the reference image (default `0.65`; `0.0` disables reference attention).

@@ -322,6 +322,7 @@ def test_config_seed_and_legacy_call_compatibility():
         "dither_secondary_pattern",
         "dither_mask_cleanup",
         "spatial_perturbation",
+        "combine_video_embeds",
     ]
     assert inputs["seed"].control_after_generate is True
     assert inputs["dither_secondary_pattern"].options == [

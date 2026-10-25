@@ -4104,3 +4104,91 @@ def test_temporal_fusion_encodes_multiple_references_with_ref_image_size_none_an
         if call.get("images") is not None
     ]
     assert any(len(imgs) == 2 for imgs in images_tokenized)
+
+
+def test_build_context_attention_bias_raw_tokens_and_ranges():
+    import math
+    cond_tensor = torch.zeros((1, 10, 64))
+
+    # 1. Neutral strength returns None
+    assert encoder_helpers.build_context_attention_bias(None, cond_tensor, image_strength=1.0) is None
+
+    # 2. Visual ranges fallback
+    bias = encoder_helpers.build_context_attention_bias(
+        None, cond_tensor, image_strength=2.0, visual_ranges={"a": (2, 6)}
+    )
+    assert bias is not None
+    assert bias.shape == (1, 10)
+    expected_weight = math.log(2.0)
+    assert torch.allclose(bias[:, :2], torch.zeros(1, 2))
+    assert torch.allclose(bias[:, 2:6], torch.full((1, 4), expected_weight))
+    assert torch.allclose(bias[:, 6:], torch.zeros(1, 4))
+
+    # 3. Suppressed strength (0.5)
+    bias_half = encoder_helpers.build_context_attention_bias(
+        None, cond_tensor, image_strength=0.5, visual_ranges={"a": (2, 6)}
+    )
+    assert torch.allclose(bias_half[:, 2:6], torch.full((1, 4), math.log(0.5)))
+
+    # 4. Zero strength (-100.0)
+    bias_zero = encoder_helpers.build_context_attention_bias(
+        None, cond_tensor, image_strength=0.0, visual_ranges={"a": (2, 6)}
+    )
+    assert torch.allclose(bias_zero[:, 2:6], torch.full((1, 4), -100.0))
+
+
+def test_advanced_visual_conditioning_encode_image_strength_schema_and_metadata(monkeypatch):
+    schema = encoder_nodes.UC_AdvancedVisualConditioningEncode.define_schema()
+    inputs = {v.id: v for v in schema.inputs}
+    assert "image_strength" in inputs
+    assert inputs["image_strength"].default == 1.0
+    assert inputs["image_strength"].min == 0.0
+    assert inputs["image_strength"].max == 100.0
+
+    consensus_schema = encoder_nodes.UC_AdvancedVisConEncoder.define_schema()
+    consensus_inputs = {v.id: v for v in consensus_schema.inputs}
+    assert "image_strength" in consensus_inputs
+    assert consensus_inputs["image_strength"].default == 1.0
+
+    # Test execution with image_strength attaching context_attention_bias
+    monkeypatch.setattr(
+        encoder_nodes, "find_visual_token_range", lambda *_args, **_kwargs: (1, 4)
+    )
+
+    class _DummyClip:
+        def tokenize(self, text, **kwargs):
+            return {"qwen_vl": [[(1, None), (151655, None), (151655, None), (151655, None), (5, None)]]}
+
+        def encode_from_tokens_scheduled(self, tokens):
+            return [[torch.zeros(1, 5, 16), {}]]
+
+    clip = _DummyClip()
+    image = torch.ones(1, 64, 64, 3)
+
+    # image_strength=1.0: no context_attention_bias
+    out_neutral = encoder_nodes.UC_AdvancedVisualConditioningEncode.execute(
+        clip=clip,
+        prompt="photo <Picture 1>",
+        system_prompt="",
+        vlm_resolution=384,
+        image_inputs={"image1": image},
+        image_strength=1.0,
+    )
+    assert "context_attention_bias" not in out_neutral.args[0][0][1]
+
+    # image_strength=2.0: context_attention_bias present
+    out_boost = encoder_nodes.UC_AdvancedVisualConditioningEncode.execute(
+        clip=clip,
+        prompt="photo <Picture 1>",
+        system_prompt="",
+        vlm_resolution=384,
+        image_inputs={"image1": image},
+        image_strength=2.0,
+    )
+    cond = out_boost.args[0]
+    meta = cond[0][1]
+    assert "context_attention_bias" in meta
+    bias = meta["context_attention_bias"]
+    assert torch.is_tensor(bias)
+    assert bias.shape == (1, 5)
+
