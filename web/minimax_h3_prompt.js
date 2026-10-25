@@ -181,6 +181,14 @@ class H3CanvasPromptEditor {
     return w;
   }
 
+  stepperButtons(ctx, x, y, onPrev, onNext, tooltipPrev = "Previous option", tooltipNext = "Next option") {
+    const btnW = 18;
+    const btnH = 22;
+    this.button(ctx, x, y, btnW, btnH, "↑", onPrev, false, "center", false, false, tooltipPrev);
+    this.button(ctx, x + btnW + 2, y, btnW, btnH, "↓", onNext, false, "center", false, false, tooltipNext);
+    return btnW * 2 + 2;
+  }
+
   onPointerMove(event) {
     if (this.textEditor) {
       this.clearHoveredTooltip();
@@ -297,10 +305,22 @@ class H3CanvasPromptEditor {
       onSelect,
     };
 
-    this.menuOutsidePointer = () => {
-      if (this.activeMenu) {
-        this.closeMenu();
+    this.menuOutsidePointer = (event) => {
+      if (!this.activeMenu) return;
+      const canvas = app.canvas;
+      if (canvas?.canvas && this.node?.pos && this.menuBoundingBox) {
+        const bounds = canvas.canvas.getBoundingClientRect();
+        const scale = canvas.ds.scale;
+        const graphX = (event.clientX - bounds.left) / scale - canvas.ds.offset[0];
+        const graphY = (event.clientY - bounds.top) / scale - canvas.ds.offset[1];
+        const nx = graphX - this.node.pos[0];
+        const ny = graphY - this.node.pos[1];
+        if (this.contains(this.menuBoundingBox, nx, ny)) {
+          return;
+        }
       }
+      this.closeMenu();
+      this.menuDismissedAt = Date.now();
     };
     requestAnimationFrame(() => {
       document.addEventListener("pointerdown", this.menuOutsidePointer, true);
@@ -727,32 +747,35 @@ class H3CanvasPromptEditor {
           ctx.font = "11px sans-serif";
           const selW = Math.max(130, Math.ceil(ctx.measureText(selLabel).width) + 20);
 
+          const pics = this.state.definitions.filter(d => d.kind === "picture");
+          const vids = this.state.definitions.filter(d => d.kind === "video");
+          const modes = [{ hasRef: false, label: "Standalone (No Reference)" }];
+          pics.forEach(p => modes.push({ hasRef: true, refType: "picture", refIndex: p.id, label: `Reference <Picture ${p.id}>` }));
+          vids.forEach(v => modes.push({ hasRef: true, refType: "video", refIndex: v.id, label: `Reference <Video ${v.id}>` }));
+
+          let curModeIdx = 0;
+          if (item.hasRef) {
+            const fIdx = modes.findIndex(m => m.hasRef && m.refType === item.refType && m.refIndex === item.refIndex);
+            if (fIdx >= 0) curModeIdx = fIdx;
+          }
+
+          const applyModeIdx = (newIdx) => {
+            const m = modes[newIdx];
+            this.change(() => {
+              item.hasRef = m.hasRef;
+              if (m.hasRef) {
+                item.refType = m.refType;
+                item.refIndex = m.refIndex;
+              }
+            });
+          };
+
           this.button(ctx, left + 102, cardY + 7, selW, 22, selLabel, () => {
-            const menuOpts = [
-              {
-                label: "Standalone (No Reference)",
-                active: !item.hasRef,
-                action: () => this.change(() => { item.hasRef = false; }),
-              },
-            ];
-
-            const pics = this.state.definitions.filter(d => d.kind === "picture");
-            pics.forEach(p => {
-              menuOpts.push({
-                label: `Reference <Picture ${p.id}>`,
-                active: item.hasRef && item.refType === "picture" && item.refIndex === p.id,
-                action: () => this.change(() => { item.hasRef = true; item.refType = "picture"; item.refIndex = p.id; }),
-              });
-            });
-
-            const vids = this.state.definitions.filter(d => d.kind === "video");
-            vids.forEach(v => {
-              menuOpts.push({
-                label: `Reference <Video ${v.id}>`,
-                active: item.hasRef && item.refType === "video" && item.refIndex === v.id,
-                action: () => this.change(() => { item.hasRef = true; item.refType = "video"; item.refIndex = v.id; }),
-              });
-            });
+            const menuOpts = modes.map((m, mIdx) => ({
+              label: m.label,
+              active: curModeIdx === mIdx,
+              action: () => applyModeIdx(mIdx),
+            }));
 
             if (!pics.length && !vids.length) {
               menuOpts.push({
@@ -763,6 +786,12 @@ class H3CanvasPromptEditor {
 
             this.openMenu(left + 102, cardY + 31, selW + 30, menuOpts);
           }, item.hasRef, "center", item.hasRef, false, "Click to choose standalone mode or reference picture/video.");
+
+          this.stepperButtons(ctx, left + 102 + selW + 4, cardY + 7,
+            () => applyModeIdx((curModeIdx - 1 + modes.length) % modes.length),
+            () => applyModeIdx((curModeIdx + 1) % modes.length),
+            "Previous reference mode", "Next reference mode"
+          );
 
           // Row 2: Clean single non-overlapping label (at cardY + 38)
           const descLabel = item.hasRef
@@ -790,6 +819,9 @@ class H3CanvasPromptEditor {
           ctx.font = "11px sans-serif";
           const selW = Math.max(140, Math.ceil(ctx.measureText(curLabel).width) + 20);
 
+          const pRoles = ["first_frame", "final_frame", "storyboard", "custom"];
+          const curPIdx = Math.max(0, pRoles.indexOf(item.role || "first_frame"));
+
           this.button(ctx, left + 102, cardY + 7, selW, 22, curLabel, () => {
             this.openMenu(left + 102, cardY + 31, selW + 20, [
               { label: "First Frame (00.00s)", active: item.role === "first_frame", action: () => this.change(() => { item.role = "first_frame"; }) },
@@ -798,6 +830,12 @@ class H3CanvasPromptEditor {
               { label: "Custom Role Description", active: item.role === "custom", action: () => this.change(() => { item.role = "custom"; }) },
             ]);
           }, true, "center", false, false, "Click to select how this reference picture is used.");
+
+          this.stepperButtons(ctx, left + 102 + selW + 4, cardY + 7,
+            () => this.change(() => { item.role = pRoles[(curPIdx - 1 + pRoles.length) % pRoles.length]; }),
+            () => this.change(() => { item.role = pRoles[(curPIdx + 1) % pRoles.length]; }),
+            "Previous picture role", "Next picture role"
+          );
 
           if (item.role === "custom") {
             const editBoxH = 30;
@@ -826,6 +864,9 @@ class H3CanvasPromptEditor {
           ctx.font = "11px sans-serif";
           const selW = Math.max(140, Math.ceil(ctx.measureText(curVLabel).width) + 20);
 
+          const vRoles = ["edit", "continue", "structure", "custom"];
+          const curVIdx = Math.max(0, vRoles.indexOf(item.role || "edit"));
+
           this.button(ctx, left + 102, cardY + 7, selW, 22, curVLabel, () => {
             this.openMenu(left + 102, cardY + 31, selW + 20, [
               { label: "Edit Source (Video to modify)", active: item.role === "edit", action: () => this.change(() => { item.role = "edit"; }) },
@@ -834,6 +875,12 @@ class H3CanvasPromptEditor {
               { label: "Custom Role Description", active: item.role === "custom", action: () => this.change(() => { item.role = "custom"; }) },
             ]);
           }, true, "center", false, false, "Click to select how this reference video is used.");
+
+          this.stepperButtons(ctx, left + 102 + selW + 4, cardY + 7,
+            () => this.change(() => { item.role = vRoles[(curVIdx - 1 + vRoles.length) % vRoles.length]; }),
+            () => this.change(() => { item.role = vRoles[(curVIdx + 1) % vRoles.length]; }),
+            "Previous video role", "Next video role"
+          );
 
           if (item.role === "custom") {
             const editBoxH = 30;
@@ -862,6 +909,9 @@ class H3CanvasPromptEditor {
           ctx.font = "11px sans-serif";
           const selW = Math.max(130, Math.ceil(ctx.measureText(curALabel).width) + 20);
 
+          const aRoles = ["timbre", "full", "music", "custom"];
+          const curAIdx = Math.max(0, aRoles.indexOf(item.role || "timbre"));
+
           this.button(ctx, left + 102, cardY + 7, selW, 22, curALabel, () => {
             this.openMenu(left + 102, cardY + 31, selW + 20, [
               { label: "Voice Timbre (Character vocal sound)", active: item.role === "timbre", action: () => this.change(() => { item.role = "timbre"; }) },
@@ -871,6 +921,12 @@ class H3CanvasPromptEditor {
             ]);
           }, true, "center", false, false, "Click to select how this reference audio is used.");
 
+          const stepW = this.stepperButtons(ctx, left + 102 + selW + 4, cardY + 7,
+            () => this.change(() => { item.role = aRoles[(curAIdx - 1 + aRoles.length) % aRoles.length]; }),
+            () => this.change(() => { item.role = aRoles[(curAIdx + 1) % aRoles.length]; }),
+            "Previous audio role", "Next audio role"
+          );
+
           if (item.role === "timbre") {
             const subs = this.state.definitions.filter(d => d.kind === "subject");
             const hasSubs = subs.length > 0;
@@ -879,7 +935,7 @@ class H3CanvasPromptEditor {
               ? `Speaker: <Subj ${targetSub.id}> (S${targetSub.id}) ▾`
               : "Speaker: (None Defined) ▾";
             const spkW = Math.max(120, Math.ceil(ctx.measureText(spkLabel).width) + 18);
-            const spkX = left + 108 + selW;
+            const spkX = left + 102 + selW + 4 + stepW + 6;
 
             this.button(ctx, spkX, cardY + 7, spkW, 22, spkLabel, () => {
               const spkOpts = [];
@@ -899,6 +955,15 @@ class H3CanvasPromptEditor {
               }
               this.openMenu(spkX, cardY + 31, spkW + 20, spkOpts);
             }, false, "center", false, false, "Select which defined subject receives this voice timbre.");
+
+            if (hasSubs) {
+              const curSubIdx = Math.max(0, subs.findIndex(s => s.id === (item.targetSubject || targetSub.id)));
+              this.stepperButtons(ctx, spkX + spkW + 4, cardY + 7,
+                () => this.change(() => { item.targetSubject = subs[(curSubIdx - 1 + subs.length) % subs.length].id; }),
+                () => this.change(() => { item.targetSubject = subs[(curSubIdx + 1) % subs.length].id; }),
+                "Previous speaker subject", "Next speaker subject"
+              );
+            }
           }
 
           if (item.role === "custom") {
@@ -994,30 +1059,67 @@ class H3CanvasPromptEditor {
       this.text(ctx, "retention_analysis: (Format: <label>: <marker> - <descriptor>)", left, sy(cy + 10), "#93c5fd", "bold 12px sans-serif");
       cy += 24;
 
-      this.button(ctx, left, sy(cy), 170, 26, "+ Add Retention Label ▾", () => {
-        const existingLabels = new Set(this.state.retention.map(r => r.label));
-        const defs = this.state.definitions || [];
-        const availableOptions = [];
+      const existingLabels = new Set(this.state.retention.map(r => r.label));
+      const defs = this.state.definitions || [];
+      const untracked = [];
 
-        defs.forEach(d => {
-          let tag = "";
-          if (d.kind === "subject") tag = `<Subject ${d.id}>`;
-          else if (d.kind === "picture") tag = `<Picture ${d.id}>`;
-          else if (d.kind === "video") tag = `<Video ${d.id}>`;
-          else if (d.kind === "audio") tag = `<Audio ${d.id}>`;
+      defs.forEach(d => {
+        let tag = "";
+        if (d.kind === "subject") tag = `<Subject ${d.id}>`;
+        else if (d.kind === "picture") tag = `<Picture ${d.id}>`;
+        else if (d.kind === "video") tag = `<Video ${d.id}>`;
+        else if (d.kind === "audio") tag = `<Audio ${d.id}>`;
 
-          if (tag && !existingLabels.has(tag)) {
-            availableOptions.push({
-              label: `Track ${tag}`,
-              action: () => this.change(() => {
-                this.state.retention.push({
-                  label: tag,
-                  marker: d.kind === "audio" ? "reference" : "attribute_transfer",
-                  text: defaultRetentionText(tag, d.kind === "audio" ? "reference" : "attribute_transfer"),
-                });
-              }),
-            });
+        if (tag && !existingLabels.has(tag)) {
+          untracked.push({ tag, kind: d.kind });
+        }
+      });
+
+      if (!untracked.length) {
+        this.selectedRetentionCandidateIndex = 0;
+      } else if ((this.selectedRetentionCandidateIndex || 0) >= untracked.length) {
+        this.selectedRetentionCandidateIndex = 0;
+      }
+      const curCandIdx = Math.max(0, Math.min(Math.max(0, untracked.length - 1), this.selectedRetentionCandidateIndex || 0));
+      const curCand = untracked[curCandIdx] || null;
+
+      const addEntityToRetention = (entity) => {
+        if (!entity) return;
+        this.change(() => {
+          this.state.retention.push({
+            label: entity.tag,
+            marker: entity.kind === "audio" ? "reference" : "attribute_transfer",
+            text: defaultRetentionText(entity.tag, entity.kind === "audio" ? "reference" : "attribute_transfer"),
+          });
+          if (this.selectedRetentionCandidateIndex > 0) {
+            this.selectedRetentionCandidateIndex--;
           }
+        });
+      };
+
+      // [+ Add] direct action button
+      const hasCand = Boolean(curCand);
+      this.button(ctx, left, sy(cy), 54, 26, "+ Add", () => {
+        if (curCand) addEntityToRetention(curCand);
+      }, hasCand, "center", false, !hasCand, hasCand ? `Adds ${curCand.tag} to retention analysis.` : "No untracked definitions available to add.");
+
+      // Dropdown selector button for viewing/selecting options
+      const selCandLabel = curCand ? `${curCand.tag} ▾` : "Select Entity ▾";
+      ctx.font = "11px sans-serif";
+      const candSelW = Math.max(120, Math.ceil(ctx.measureText(selCandLabel).width) + 20);
+      const candX = left + 58;
+
+      this.button(ctx, candX, sy(cy), candSelW, 26, selCandLabel, () => {
+        const availableOptions = [];
+        untracked.forEach((u, uIdx) => {
+          availableOptions.push({
+            label: `Track ${u.tag}`,
+            active: curCandIdx === uIdx,
+            action: () => {
+              this.selectedRetentionCandidateIndex = uIdx;
+              addEntityToRetention(u);
+            },
+          });
         });
 
         if (!availableOptions.length) {
@@ -1027,10 +1129,27 @@ class H3CanvasPromptEditor {
           });
         }
 
-        this.openMenu(left, sy(cy) + 30, 200, availableOptions);
+        this.openMenu(candX, sy(cy) + 30, Math.max(candSelW + 30, 200), availableOptions);
       }, true, "center", false, false, "Select an existing defined entity to track retention/transfer.");
 
-      this.button(ctx, left + 178, sy(cy), 120, 26, "Clear All (T2V)", () => {
+      // Stepper buttons for cycling available candidates
+      let candStepW = 0;
+      if (untracked.length > 1) {
+        candStepW = this.stepperButtons(ctx, candX + candSelW + 4, sy(cy) + 2,
+          () => {
+            this.selectedRetentionCandidateIndex = (curCandIdx - 1 + untracked.length) % untracked.length;
+            app.canvas?.setDirty(true, true);
+          },
+          () => {
+            this.selectedRetentionCandidateIndex = (curCandIdx + 1) % untracked.length;
+            app.canvas?.setDirty(true, true);
+          },
+          "Previous available entity", "Next available entity"
+        );
+      }
+
+      const clearX = candX + candSelW + 4 + (candStepW ? candStepW + 8 : 4);
+      this.button(ctx, clearX, sy(cy), 110, 26, "Clear All (T2V)", () => {
         this.change(() => { this.state.retention = []; });
       }, false, "center", false, false, "Clears retention analysis (cleanly omitted when generating without references).");
       cy += 32;
@@ -1065,8 +1184,15 @@ class H3CanvasPromptEditor {
           this.openMenu(left + 104, cardY + 31, mw + 20, markerOpts);
         }, true, "center", false, false, "Click to choose retention marker.");
 
+        const curMIdx = Math.max(0, markers.indexOf(item.marker));
+        const mStepW = this.stepperButtons(ctx, left + 104 + mw + 4, cardY + 7,
+          () => this.change(() => { item.marker = markers[(curMIdx - 1 + markers.length) % markers.length]; }),
+          () => this.change(() => { item.marker = markers[(curMIdx + 1) % markers.length]; }),
+          "Previous retention marker", "Next retention marker"
+        );
+
         // Autofill default button
-        this.button(ctx, left + 110 + mw, cardY + 7, 70, 22, "Autofill", () => {
+        this.button(ctx, left + 104 + mw + 4 + mStepW + 6, cardY + 7, 70, 22, "Autofill", () => {
           this.change(() => {
             item.text = defaultRetentionText(item.label, item.marker);
           });
@@ -1368,6 +1494,10 @@ class H3CanvasPromptEditor {
   mouse(event, position) {
     if (event.button !== 0 || !/up$/.test(event.type)) return true;
     this.clearHoveredTooltip();
+
+    if (Date.now() - (this.menuDismissedAt || 0) < 150) {
+      return true;
+    }
 
     if (this.activeMenu) {
       const hitMenu = this.menuHitRegions.find(item => this.contains(item, position[0], position[1]));

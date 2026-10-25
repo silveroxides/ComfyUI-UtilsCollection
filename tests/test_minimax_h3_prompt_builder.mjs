@@ -172,11 +172,12 @@ test("single-line button edits use inline input overlay instead of non-existent 
   assert.ok(baseSource.includes("h3-base-prompt-singleline-container"));
 });
 
-test("dropdown menus attach document-level pointerdown listener for outside dismissal", () => {
+test("dropdown menus attach document-level pointerdown listener for outside dismissal and steppers exist", () => {
   const dynamicSource = readFileSync(new URL("../web/minimax_h3_prompt.js", import.meta.url), "utf8");
-  assert.ok(dynamicSource.includes("this.menuOutsidePointer = () =>"));
+  assert.ok(dynamicSource.includes("this.menuOutsidePointer = (event) =>") || dynamicSource.includes("this.menuOutsidePointer = () =>"));
   assert.ok(dynamicSource.includes("document.addEventListener(\"pointerdown\", this.menuOutsidePointer, true)"));
   assert.ok(dynamicSource.includes("document.removeEventListener(\"pointerdown\", this.menuOutsidePointer, true)"));
+  assert.ok(dynamicSource.includes("stepperButtons(ctx,"));
 });
 
 test("timeline segment cards compute dynamic height avoiding hardcoded vertical overlap", () => {
