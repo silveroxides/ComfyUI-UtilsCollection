@@ -45,6 +45,7 @@ Native inference uses ComfyUI model management and attention, UEL safetensors lo
 - `UC_MiniMaxH3BasePromptBuilder`
 - `UC_MiniMaxH3DynamicPromptBuilder`
 - `UC_MiniMaxH3VLMGuide`
+- `UC_MiniMaxH3VLMFrameGuide`
 - `UC_MiniMaxH3MediaConfig`
 - `UC_MiniMaxH3RefExtract`
 - `UC_MiniMaxH3AudioRefExtract`
@@ -71,7 +72,7 @@ All four H3 image-to-video encoders preserve joint Qwen encoding regardless of e
 
 The temporal encoders fuse offset video samples into the ordinary video token budget. Set temporal density and consensus/spatial method on `UC_MiniMaxH3MediaConfig`; density 1 preserves ordinary sampling. Consensus uses `UC_TextConsensusBlendConfig`, spatial fusion uses `UC_VisualFusionConfig`.
 
-`UC_MiniMaxH3VLMGuide` inserts an independently encoded timestamp/image block before the prompt in compatible H3 conditioning. Chained guides retain insertion order. This experiment does not re-encode the original prompt jointly with the guide.
+`UC_MiniMaxH3VLMGuide` inserts an independently encoded timestamp/image block before the prompt in compatible H3 conditioning. `UC_MiniMaxH3VLMFrameGuide` is its frame-indexed child node using zero-based indexing (0 is first frame, 1 is second frame, -1 is last frame) at 24 fps, accepting an optional AV latent to resolve negative frame indices when conditioning lacks frame-count metadata. Chained guides retain insertion order. This experiment does not re-encode the original prompt jointly with the guide.
 
 `UC_MiniMaxH3FirstFrameReferences`, `UC_AdvancedMiniMaxH3ImageToVideoCombined`, and `UC_AdvMiniMaxH3ImageToVideoCombinedTokenFusion` were removed. Workflows using these IDs report missing nodes; no aliases or migration are provided.
 

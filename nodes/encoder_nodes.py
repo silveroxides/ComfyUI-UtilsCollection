@@ -55,6 +55,7 @@ from ..helpers.encoder_helpers import(
     execute_advanced_visual_consensus,
     execute_advanced_minimax_h3_image_to_video,
     execute_minimax_h3_vlm_guide,
+    execute_minimax_h3_vlm_frame_guide,
     build_minimax_h3_media_config,
     MINIMAX_H3_MEDIA_STRUCTURE,
     MINIMAX_H3_VIDEO_LATENT_MODES,
@@ -3803,6 +3804,66 @@ class UC_MiniMaxH3VLMGuide(io.ComfyNode):
     @classmethod
     def execute(cls, conditioning, clip, image, timestamp, vlm_resolution=384, enable_caching="all"):
         return io.NodeOutput(execute_minimax_h3_vlm_guide(conditioning, clip, image, timestamp, vlm_resolution, enable_caching=enable_caching))
+
+
+class UC_MiniMaxH3VLMFrameGuide(UC_MiniMaxH3VLMGuide):
+    @classmethod
+    def define_schema(cls):
+        schema = super().define_schema()
+        schema.node_id = "UC_MiniMaxH3VLMFrameGuide"
+        schema.display_name = "MiniMax H3 VLM Frame Guide"
+        schema.description = "Experimentally inserts independently encoded frame-indexed image conditioning before an H3 prompt."
+        new_inputs = []
+        for inp in schema.inputs:
+            if inp.id == "timestamp":
+                new_inputs.append(
+                    io.Int.Input(
+                        "frame_index",
+                        default=0,
+                        min=-9999,
+                        max=9999,
+                        step=1,
+                        tooltip="Guide target frame index (0 is first frame, 1 is second frame, -1 is last frame). Negative values count backward from the end.",
+                    )
+                )
+                new_inputs.append(
+                    io.Latent.Input(
+                        "latent",
+                        optional=True,
+                        tooltip="Optional MiniMax H3 AV latent to resolve negative frame indices when conditioning lacks frame count metadata.",
+                    )
+                )
+            else:
+                new_inputs.append(inp)
+        schema.inputs = new_inputs
+        for inp in schema.inputs:
+            if inp.id == "conditioning":
+                inp.tooltip = "MiniMax H3 conditioning to insert the guide into."
+            elif inp.id == "clip":
+                inp.tooltip = "MiniMax H3 Qwen3-VL 32B text encoder."
+            elif inp.id == "image":
+                inp.tooltip = "Guide image to encode and insert before the prompt."
+            elif inp.id == "vlm_resolution":
+                inp.tooltip = "Equivalent-square Qwen target from 256 to 4096. Values outside that range preserve original resolution."
+            elif inp.id == "enable_caching":
+                inp.tooltip = "Disk caching for this independently encoded image Guide. Images only/all cache its final guide section; video only does not."
+        for out in schema.outputs:
+            out.tooltip = "Conditioning with the VLM frame guide inserted before the prompt."
+        return schema
+
+    @classmethod
+    def execute(cls, conditioning, clip, image, frame_index, latent=None, vlm_resolution=384, enable_caching="all"):
+        return io.NodeOutput(
+            execute_minimax_h3_vlm_frame_guide(
+                conditioning,
+                clip,
+                image,
+                frame_index,
+                latent=latent,
+                vlm_resolution=vlm_resolution,
+                enable_caching=enable_caching,
+            )
+        )
 
 
 class UC_AdvancedMiniMaxH3ImageToVideo(io.ComfyNode):

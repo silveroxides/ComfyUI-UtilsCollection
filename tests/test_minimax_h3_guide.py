@@ -185,3 +185,67 @@ def test_layout_construction_is_scalar_only_and_does_not_change_inputs():
     assert all(type(value) is int for value in layout.values())
     assert cond.tolist() == [[[1.0], [2.0]]]
     assert tags.tolist() == [0, 1]
+
+
+def test_frame_index_resolution_zero_and_positive():
+    from utils_collection_h3_guide_test.helpers.encoder_helpers import resolve_minimax_h3_frame_index
+    assert resolve_minimax_h3_frame_index(0) == 0.0
+    assert resolve_minimax_h3_frame_index(1) == pytest.approx(1.0 / 24.0)
+    assert resolve_minimax_h3_frame_index(24) == 1.0
+
+
+def test_frame_index_resolution_negative_with_conditioning_metadata():
+    from utils_collection_h3_guide_test.helpers.encoder_helpers import resolve_minimax_h3_frame_index
+    cond = [[torch.zeros(1, 1, 1), {"minimax_frame_count": 124}]]
+    assert resolve_minimax_h3_frame_index(0, conditioning=cond) == 0.0
+    assert resolve_minimax_h3_frame_index(1, conditioning=cond) == pytest.approx(1.0 / 24.0)
+    assert resolve_minimax_h3_frame_index(-1, conditioning=cond) == pytest.approx(123.0 / 24.0)
+    assert resolve_minimax_h3_frame_index(-124, conditioning=cond) == 0.0
+
+
+def test_frame_index_resolution_negative_with_latent():
+    from utils_collection_h3_guide_test.helpers.encoder_helpers import resolve_minimax_h3_frame_index
+    # 7 latent steps correspond to 22 frames in MiniMax H3
+    samples = torch.zeros(1, 24, 7, 4, 4)
+    latent = {"samples": type("NestedStub", (), {"is_nested": True, "tensors": (samples, torch.zeros(1, 32, 2, 4))})()}
+    assert resolve_minimax_h3_frame_index(-1, latent=latent) == pytest.approx(21.0 / 24.0)
+    assert resolve_minimax_h3_frame_index(0, latent=latent) == 0.0
+
+
+@pytest.mark.parametrize("bad_index", [0.5, "0", True, False, None])
+def test_frame_index_invalid_type_rejected(bad_index):
+    from utils_collection_h3_guide_test.helpers.encoder_helpers import resolve_minimax_h3_frame_index
+    with pytest.raises(ValueError, match="integer"):
+        resolve_minimax_h3_frame_index(bad_index)
+
+
+def test_frame_index_negative_without_count_fails():
+    from utils_collection_h3_guide_test.helpers.encoder_helpers import resolve_minimax_h3_frame_index
+    with pytest.raises(ValueError, match="requires video frame count"):
+        resolve_minimax_h3_frame_index(-1)
+
+
+def test_frame_index_out_of_bounds_fails():
+    from utils_collection_h3_guide_test.helpers.encoder_helpers import resolve_minimax_h3_frame_index
+    cond = [[torch.zeros(1, 1, 1), {"minimax_frame_count": 10}]]
+    with pytest.raises(ValueError, match="outside"):
+        resolve_minimax_h3_frame_index(10, conditioning=cond)
+    with pytest.raises(ValueError, match="outside"):
+        resolve_minimax_h3_frame_index(-11, conditioning=cond)
+
+
+def test_minimax_h3_vlm_frame_guide_subclass_and_schema():
+    from utils_collection_h3_guide_test.nodes.encoder_nodes import (
+        UC_MiniMaxH3VLMGuide,
+        UC_MiniMaxH3VLMFrameGuide,
+    )
+    assert issubclass(UC_MiniMaxH3VLMFrameGuide, UC_MiniMaxH3VLMGuide)
+    schema = UC_MiniMaxH3VLMFrameGuide.define_schema()
+    input_ids = [inp.id for inp in schema.inputs]
+    assert "frame_index" in input_ids
+    assert "timestamp" not in input_ids
+    assert "latent" in input_ids
+    assert schema.node_id == "UC_MiniMaxH3VLMFrameGuide"
+    assert all(inp.tooltip for inp in schema.inputs)
+    assert all(out.tooltip for out in schema.outputs)
+

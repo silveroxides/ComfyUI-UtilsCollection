@@ -52,6 +52,7 @@ class SamplingUtils(ComfyExtension):
             UC_MiniMaxH3MediaConfig,
             UC_MiniMaxH3ReferenceMedia,
             UC_MiniMaxH3VLMGuide,
+            UC_MiniMaxH3VLMFrameGuide,
             UC_MiniMaxH3RefExtract,
             UC_MiniMaxH3AudioRefExtract,
             UC_MiniMaxH3RefLoad,

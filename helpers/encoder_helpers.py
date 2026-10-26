@@ -3800,6 +3800,61 @@ def execute_minimax_h3_vlm_guide(conditioning, clip, image, timestamp, vlm_resol
     return splice_conditioning(conditioning, guide)
 
 
+def resolve_minimax_h3_frame_index(
+    frame_index: int,
+    conditioning=None,
+    latent=None,
+    fps: float = 24.0,
+) -> float:
+    """Resolve a zero-based frame index (0 is first, 1 is second, -1 is last) to timestamp seconds."""
+    if isinstance(frame_index, bool) or not isinstance(frame_index, numbers.Integral):
+        raise ValueError("MiniMax H3 frame index must be an integer.")
+    frame_index = int(frame_index)
+
+    frame_count = None
+    if latent is not None:
+        from .model_helpers import h3_video_from_latent, h3_pixel_frames_for_latent_steps
+        video = h3_video_from_latent(latent)
+        frame_count = h3_pixel_frames_for_latent_steps(video.shape[2])
+    elif (
+        isinstance(conditioning, (tuple, list))
+        and conditioning
+        and isinstance(conditioning[0], (tuple, list))
+        and len(conditioning[0]) > 1
+        and isinstance(conditioning[0][1], dict)
+    ):
+        frame_count = conditioning[0][1].get("minimax_frame_count")
+
+    if frame_index < 0:
+        if frame_count is None:
+            raise ValueError(
+                f"Negative frame index ({frame_index}) requires video frame count; "
+                "connect latent or use conditioning with minimax_frame_count metadata."
+            )
+        resolved_frame = frame_count + frame_index
+        if resolved_frame < 0:
+            raise ValueError(
+                f"Negative frame index ({frame_index}) is outside the video's {frame_count} frames."
+            )
+    else:
+        resolved_frame = frame_index
+        if frame_count is not None and resolved_frame >= frame_count:
+            raise ValueError(
+                f"Frame index ({frame_index}) is outside the video's {frame_count} frames."
+            )
+
+    return float(resolved_frame) / float(fps)
+
+
+def execute_minimax_h3_vlm_frame_guide(
+    conditioning, clip, image, frame_index, latent=None, vlm_resolution=384, cache=None, enable_caching="all"
+):
+    timestamp = resolve_minimax_h3_frame_index(frame_index, conditioning=conditioning, latent=latent)
+    return execute_minimax_h3_vlm_guide(
+        conditioning, clip, image, timestamp, vlm_resolution=vlm_resolution, cache=cache, enable_caching=enable_caching
+    )
+
+
 def _encode_minimax_h3_image_guide(clip, image, timestamp, vlm_resolution, cache):
     prepared = prepare_vlm_image(image, vlm_resolution)
     entries = _minimax_h3_text_entries(clip, f"<{timestamp:.1f} seconds>")
