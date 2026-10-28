@@ -18,6 +18,7 @@ from typing import Any
 
 import torch
 import torch.nn.functional as F
+from einops import rearrange
 
 try:
     import triton
@@ -72,6 +73,17 @@ KREA2_NAG_STATE_KEY = "utilscollection_krea2_nag_state"
 KREA2_NAG_NEG_CONTEXT_KEY = "utilscollection_krea2_nag_neg_context"
 KREA2_NAG_CFG_SCALE_KEY = "utilscollection_krea2_nag_cfg_scale"
 KREA2_NAG_ATTN_STEP_KEY = "utilscollection_krea2_nag_attn_step"
+KREA2_EDIT_OWNER_KEY = "utilscollection_krea2_edit"
+KREA2_EDIT_OUTER_SAMPLE_WRAPPER_KEY = "utilscollection_krea2_edit_outer_sample"
+KREA2_EDIT_ROPE_POSITIONS = (
+    "aligned (trained)",
+    "beside (right of target)",
+    "bag of features",
+)
+KREA2_EDIT_BOOST_MODES = (
+    "Fast / Key Scaling (FlashAttention)",
+    "Exact / Logit Bias",
+)
 MOSS_IMAGE_EDIT_DIFFUSION_WRAPPER_KEY = "utilscollection_moss_image_edit_diffusion"
 MOSS_IMAGE_EDIT_OUTER_SAMPLE_WRAPPER_KEY = "utilscollection_moss_image_edit_outer_sample"
 MOSS_IMAGE_EDIT_ROPE_MODES = ("spatial_aligned", "reference_axis")
@@ -3940,4 +3952,318 @@ def patch_moss_image_edit_model(
         ),
     )
     return patched
+
+
+class Krea2CachedTextFusion(torch.nn.Module):
+    def __init__(self, original_txtfusion: Any) -> None:
+        super().__init__()
+        self.original = original_txtfusion
+        self.cache: torch.Tensor | None = None
+        self.cache_key: tuple[Any, ...] | None = None
+
+    def reset(self) -> None:
+        self.cache = None
+        self.cache_key = None
+
+    def forward(
+        self,
+        x: torch.Tensor,
+        mask: Any = None,
+        transformer_options: dict[str, Any] = {},
+    ) -> torch.Tensor:
+        cache_key = (x.data_ptr(), x.shape, x.device)
+        if self.cache is None or self.cache_key != cache_key:
+            self.cache = self.original(x, mask=mask, transformer_options=transformer_options)
+            self.cache_key = cache_key
+        return self.cache
+
+
+class Krea2EditExecutionState:
+    def __init__(
+        self,
+        ref_position: str = "aligned (trained)",
+        ref_position_a: str = "aligned (trained)",
+        ref_boost: float = 1.0,
+        ref_boost_a: float = 1.0,
+        boost_mode: str = "Fast / Key Scaling (FlashAttention)",
+        cached_txtfusion: Krea2CachedTextFusion | None = None,
+    ) -> None:
+        self.ref_position = ref_position
+        self.ref_position_a = ref_position_a
+        self.ref_boost = ref_boost
+        self.ref_boost_a = ref_boost_a
+        self.boost_mode = boost_mode
+        self.cached_txtfusion = cached_txtfusion
+        self.target_hw: tuple[int, int] | None = None
+        self.ref_widths: dict[int, int] = {}
+        self.cached_bias: torch.Tensor | None = None
+        self.cached_bias_key: tuple[Any, ...] | None = None
+
+    def reset_step_state(self) -> None:
+        self.target_hw = None
+        self.ref_widths.clear()
+
+    def reset_all(self) -> None:
+        self.reset_step_state()
+        self.cached_bias = None
+        self.cached_bias_key = None
+        if self.cached_txtfusion is not None:
+            self.cached_txtfusion.reset()
+
+
+def _make_krea2_edit_process_img(
+    original_process_img: Callable[..., tuple[torch.Tensor, torch.Tensor, int, int]],
+    exec_state: Krea2EditExecutionState,
+    total_refs: int,
+):
+    def process_img(self, x: torch.Tensor, index: int = 0):
+        img, img_ids, h, w = original_process_img(x, index=index)
+        if index == 0:
+            exec_state.target_hw = (h, w)
+            return img, img_ids, h, w
+
+        exec_state.ref_widths[index] = w
+        target_hw = exec_state.target_hw
+        if target_hw is not None:
+            target_h, target_w = target_hw
+            mode = exec_state.ref_position if index == total_refs else exec_state.ref_position_a
+            if mode == "beside (right of target)":
+                prior_offset = sum(
+                    exec_state.ref_widths.get(i, 0) for i in range(1, index)
+                )
+                img_ids[..., 2] += float(target_w + prior_offset)
+            elif mode == "bag of features":
+                img_ids[..., 1] = float(target_h - 1) / 2.0
+                img_ids[..., 2] = float(target_w - 1) / 2.0
+        return img, img_ids, h, w
+
+    return process_img
+
+
+def _make_krea2_edit_attn_forward(
+    original_attn_forward: Callable[..., torch.Tensor],
+    exec_state: Krea2EditExecutionState,
+    total_refs: int,
+):
+    def forward(
+        self,
+        x: torch.Tensor,
+        freqs: Any = None,
+        mask: Any = None,
+        transformer_options: dict[str, Any] = {},
+    ) -> torch.Tensor:
+        ref_tokens = transformer_options.get("reference_image_num_tokens")
+        if not ref_tokens or (exec_state.ref_boost == 1.0 and exec_state.ref_boost_a == 1.0):
+            return original_attn_forward(x, freqs=freqs, mask=mask, transformer_options=transformer_options)
+
+        img_slice = transformer_options.get("img_slice")
+        txtlen = img_slice[0] if img_slice else 0
+        total_ref = sum(ref_tokens)
+        target_tokens = (x.shape[1] - txtlen) - total_ref
+        target_start = txtlen
+        target_end = txtlen + target_tokens
+
+        slices = []
+        curr = target_end
+        for count in ref_tokens:
+            slices.append((curr, curr + count))
+            curr += count
+
+        boosts = [exec_state.ref_boost_a] * (len(slices) - 1) + [exec_state.ref_boost]
+
+        if exec_state.boost_mode == "Fast / Key Scaling (FlashAttention)":
+            transformer_patches = transformer_options.get("patches", {})
+            extra_options = transformer_options.copy()
+            q, k, v, gate = self.wq(x), self.wk(x), self.wv(x), self.gate(x)
+            q = rearrange(q, "B L (H D) -> B H L D", H=self.heads)
+            k = rearrange(k, "B L (H D) -> B H L D", H=self.kvheads)
+            v = rearrange(v, "B L (H D) -> B H L D", H=self.kvheads)
+            q, k = self.qknorm(q, k)
+
+            if "block_index" in transformer_options and "attn1_patch" in transformer_patches:
+                for p in transformer_patches["attn1_patch"]:
+                    out = p(q, k, v, pe=freqs, attn_mask=mask, extra_options=extra_options)
+                    q, k, v = out.get("q", q), out.get("k", k), out.get("v", v)
+                    freqs, mask = out.get("pe", freqs), out.get("attn_mask", mask)
+
+            k = k.clone()
+            for (r_start, r_end), b in zip(slices, boosts):
+                if b != 1.0 and b > 0.0:
+                    k[:, :, r_start:r_end, :] *= math.sqrt(b)
+
+            if freqs is not None:
+                q, k = apply_rope(q, k, freqs)
+            if self.kvheads != self.heads:
+                rep = self.heads // self.kvheads
+                k = k.repeat_interleave(rep, dim=1)
+                v = v.repeat_interleave(rep, dim=1)
+
+            q_c = comfy.ldm.modules.attention.AttentionTensorContainer(q)
+            k_c = comfy.ldm.modules.attention.AttentionTensorContainer(k)
+            v_c = comfy.ldm.modules.attention.AttentionTensorContainer(v)
+            out = comfy.ldm.modules.attention.optimized_attention_masked(
+                q_c, k_c, v_c, self.heads, mask=mask, skip_reshape=True,
+                preferred_attention=self.comfy_attention, transformer_options=transformer_options,
+            )
+            if "block_index" in transformer_options and "attn1_output_patch" in transformer_patches:
+                for p in transformer_patches["attn1_output_patch"]:
+                    out = p(out, extra_options)
+            return self.wo(out * F.sigmoid(gate))
+
+        else:
+            L = x.shape[1]
+            bias_key = (L, x.device, x.dtype, exec_state.ref_boost, exec_state.ref_boost_a)
+            if exec_state.cached_bias is None or exec_state.cached_bias_key != bias_key:
+                bias = torch.zeros(1, 1, L, L, device=x.device, dtype=x.dtype)
+                for (r_start, r_end), b in zip(slices, boosts):
+                    if b != 1.0:
+                        bias[:, :, target_start:target_end, r_start:r_end] = math.log(max(b, 1e-4))
+                exec_state.cached_bias = bias
+                exec_state.cached_bias_key = bias_key
+            effective_mask = exec_state.cached_bias if mask is None else (mask + exec_state.cached_bias)
+            return original_attn_forward(x, freqs=freqs, mask=effective_mask, transformer_options=transformer_options)
+
+    return forward
+
+
+class Krea2EditSamplingScope:
+    def __init__(self, exec_state: Krea2EditExecutionState) -> None:
+        self.exec_state = exec_state
+
+    def __call__(self, sample_fn: Callable[..., Any], *args: Any, **kwargs: Any) -> Any:
+        self.exec_state.reset_all()
+        try:
+            return sample_fn(*args, **kwargs)
+        finally:
+            self.exec_state.reset_all()
+
+
+def patch_krea2_edit_model(
+    model: Any,
+    reference_latent: dict[str, Any] | torch.Tensor | None = None,
+    reference_latent_b: dict[str, Any] | torch.Tensor | None = None,
+    source_image: torch.Tensor | None = None,
+    source_image_b: torch.Tensor | None = None,
+    vae: Any = None,
+    ref_boost: float = 1.0,
+    ref_boost_a: float = 1.0,
+    boost_mode: str = "Fast / Key Scaling (FlashAttention)",
+    ref_position: str = "aligned (trained)",
+    ref_position_a: str = "aligned (trained)",
+    fit_mode: str = "fit",
+    target_width: int = 1024,
+    target_height: int = 1024,
+    cache_text_fusion: bool = True,
+    **kwargs: Any,
+) -> Any:
+    diffusion_model = model.get_model_object("diffusion_model")
+    if not isinstance(diffusion_model, krea2_model.SingleStreamDiT):
+        raise ValueError("Krea2 Edit Patcher requires a Krea2 SingleStreamDiT diffusion model.")
+
+    ref_boost = float(ref_boost)
+    ref_boost_a = float(ref_boost_a)
+    if ref_boost < 0.0 or ref_boost_a < 0.0:
+        raise ValueError("Reference boost factors must be non-negative.")
+    if boost_mode not in KREA2_EDIT_BOOST_MODES:
+        raise ValueError(f"Unsupported boost_mode: {boost_mode}")
+    if ref_position not in KREA2_EDIT_ROPE_POSITIONS:
+        raise ValueError(f"Unsupported ref_position: {ref_position}")
+    if ref_position_a not in KREA2_EDIT_ROPE_POSITIONS:
+        raise ValueError(f"Unsupported ref_position_a: {ref_position_a}")
+    if fit_mode not in ("fit", "crop"):
+        raise ValueError(f"Unsupported fit_mode: {fit_mode}")
+    if target_width < 64 or target_height < 64:
+        raise ValueError("Target dimensions must be at least 64 pixels.")
+
+    base_model = getattr(model, "model", None)
+    process_in = getattr(base_model, "process_latent_in", None)
+    node_ref_latents: list[torch.Tensor] = []
+
+    from .encoder_helpers import prepare_krea2_edit_reference_latent
+
+    # Primary reference (image or latent)
+    if source_image is not None and vae is not None:
+        ref_lat = prepare_krea2_edit_reference_latent(source_image, vae, target_width, target_height, fit_mode)
+        processed = process_in(ref_lat) if callable(process_in) else ref_lat
+        node_ref_latents.append(processed.detach().clone())
+    elif reference_latent is not None:
+        samples = reference_latent.get("samples") if isinstance(reference_latent, dict) else reference_latent
+        if torch.is_tensor(samples):
+            processed = process_in(samples) if callable(process_in) else samples
+            node_ref_latents.append(processed.detach().clone())
+
+    # Secondary reference (image_b or latent_b)
+    if source_image_b is not None and vae is not None:
+        ref_lat_b = prepare_krea2_edit_reference_latent(source_image_b, vae, target_width, target_height, fit_mode)
+        processed_b = process_in(ref_lat_b) if callable(process_in) else ref_lat_b
+        node_ref_latents.append(processed_b.detach().clone())
+    elif reference_latent_b is not None:
+        samples_b = reference_latent_b.get("samples") if isinstance(reference_latent_b, dict) else reference_latent_b
+        if torch.is_tensor(samples_b):
+            processed_b = process_in(samples_b) if callable(process_in) else samples_b
+            node_ref_latents.append(processed_b.detach().clone())
+
+    patched = model.clone()
+
+    if base_model is not None and hasattr(base_model, "extra_conds") and hasattr(patched, "add_object_patch"):
+        orig_extra_conds = base_model.extra_conds
+
+        def _krea2_edit_extra_conds(self, **extra_kwargs):
+            out = orig_extra_conds(**extra_kwargs)
+            existing = extra_kwargs.get("reference_latents", None) or []
+            proc = getattr(self, "process_latent_in", None)
+            all_refs = list(node_ref_latents) + [
+                proc(lat) if callable(proc) else lat
+                for lat in existing
+                if torch.is_tensor(lat)
+            ]
+            if all_refs and comfy is not None and hasattr(comfy, "conds"):
+                out["ref_latents"] = comfy.conds.CONDList(all_refs)
+                out["ref_latents_method"] = comfy.conds.CONDConstant("index_timestep_zero")
+            return out
+
+        patched.add_object_patch("extra_conds", types.MethodType(_krea2_edit_extra_conds, base_model))
+
+    total_refs = len(node_ref_latents) or 1
+    cached_txtfusion = Krea2CachedTextFusion(diffusion_model.txtfusion) if (cache_text_fusion and hasattr(diffusion_model, "txtfusion")) else None
+    exec_state = Krea2EditExecutionState(
+        ref_position=ref_position,
+        ref_position_a=ref_position_a,
+        ref_boost=ref_boost,
+        ref_boost_a=ref_boost_a,
+        boost_mode=boost_mode,
+        cached_txtfusion=cached_txtfusion,
+    )
+
+    if hasattr(diffusion_model, "process_img"):
+        patched_process_img = types.MethodType(
+            _make_krea2_edit_process_img(diffusion_model.process_img, exec_state, total_refs),
+            diffusion_model,
+        )
+        patched.add_object_patch("diffusion_model.process_img", patched_process_img)
+
+    if cached_txtfusion is not None:
+        patched.add_object_patch("diffusion_model.txtfusion", cached_txtfusion)
+
+    if hasattr(diffusion_model, "blocks"):
+        for index, block in enumerate(diffusion_model.blocks):
+            patched_attn = types.MethodType(
+                _make_krea2_edit_attn_forward(block.attn.forward, exec_state, total_refs),
+                block.attn,
+            )
+            patched.add_object_patch(f"diffusion_model.blocks.{index}.attn.forward", patched_attn)
+
+    if hasattr(patched, "remove_wrappers_with_key"):
+        patched.remove_wrappers_with_key(
+            comfy.patcher_extension.WrappersMP.OUTER_SAMPLE,
+            KREA2_EDIT_OUTER_SAMPLE_WRAPPER_KEY,
+        )
+    patched.add_wrapper_with_key(
+        comfy.patcher_extension.WrappersMP.OUTER_SAMPLE,
+        KREA2_EDIT_OUTER_SAMPLE_WRAPPER_KEY,
+        Krea2EditSamplingScope(exec_state),
+    )
+    patched.model_options[KREA2_EDIT_OWNER_KEY] = True
+    return patched
+
 

@@ -5024,3 +5024,54 @@ def krea2_attn_forward_weight(self, x, freqs=None, mask=None, transformer_option
             mask = additive_mask + bias.to(device=mask.device, dtype=q.dtype)
     out = optimized_attention(q, k, v, self.heads, mask=mask, skip_reshape=True, transformer_options=transformer_options)
     return self.wo(out * torch.sigmoid(gate))
+
+
+def prepare_krea2_edit_reference_latent(
+    image: torch.Tensor,
+    vae,
+    target_width: int,
+    target_height: int,
+    fit_mode: str = "fit",
+) -> torch.Tensor:
+    """Pre-sample pixel fitting and VAE encoding for Krea2 reference images.
+
+    Pre-fits source image to target canvas in pixel space before VAE encoding.
+    Running at node execution time prevents mid-sampler VAE execution and DiT
+    VRAM eviction.
+    """
+    if not torch.is_tensor(image) or image.ndim != 4:
+        raise ValueError("Source image must be a 4D BHWC tensor.")
+    if vae is None:
+        raise ValueError("VAE is required to encode source image to latent.")
+
+    px_h = int(target_height)
+    px_w = int(target_width)
+    img = image.movedim(-1, 1)  # B,H,W,C -> B,C,H,W
+    ih, iw = img.shape[-2:]
+
+    if fit_mode == "fit":
+        sc = min(px_h / ih, px_w / iw)
+        crop_tol = 0.08
+        if ih * sc >= px_h * (1 - crop_tol) and iw * sc >= px_w * (1 - crop_tol):
+            s = max(px_h / ih, px_w / iw)
+            ch, cw = min(ih, int(round(px_h / s))), min(iw, int(round(px_w / s)))
+            y0, x0 = (ih - ch) // 2, (iw - cw) // 2
+            img = img[..., y0 : y0 + ch, x0 : x0 + cw]
+            nh, nw = px_h, px_w
+        else:
+            nh = min(max(16, int(ih * sc) // 16 * 16), max(16, px_h // 16 * 16))
+            nw = min(max(16, int(iw * sc) // 16 * 16), max(16, px_w // 16 * 16))
+            ch2 = min(ih, max(1, int(round(nh / sc))))
+            cw2 = min(iw, max(1, int(round(nw / sc))))
+            y0, x0 = (ih - ch2) // 2, (iw - cw2) // 2
+            img = img[..., y0 : y0 + ch2, x0 : x0 + cw2]
+        img = F.interpolate(img.float(), size=(nh, nw), mode="bicubic", antialias=True)
+        return vae.encode(img.movedim(1, -1)[..., :3].clamp(0, 1))
+
+    s = max(px_h / ih, px_w / iw)
+    ch, cw = min(ih, int(round(px_h / s))), min(iw, int(round(px_w / s)))
+    y0, x0 = (ih - ch) // 2, (iw - cw) // 2
+    img = img[..., y0 : y0 + ch, x0 : x0 + cw]
+    img = F.interpolate(img.float(), size=(px_h, px_w), mode="bicubic", antialias=True)
+    return vae.encode(img.movedim(1, -1)[..., :3].clamp(0, 1))
+

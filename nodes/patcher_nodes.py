@@ -19,6 +19,9 @@ from ..helpers.patcher_helpers import (
     patch_minimax_h3_diffusion_cache_model,
     MOSS_IMAGE_EDIT_PRESETS,
     patch_moss_image_edit_model,
+    KREA2_EDIT_BOOST_MODES,
+    KREA2_EDIT_ROPE_POSITIONS,
+    patch_krea2_edit_model,
 )
 
 
@@ -747,4 +750,78 @@ class UC_MOSSImageEditPatcher(io.ComfyNode):
                 **kwargs,
             )
         )
+
+
+class UC_Krea2EditPatcher(io.ComfyNode):
+    @classmethod
+    def define_schema(cls) -> io.Schema:
+        return io.Schema(
+            node_id="UC_Krea2EditPatcher",
+            display_name="Krea2 Edit Patcher",
+            category="advanced/model/patches",
+            description="Configures a Krea2 diffusion model for reference-guided image editing, character transfer, and scene composition using clean ModelPatcher object patches and comfy-kitchen kernel integration.",
+            inputs=[
+                io.Model.Input("model", tooltip="Krea2 model to configure for reference-guided editing. Connect the output to your sampler."),
+                io.Latent.Input("reference_latent", optional=True, tooltip="Optional primary reference latent (subject or scene image)."),
+                io.Latent.Input("reference_latent_b", optional=True, tooltip="Optional secondary reference latent (subject photo in two-image composition)."),
+                io.Image.Input("source_image", optional=True, tooltip="Optional primary source image (pre-encoded at node execution time when VAE is connected, avoiding mid-sampling VRAM eviction)."),
+                io.Image.Input("source_image_b", optional=True, tooltip="Optional secondary source image."),
+                io.Vae.Input("vae", optional=True, tooltip="Optional VAE for pre-encoding source images cleanly before sampling begins."),
+                io.Float.Input("ref_boost", default=1.0, min=0.0, max=20.0, step=0.05, tooltip="Reference attention fidelity dial for the primary/subject reference (1.0 = standard, >1.0 strengthens appearance and likeness)."),
+                io.Float.Input("ref_boost_a", default=1.0, min=0.0, max=20.0, step=0.05, tooltip="Reference attention fidelity dial for the scene reference in two-image workflows (1.0 = standard)."),
+                io.Combo.Input("boost_mode", options=list(KREA2_EDIT_BOOST_MODES), default="Fast / Key Scaling (FlashAttention)", tooltip="Attention boosting method. 'Fast / Key Scaling' scales keys directly without an attention mask, keeping FlashAttention and SageAttention active with zero memory overhead. 'Exact / Logit Bias' reproduces training logit bias with session-cached masks."),
+                io.Combo.Input("ref_position", options=list(KREA2_EDIT_ROPE_POSITIONS), default="aligned (trained)", tooltip="RoPE position space placement for the primary reference. 'aligned' pins onto the output layout; 'beside' shifts right of the canvas for flexible restaging; 'bag of features' collapses spatial coordinates."),
+                io.Combo.Input("ref_position_a", options=list(KREA2_EDIT_ROPE_POSITIONS), default="aligned (trained)", tooltip="RoPE position space placement for the scene reference in two-image workflows."),
+                io.Combo.Input("fit_mode", options=["fit", "crop"], default="fit", tooltip="How source images fit output aspect ratio in pixel space before sampling."),
+                io.Int.Input("target_width", default=1024, min=64, max=4096, step=16, tooltip="Target generation width in pixels (used for pre-sampling image fitting)."),
+                io.Int.Input("target_height", default=1024, min=64, max=4096, step=16, tooltip="Target generation height in pixels."),
+                io.Boolean.Input("cache_text_fusion", default=True, tooltip="Caches invariant TextFusion transformer output on step 0 to eliminate redundant compute across remaining sampling steps."),
+            ],
+            outputs=[
+                io.Model.Output("model", display_name="model", tooltip="Krea2 model configured for reference-guided editing."),
+            ],
+            is_experimental=True,
+        )
+
+    @classmethod
+    def execute(
+        cls,
+        model,
+        reference_latent=None,
+        reference_latent_b=None,
+        source_image=None,
+        source_image_b=None,
+        vae=None,
+        ref_boost: float = 1.0,
+        ref_boost_a: float = 1.0,
+        boost_mode: str = "Fast / Key Scaling (FlashAttention)",
+        ref_position: str = "aligned (trained)",
+        ref_position_a: str = "aligned (trained)",
+        fit_mode: str = "fit",
+        target_width: int = 1024,
+        target_height: int = 1024,
+        cache_text_fusion: bool = True,
+        **kwargs,
+    ) -> io.NodeOutput:
+        return io.NodeOutput(
+            patch_krea2_edit_model(
+                model=model,
+                reference_latent=reference_latent,
+                reference_latent_b=reference_latent_b,
+                source_image=source_image,
+                source_image_b=source_image_b,
+                vae=vae,
+                ref_boost=ref_boost,
+                ref_boost_a=ref_boost_a,
+                boost_mode=boost_mode,
+                ref_position=ref_position,
+                ref_position_a=ref_position_a,
+                fit_mode=fit_mode,
+                target_width=target_width,
+                target_height=target_height,
+                cache_text_fusion=cache_text_fusion,
+                **kwargs,
+            )
+        )
+
 

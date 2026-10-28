@@ -362,6 +362,7 @@ The left sidebar stays visible and shows the selected foreground's context actio
 - `UC_MiniMaxH3PDDAcc`
 - `UC_UnifiedAttentionPatcher`
 - `UC_Krea2NAG`
+- `UC_Krea2EditPatcher`
 - `UC_MOSSImageEditPatcher`
 - `UC_MarkdownPreview`
 - `UC_BoldFrakturTextStyle`
@@ -481,6 +482,18 @@ a guider without a negative input.
   (defaults `0.0` to `1.0`). Lowering `end_percent` (for example to `0.5`) stops
   guidance halfway through sampling to save generation time while keeping most
   of the negative prompt effect.
+
+### Krea2 Edit Patcher
+
+`UC_Krea2EditPatcher` configures a Krea2 diffusion model for reference-guided image editing, character transfer, and two-image scene composition using clean `ModelPatcher` object patches while keeping ComfyUI's native `comfy-kitchen` RoPE kernels and fast attention backends active.
+
+Connect your Krea2 `model` (after any edit LoRA loader) through `UC_Krea2EditPatcher` to your sampler. You can supply references either as pre-encoded `reference_latent` / `reference_latent_b` inputs or by connecting `source_image` / `source_image_b` together with `vae` so the node fits and VAE-encodes them cleanly before sampling begins (preventing mid-sampling VRAM eviction).
+
+- `ref_boost` and `ref_boost_a`: reference attention fidelity dials for the primary/subject reference and the scene reference in two-image workflows (default `1.0`; raising toward `4.0` strengthens identity and appearance preservation).
+- `boost_mode`: selects `Fast / Key Scaling (FlashAttention)` (scales reference keys directly without allocating a dense attention mask, keeping FlashAttention and SageAttention active) or `Exact / Logit Bias` (reproduces the exact training logit bias with a session-cached mask).
+- `ref_position` and `ref_position_a`: RoPE position placement (`aligned (trained)` pins the reference to the output canvas layout, `beside (right of target)` shifts it next to the canvas for flexible restaging, and `bag of features` collapses spatial coordinates).
+- `fit_mode`, `target_width`, and `target_height`: control how connected source images are fitted to the target generation aspect ratio in pixel space before VAE encoding.
+- `cache_text_fusion`: caches the timestep-invariant TextFusion transformer output on step 0 so it is reused across all remaining sampling steps (default `True`).
 
 ### MOSS-Image Edit Patcher
 

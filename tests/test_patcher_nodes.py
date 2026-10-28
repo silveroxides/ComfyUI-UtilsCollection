@@ -1954,3 +1954,158 @@ def test_moss_image_edit_patcher_end_to_end():
         comfy.model_management.in_training = old_training
 
 
+def test_krea2_edit_patcher_end_to_end():
+    import comfy.ops
+    from comfy.ldm.krea2.model import SingleStreamDiT
+
+    schema = patcher_nodes.UC_Krea2EditPatcher.define_schema()
+    inputs = {value.id: value for value in schema.inputs}
+    assert schema.node_id == "UC_Krea2EditPatcher"
+    assert inputs["ref_boost"].default == 1.0
+    assert inputs["boost_mode"].default == "Fast / Key Scaling (FlashAttention)"
+    assert inputs["ref_position"].default == "aligned (trained)"
+    assert inputs["cache_text_fusion"].default is True
+
+    torch.manual_seed(42)
+    dit = SingleStreamDiT(
+        features=32,
+        tdim=16,
+        txtdim=16,
+        heads=2,
+        kvheads=1,
+        multiplier=1,
+        layers=2,
+        patch=2,
+        channels=4,
+        txtlayers=2,
+        txtheads=2,
+        txtkvheads=1,
+        default_ref_method="index_timestep_zero",
+        device=torch.device("cpu"),
+        dtype=torch.float32,
+        operations=comfy.ops.manual_cast,
+    )
+    with torch.no_grad():
+        for name, param in dit.named_parameters():
+            if "scale" in name or "lin" in name:
+                param.normal_(0.0, 0.05)
+            else:
+                param.normal_(0.0, 0.1)
+
+    class FakeBaseModel:
+        def __init__(self, diffusion_model):
+            self.diffusion_model = diffusion_model
+
+        def process_latent_in(self, latent):
+            return latent * 0.5
+
+        def extra_conds(self, **kwargs):
+            return {}
+
+    class FakeKrea2Patcher:
+        def __init__(self, base_model):
+            self.model = base_model
+            self.model_options = {"transformer_options": {}}
+            self.object_patches = {}
+
+        def clone(self):
+            cloned = FakeKrea2Patcher(self.model)
+            cloned.model_options = comfy.model_patcher.create_model_options_clone(self.model_options)
+            cloned.object_patches = dict(self.object_patches)
+            return cloned
+
+        def get_model_object(self, name):
+            if name == "diffusion_model":
+                return self.model.diffusion_model
+            raise KeyError(name)
+
+        def add_object_patch(self, path, value):
+            self.object_patches[path] = value
+
+        def remove_wrappers_with_key(self, wrapper_type, key):
+            wrappers = self.model_options.get("wrappers", {}).get(wrapper_type, {})
+            wrappers.pop(key, None)
+
+        def add_wrapper_with_key(self, wrapper_type, key, wrapper):
+            wrappers = self.model_options.setdefault("wrappers", {}).setdefault(wrapper_type, {})
+            wrappers[key] = [wrapper]
+
+        def apply_object_patches(self):
+            for path, value in self.object_patches.items():
+                comfy.utils.set_attr(self.model, path, value)
+
+    class FakeVAE:
+        def __init__(self):
+            self.calls = []
+
+        def encode(self, pixels):
+            self.calls.append(tuple(pixels.shape))
+            b, h, w, _ = pixels.shape
+            return torch.ones(b, 4, h // 8, w // 8)
+
+    base_model = FakeBaseModel(dit)
+    base_patcher = FakeKrea2Patcher(base_model)
+    vae = FakeVAE()
+    src_img = torch.rand(1, 64, 64, 3)
+
+    (patched,) = patcher_nodes.UC_Krea2EditPatcher.execute(
+        model=base_patcher,
+        source_image=src_img,
+        vae=vae,
+        ref_boost=4.0,
+        ref_boost_a=2.0,
+        boost_mode="Fast / Key Scaling (FlashAttention)",
+        ref_position="beside (right of target)",
+        ref_position_a="aligned (trained)",
+        fit_mode="fit",
+        target_width=64,
+        target_height=64,
+        cache_text_fusion=True,
+    )
+
+    # 1. Verify pre-sampling VAE encode happened during node execution
+    assert len(vae.calls) == 1
+    assert vae.calls[0] == (1, 64, 64, 3)
+
+    # 2. Verify object patches installed cleanly
+    assert "extra_conds" in patched.object_patches
+    assert "diffusion_model.process_img" in patched.object_patches
+    assert "diffusion_model.txtfusion" in patched.object_patches
+    assert "diffusion_model.blocks.0.attn.forward" in patched.object_patches
+    assert "diffusion_model.blocks.1.attn.forward" in patched.object_patches
+
+    patched.apply_object_patches()
+
+    # 3. Verify extra_conds injects scaled ref_latents and index_timestep_zero
+    conds = base_model.extra_conds()
+    assert "ref_latents" in conds
+    assert "ref_latents_method" in conds
+
+    # 4. Verify RoPE placement in process_img ("beside" shifts x by target_w)
+    x = torch.randn(1, 4, 4, 8)
+    ref = torch.randn(1, 4, 4, 8)
+    _, tgt_ids, th, tw = dit.process_img(x, index=0)
+    _, ref_ids, _, _ = dit.process_img(ref, index=1)
+    assert tw == 4
+    assert torch.allclose(ref_ids[..., 2], tgt_ids[..., 2] + float(tw))
+
+    # 5. Verify TextFusion step-0 cache & fast key-scaling boost
+    timesteps = torch.tensor([0.5])
+    context = torch.randn(1, 5, 32)
+    out_step0 = dit(x, timesteps, context, ref_latents=[ref], transformer_options={})
+    assert patched.object_patches["diffusion_model.txtfusion"].cache is not None
+
+    # Step 1 reuses cached txtfusion output
+    out_step1 = dit(x, torch.tensor([0.25]), context, ref_latents=[ref], transformer_options={})
+    assert out_step0.shape == x.shape
+    assert out_step1.shape == x.shape
+
+    # OUTER_SAMPLE scope clears cache on exit
+    outer_wrapper = patched.model_options["wrappers"][comfy.patcher_extension.WrappersMP.OUTER_SAMPLE][
+        patcher_helpers.KREA2_EDIT_OUTER_SAMPLE_WRAPPER_KEY
+    ][0]
+    outer_wrapper(lambda: None)
+    assert patched.object_patches["diffusion_model.txtfusion"].cache is None
+
+
+
