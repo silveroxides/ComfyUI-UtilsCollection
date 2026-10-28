@@ -1229,35 +1229,154 @@ def test_primary_visual_encoder_text_only_qwen_image21_uses_qwen_prompt(monkeypa
     assert captured["kwargs"] == {"skip_template": True}
 
 
-@pytest.mark.parametrize(
-    ("execute", "kwargs"),
-    [
-        (
-            UC_AdvancedVisualConditioningEncode.execute,
-            {
-                "visual_fusion_config": None,
-                "image_inputs": {},
-            },
-        ),
-        (
-            encoder_nodes.UC_AdvancedVisConEncoder.execute,
-            {
-                "visual_consensus_config": {},
-                "image_inputs": {},
-            },
-        ),
-    ],
-)
-def test_primary_visual_encoders_reject_qwen_image21_reference_latents(execute, kwargs):
-    with pytest.raises(ValueError, match="Qwen-Image-2.1 VAE-reference fusion"):
-        execute(
-            clip=_qwen_image21_clip(),
-            prompt="",
-            system_prompt="",
-            vlm_resolution=384,
-            ref_latent_mode="single",
-            **kwargs,
-        )
+def test_qwen_image21_multi_image_with_vae_attaches_ref_latents():
+    calls = {"tokenize": [], "vae_encode": []}
+    base = _qwen_image21_clip()
+
+    class Clip:
+        tokenizer = base.tokenizer
+
+        @staticmethod
+        def tokenize(text, **kwargs):
+            calls["tokenize"].append((text, kwargs))
+            return {"qwen3vl_8b": [[(151644, 1.0), (151644, 1.0)]]}
+
+        @staticmethod
+        def encode_from_tokens_scheduled(_tokens):
+            return [[torch.ones(1, 10, 4096), {"pooled_output": torch.ones(1, 4096), "image_slots": [2, 6]}]]
+
+    class MockVae:
+        @staticmethod
+        def encode(samples):
+            calls["vae_encode"].append(samples)
+            return torch.zeros(1, 64, samples.shape[1] // 16, samples.shape[2] // 16)
+
+    img1 = torch.zeros(1, 64, 64, 3)
+    img2 = torch.zeros(1, 64, 64, 3)
+
+    output = UC_AdvancedVisualConditioningEncode.execute(
+        clip=Clip(),
+        prompt="two subjects",
+        system_prompt="",
+        vlm_resolution=384,
+        image_inputs={"image_1": img1, "image_2": img2},
+        ref_latent_mode="multi",
+        vae=MockVae(),
+    )
+
+    cond_entry = output.args[0][0]
+    metadata = cond_entry[1]
+
+    # Verify keep_vision=False when VAE is active
+    assert len(calls["tokenize"]) == 1
+    text, kwargs = calls["tokenize"][0]
+    assert kwargs.get("keep_vision") is False
+    assert "<image1>" in text and "<image2>" in text
+
+    # Verify VAE was called for both images and attached
+    assert len(calls["vae_encode"]) == 2
+    assert "reference_latents" in metadata
+    assert len(metadata["reference_latents"]) == 2
+    assert metadata["image_slots"] == [2, 6]
+
+
+def test_qwen_image21_multi_image_without_vae_keeps_vision():
+    calls = {"tokenize": []}
+    base = _qwen_image21_clip()
+
+    class Clip:
+        tokenizer = base.tokenizer
+
+        @staticmethod
+        def tokenize(text, **kwargs):
+            calls["tokenize"].append((text, kwargs))
+            return {"qwen3vl_8b": [[(151644, 1.0), (151644, 1.0)]]}
+
+        @staticmethod
+        def encode_from_tokens_scheduled(_tokens):
+            return [[torch.ones(1, 20, 4096), {"pooled_output": torch.ones(1, 4096)}]]
+
+    img1 = torch.zeros(1, 64, 64, 3)
+    img2 = torch.zeros(1, 64, 64, 3)
+
+    output = UC_AdvancedVisualConditioningEncode.execute(
+        clip=Clip(),
+        prompt="photo of image_input_1 and image_input_2",
+        system_prompt="",
+        vlm_resolution=384,
+        image_inputs={"image_1": img1, "image_2": img2},
+        ref_latent_mode="off",
+    )
+
+    assert len(calls["tokenize"]) == 1
+    text, kwargs = calls["tokenize"][0]
+    assert kwargs.get("keep_vision") is True
+    assert "<image1>" in text and "<image2>" in text
+
+
+def test_advanced_visual_conditioning_with_dedicated_fusion_images():
+    captured = {}
+    base = _qwen_image21_clip()
+
+    class Clip:
+        tokenizer = base.tokenizer
+
+        @staticmethod
+        def tokenize(text, **kwargs):
+            return {"qwen3vl_8b": [[(151644, 1.0), (151644, 1.0)]]}
+
+        @staticmethod
+        def encode_from_tokens_scheduled(_tokens):
+            return [[torch.ones(1, 20, 4096), {"pooled_output": torch.ones(1, 4096)}]]
+
+    class MockVae:
+        @staticmethod
+        def encode(samples):
+            captured.setdefault("vae_samples", []).append(samples)
+            return torch.zeros(1, 64, samples.shape[1] // 16, samples.shape[2] // 16)
+
+    ref_img1 = torch.zeros(1, 64, 64, 3)
+    ref_img2 = torch.zeros(1, 64, 64, 3)
+    fuse_img1 = torch.zeros(1, 64, 64, 3)
+    fuse_img2 = torch.zeros(1, 64, 64, 3)
+
+    output = UC_AdvancedVisualConditioningEncode.execute(
+        clip=Clip(),
+        prompt="styled photo",
+        system_prompt="",
+        vlm_resolution=384,
+        image_inputs={"image_1": ref_img1, "image_2": ref_img2},
+        fusion_images={"fusion_image_1": fuse_img1, "fusion_image_2": fuse_img2},
+        formula="a + b",
+        ref_latent_mode="multi",
+        vae=MockVae(),
+    )
+
+    cond_entry = output.args[0][0]
+    metadata = cond_entry[1]
+
+    # Reference latents are created for the reference images
+    assert "reference_latents" in metadata
+    assert len(metadata["reference_latents"]) == 2
+
+
+def test_qwen_image21_build_token_map_with_dropped_vision():
+    tokens = {
+        "qwen3vl_8b": [[(value, 1.0) for value in (
+            151644, 10, 151645, 151644, 872, 198,
+            {"type": "image", "data": torch.zeros(1, 64, 64, 3)}, 42,
+        )]]
+    }
+    # When keep_vision=False, conditioning length is 4 (system prompt dropped, image dropped, tokens 3,4,5,7 = 4 tokens)
+    cond_tensor = torch.zeros(1, 4, 4096)
+    mapping = encoder_helpers.build_token_to_conditioning_map(
+        tokens["qwen3vl_8b"][0], cond_tensor, qwen_image21=True,
+    )
+    assert len(mapping) == len(tokens["qwen3vl_8b"][0])
+    # The image token (index 6) has 0 length at position 3
+    assert mapping[6] == (3, 3)
+    # The final token 42 (index 7) has 1 length
+    assert mapping[7] == (3, 4)
 
 
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA is not available")

@@ -48,6 +48,7 @@ from ..helpers.encoder_helpers import(
     format_moss_image_prompt,
     is_qwen_image21_text_encoder,
     format_qwen_image21_prompt,
+    prepare_qwen_image21_image,
     is_minimax_h3_text_encoder,
     tokenize_minimax_h3_prompt,
     format_minimax_h3_prompt,
@@ -68,6 +69,9 @@ from ..helpers.image_helpers import VIDEO_FRAME_TIMESTAMP_FORMATS
 def apply_parallel_ref_latents(clip, conditioning, ref_latents, ref_latent_mode):
     if not ref_latents:
         return conditioning
+
+    if is_qwen_image21_text_encoder(clip):
+        return node_helpers.conditioning_set_values(conditioning, {"reference_latents": list(ref_latents)}, append=True)
 
     stage = getattr(clip, "cond_stage_model", None)
     stage_names = " ".join(
@@ -2195,6 +2199,12 @@ class UC_AdvancedVisualConditioningEncode(io.ComfyNode):
                 io.Int.Input("vae_dimension_multiple", default=8, min=4, max=256, step=4, advanced=True, tooltip="Pixel multiple used to align reference images before VAE encoding."),
                 io.Boolean.Input("semantic_anchor", default=False, tooltip="Prefixes each encoded visual slot with its numbered <Picture N>: semantic anchor."),
                 io.Autogrow.Input("image_inputs", template=autogrow_template, tooltip="Multimodal images. Maps active inputs sequentially to variables (a, b, c, ...)."),
+                VisualFusionImages.Input(
+                    "fusion_images",
+                    display_name="Fusion Images",
+                    optional=True,
+                    tooltip="Optional Visual Fusion Images container (from UC_VisualFusionImages) for visual component fusion. When connected, visual component fusion operates on these images while image_inputs supplies the native reference images.",
+                ),
                 io.Combo.Input("fusion_method", options=["conds_fusion", "token_fusion"], default=cls.DEFAULT_FUSION_METHOD, optional=True, tooltip="Fuse visual conditioning after encoding, or visual features and DeepStack before joint encoding. Off/no-image behavior remains unchanged."),
             ],
             outputs=[
@@ -2203,9 +2213,27 @@ class UC_AdvancedVisualConditioningEncode(io.ComfyNode):
         )
 
     @classmethod
-    def execute(cls, clip, prompt, system_prompt, vlm_resolution, image_inputs: io.Autogrow.Type, visual_fusion_config: dict = None, formula: str = "", padding_method: str = "zero-pad", vae_resolution="Fast (1024)", ref_latent_mode="off", vae=None, multiplier: float = 1.0, image_strength: float = 1.0, vae_dimension_multiple=8, semantic_anchor: bool = False, fusion_method=None) -> io.NodeOutput:
-        if is_qwen_image21_text_encoder(clip) and ref_latent_mode != "off":
-            raise ValueError("Qwen-Image-2.1 VAE-reference fusion is not supported yet; set ref_latent_mode to off.")
+    def execute(
+        cls,
+        clip,
+        prompt,
+        system_prompt,
+        vlm_resolution,
+        image_inputs: io.Autogrow.Type = None,
+        fusion_images=None,
+        visual_fusion_config: dict = None,
+        formula: str = "",
+        padding_method: str = "zero-pad",
+        vae_resolution="Fast (1024)",
+        ref_latent_mode="off",
+        vae=None,
+        multiplier: float = 1.0,
+        image_strength: float = 1.0,
+        vae_dimension_multiple=8,
+        semantic_anchor: bool = False,
+        fusion_method=None,
+        **kwargs,
+    ) -> io.NodeOutput:
         method = cls.DEFAULT_FUSION_METHOD if fusion_method is None else fusion_method
         if method not in ("conds_fusion", "token_fusion"):
             raise ValueError(f"Unsupported visual fusion method: {method}")
@@ -2216,6 +2244,7 @@ class UC_AdvancedVisualConditioningEncode(io.ComfyNode):
             system_prompt=system_prompt,
             vlm_resolution=vlm_resolution,
             image_inputs=image_inputs,
+            fusion_images=fusion_images,
             visual_fusion_config=visual_fusion_config,
             formula=formula,
             padding_method=padding_method,
@@ -2226,12 +2255,33 @@ class UC_AdvancedVisualConditioningEncode(io.ComfyNode):
             image_strength=image_strength,
             vae_dimension_multiple=vae_dimension_multiple,
             semantic_anchor=semantic_anchor,
+            **kwargs,
         )
 
     @classmethod
-    def _execute_conds_fusion(cls, clip, prompt, system_prompt, vlm_resolution, image_inputs: io.Autogrow.Type, visual_fusion_config: dict = None, formula: str = "", padding_method: str = "zero-pad", vae_resolution="Fast (1024)", ref_latent_mode="off", vae=None, multiplier: float = 1.0, image_strength: float = 1.0, vae_dimension_multiple=8, semantic_anchor: bool = False) -> io.NodeOutput:
+    def _execute_conds_fusion(
+        cls,
+        clip,
+        prompt,
+        system_prompt,
+        vlm_resolution,
+        image_inputs: io.Autogrow.Type = None,
+        fusion_images=None,
+        visual_fusion_config: dict = None,
+        formula: str = "",
+        padding_method: str = "zero-pad",
+        vae_resolution="Fast (1024)",
+        ref_latent_mode="off",
+        vae=None,
+        multiplier: float = 1.0,
+        image_strength: float = 1.0,
+        vae_dimension_multiple=8,
+        semantic_anchor: bool = False,
+        **kwargs,
+    ) -> io.NodeOutput:
         # Collect, extract, and parse all active (non-null) connected images sequentially (including batched images)
         _, active_images, _ = extract_and_flatten_images(image_inputs)
+        _, active_fusion, _ = extract_and_flatten_images(fusion_images)
         minimax_h3 = is_minimax_h3_text_encoder(clip)
         klein_vl = is_klein_vl_text_encoder(clip)
         flux3 = is_flux3_text_encoder(clip)
@@ -2281,7 +2331,7 @@ class UC_AdvancedVisualConditioningEncode(io.ComfyNode):
                 anchored_prompt.append(segment)
             return "".join(anchored_prompt)
 
-        if not active_images:
+        if not active_images and not active_fusion:
             # Fallback if no images are connected: encode prompt as plain text
             logging.warning("AdvancedVisualConditioning: no images are connected; encoding the prompt as text only.")
             clean_prompt, _ = prepare_image_placeholder_prompt(
@@ -2313,9 +2363,21 @@ class UC_AdvancedVisualConditioningEncode(io.ComfyNode):
             visual_fusion_config.get("save_blended_embeds", False)
         )
 
-        processed_active_images = [
-            prepare_vlm_image(image, vlm_resolution) for image in active_images
-        ]
+        qwen_vae_images = None
+        if qwen_image21:
+            qwen_res = 0 if vae_resolution == "Original" else {
+                "Ultra (512)": 512, "Turbo (768)": 768, "Fast (1024)": 1024,
+                "Balanced (1280)": 1280, "Detailed (1536)": 1536
+            }.get(vae_resolution, 1024)
+            qwen_keep_vision = (vae is None or ref_latent_mode == "off")
+            qwen_pairs = [prepare_qwen_image21_image(image, qwen_res) for image in active_images]
+            processed_active_images = [p[0] for p in qwen_pairs]
+            qwen_vae_images = [p[1] for p in qwen_pairs]
+        else:
+            qwen_keep_vision = True
+            processed_active_images = [
+                prepare_vlm_image(image, vlm_resolution) for image in active_images
+            ]
         prepared_prompt, inline_numbers = prepare_image_placeholder_prompt(
             prompt,
             image_count=len(processed_active_images),
@@ -2326,11 +2388,27 @@ class UC_AdvancedVisualConditioningEncode(io.ComfyNode):
             prepared_prompt = prepared_prompt.replace(VISION_BLOCK, "")
 
         inline_mode = False
-        if visual_method == "off" and inline_numbers:
-            inline_images = [processed_active_images[number - 1] for number in inline_numbers]
-            inline_prompt = format_krea_prompt(
-                add_semantic_anchors(prepared_prompt, inline_numbers)
-            )
+        if visual_method == "off" and (inline_numbers or (qwen_image21 and not active_fusion and formula.strip() in ("", "a"))):
+            if inline_numbers:
+                inline_images = [processed_active_images[number - 1] for number in inline_numbers]
+                inline_vae_source = [qwen_vae_images[number - 1] for number in inline_numbers] if qwen_vae_images else None
+                if qwen_image21:
+                    prompt_segments = prepared_prompt.split(VISION_BLOCK)
+                    anchored_prompt = [prompt_segments[0]]
+                    for index, segment in enumerate(prompt_segments[1:]):
+                        pic_num = inline_numbers[index] if index < len(inline_numbers) else index + 1
+                        anchored_prompt.append(f"<image{pic_num}>{VISION_BLOCK}")
+                        anchored_prompt.append(segment)
+                    inline_prompt = format_krea_prompt("".join(anchored_prompt))
+                else:
+                    inline_prompt = format_krea_prompt(
+                        add_semantic_anchors(prepared_prompt, inline_numbers)
+                    )
+            else:
+                inline_images = processed_active_images
+                inline_vae_source = qwen_vae_images
+                refs = " ".join(f"<image{i + 1}>{VISION_BLOCK}" for i in range(len(processed_active_images)))
+                inline_prompt = format_krea_prompt(f"{refs} {prepared_prompt}".strip())
             if strip_contextual_weight_syntax(inline_prompt) != inline_prompt:
                 logging.warning(
                     "AdvancedVisualConditioning: custom contextual vector scaling is disabled for native multi-image inline encoding."
@@ -2342,12 +2420,19 @@ class UC_AdvancedVisualConditioningEncode(io.ComfyNode):
                         if minimax_h3
                         else clip.tokenize(
                             inline_prompt, images=inline_images, skip_template=True,
-                            **({"keep_vision": True} if qwen_image21 else {}),
+                            **({"keep_vision": qwen_keep_vision} if qwen_image21 else {}),
                         )
                     )
                     inline_cond = clip.encode_from_tokens_scheduled(inline_tokens)
                 if len(inline_cond) != 1:
                     raise ValueError("Inline image encoding requires a single conditioning schedule entry.")
+                if qwen_image21 and inline_vae_source and vae is not None and ref_latent_mode != "off":
+                    ref_latents_qwen = []
+                    for s_vae in inline_vae_source:
+                        if "single" in ref_latent_mode and len(ref_latents_qwen) > 0:
+                            break
+                        ref_latents_qwen.append(vae.encode(s_vae))
+                    inline_cond = apply_parallel_ref_latents(clip, inline_cond, ref_latents_qwen, ref_latent_mode)
             except (TypeError, ValueError) as exc:
                 logging.warning(
                     "AdvancedVisualConditioning: inline placeholder encoding failed (%s); falling back to per-image formula encoding.",
@@ -2383,7 +2468,7 @@ class UC_AdvancedVisualConditioningEncode(io.ComfyNode):
                     )
                 formula = "a"
 
-        multipass_images = [] if inline_mode else active_images
+        multipass_images = [] if inline_mode else (active_fusion or active_images)
         for idx, source_image in enumerate(multipass_images):
             letter = chr(97 + idx)  # 0 -> 'a', 1 -> 'b', 2 -> 'c', ...
 
@@ -2397,7 +2482,10 @@ class UC_AdvancedVisualConditioningEncode(io.ComfyNode):
             )
             full_prompt = format_krea_prompt(modified_prompt)
 
-            processed_img = prepare_vlm_image(source_image, vlm_resolution)
+            if qwen_image21:
+                processed_img, _ = prepare_qwen_image21_image(source_image, qwen_res)
+            else:
+                processed_img = prepare_vlm_image(source_image, vlm_resolution)
             tokenize_callback = None
             encode_kwargs = {"images": [processed_img]}
             if not klein_vl:
@@ -2432,7 +2520,7 @@ class UC_AdvancedVisualConditioningEncode(io.ComfyNode):
                         tokenize_minimax_h3_prompt(clip, full_prompt, [processed_img])
                         if minimax_h3
                         else clip.tokenize(
-                            full_prompt, images=[processed_img], skip_template=True, **({"keep_vision": True} if qwen_image21 else {})
+                            full_prompt, images=[processed_img], skip_template=True, **({"keep_vision": qwen_keep_vision} if qwen_image21 else {})
                         )
                     )
                     tokens_dict[letter] = tokens
@@ -2537,25 +2625,32 @@ class UC_AdvancedVisualConditioningEncode(io.ComfyNode):
         conditioning = [[C_blended, final_cond_dict]]
 
         ref_latents = []
-        if vae is not None and ref_latent_mode != "off":
-            VAE_RESOLUTIONS = {
-                "Ultra (512)": 512,
-                "Turbo (768)": 768,
-                "Fast (1024)": 1024,
-                "Balanced (1280)": 1280,
-                "Detailed (1536)": 1536
-            }
-            # Process sequentially from active_images
-            for i, image in enumerate(active_images):
-                if "single" in ref_latent_mode and len(ref_latents) > 0:
-                    break
-                if image is not None:
-                    samples = image.movedim(-1, 1)
-                    target_size = None if vae_resolution == "Original" else VAE_RESOLUTIONS[vae_resolution]
-                    s_vae = prepare_vae_reference_image(samples, target_size, vae_dimension_multiple)
-                    ref_latents.append(vae.encode(s_vae.movedim(1, -1)[:, :, :, :3]))
+        if vae is not None and ref_latent_mode != "off" and not (inline_mode and qwen_image21):
+            if qwen_image21 and qwen_vae_images:
+                for s_vae in qwen_vae_images:
+                    if "single" in ref_latent_mode and len(ref_latents) > 0:
+                        break
+                    ref_latents.append(vae.encode(s_vae))
+            else:
+                VAE_RESOLUTIONS = {
+                    "Ultra (512)": 512,
+                    "Turbo (768)": 768,
+                    "Fast (1024)": 1024,
+                    "Balanced (1280)": 1280,
+                    "Detailed (1536)": 1536
+                }
+                # Process sequentially from active_images
+                for i, image in enumerate(active_images):
+                    if "single" in ref_latent_mode and len(ref_latents) > 0:
+                        break
+                    if image is not None:
+                        samples = image.movedim(-1, 1)
+                        target_size = None if vae_resolution == "Original" else VAE_RESOLUTIONS[vae_resolution]
+                        s_vae = prepare_vae_reference_image(samples, target_size, vae_dimension_multiple)
+                        ref_latents.append(vae.encode(s_vae.movedim(1, -1)[:, :, :, :3]))
 
-        conditioning = apply_parallel_ref_latents(clip, conditioning, ref_latents, ref_latent_mode)
+        if ref_latents:
+            conditioning = apply_parallel_ref_latents(clip, conditioning, ref_latents, ref_latent_mode)
         return io.NodeOutput(conditioning)
 
 
@@ -2565,7 +2660,8 @@ class UC_AdvancedVisualConditioningEncode(io.ComfyNode):
         clip,
         prompt,
         vlm_resolution,
-        image_inputs,
+        image_inputs=None,
+        fusion_images=None,
         visual_fusion_config=None,
         formula="",
         padding_method="zero-pad",
@@ -2577,6 +2673,7 @@ class UC_AdvancedVisualConditioningEncode(io.ComfyNode):
         vae_dimension_multiple=8,
         semantic_anchor=False,
         system_prompt="",
+        **kwargs,
     ):
         config = visual_fusion_config or {"visual_fusion_method": "off"}
         if config.get("visual_fusion_method", "off") == "off":
@@ -2585,6 +2682,7 @@ class UC_AdvancedVisualConditioningEncode(io.ComfyNode):
                 prompt=prompt,
                 vlm_resolution=vlm_resolution,
                 image_inputs=image_inputs,
+                fusion_images=fusion_images,
                 visual_fusion_config=visual_fusion_config,
                 formula=formula,
                 padding_method=padding_method,
@@ -2600,12 +2698,15 @@ class UC_AdvancedVisualConditioningEncode(io.ComfyNode):
             return cls._execute_conds_fusion(**kwargs)
 
         _, active_images, _ = extract_and_flatten_images(image_inputs)
-        if not active_images:
+        _, active_fusion, _ = extract_and_flatten_images(fusion_images)
+        token_sources = active_fusion or active_images
+        if not token_sources:
             kwargs = dict(
                 clip=clip,
                 prompt=prompt,
                 vlm_resolution=vlm_resolution,
                 image_inputs=image_inputs,
+                fusion_images=fusion_images,
                 visual_fusion_config=visual_fusion_config,
                 formula=formula,
                 padding_method=padding_method,
@@ -2626,14 +2727,14 @@ class UC_AdvancedVisualConditioningEncode(io.ComfyNode):
         conditioning, token_sources = execute_token_fusion_visual_conditioning(
             clip,
             prompt,
-            active_images,
+            token_sources,
             config,
             vlm_resolution,
             system_prompt,
             multiplier,
             True,
         )
-        if image_strength != 1.0 and active_images:
+        if image_strength != 1.0 and token_sources:
             t_src = token_sources[0] if token_sources else None
             for item in conditioning:
                 c_tensor = item[0]
@@ -2654,13 +2755,19 @@ class UC_AdvancedVisualConditioningEncode(io.ComfyNode):
                 "Balanced (1280)": 1280,
                 "Detailed (1536)": 1536,
             }
-            for image in active_images:
+            ref_sources = active_images or active_fusion
+            for image in ref_sources:
                 if "single" in ref_latent_mode and ref_latents:
                     break
-                samples = image.movedim(-1, 1)
-                target = None if vae_resolution == "Original" else resolutions[vae_resolution]
-                prepared = prepare_vae_reference_image(samples, target, vae_dimension_multiple)
-                ref_latents.append(vae.encode(prepared.movedim(1, -1)[:, :, :, :3]))
+                if is_qwen_image21_text_encoder(clip):
+                    target_res = 0 if vae_resolution == "Original" else resolutions.get(vae_resolution, 1024)
+                    _, s_vae = prepare_qwen_image21_image(image, target_res)
+                    ref_latents.append(vae.encode(s_vae))
+                else:
+                    samples = image.movedim(-1, 1)
+                    target = None if vae_resolution == "Original" else resolutions[vae_resolution]
+                    prepared = prepare_vae_reference_image(samples, target, vae_dimension_multiple)
+                    ref_latents.append(vae.encode(prepared.movedim(1, -1)[:, :, :, :3]))
         return io.NodeOutput(
             apply_parallel_ref_latents(clip, conditioning, ref_latents, ref_latent_mode)
         )
@@ -4388,20 +4495,22 @@ class UC_AdvancedVisualConditioningEncodeTokenFusion(UC_AdvancedVisualConditioni
 
     @classmethod
     def execute(
-        cls, clip, prompt, vlm_resolution, image_inputs, visual_fusion_config=None,
+        cls, clip, prompt, vlm_resolution, image_inputs=None, visual_fusion_config=None,
         formula="", padding_method="zero-pad", vae_resolution="Fast (1024)",
         ref_latent_mode="off", vae=None, multiplier=1.0, image_strength=1.0,
         vae_dimension_multiple=8, semantic_anchor=False, system_prompt="",
-        fusion_method=None,
+        fusion_method=None, fusion_images=None, **kwargs,
     ):
         return super().execute(
             clip=clip, prompt=prompt, system_prompt=system_prompt,
             vlm_resolution=vlm_resolution, image_inputs=image_inputs,
+            fusion_images=fusion_images,
             visual_fusion_config=visual_fusion_config, formula=formula,
             padding_method=padding_method, vae_resolution=vae_resolution,
             ref_latent_mode=ref_latent_mode, vae=vae, multiplier=multiplier,
             image_strength=image_strength, vae_dimension_multiple=vae_dimension_multiple,
             semantic_anchor=semantic_anchor, fusion_method=fusion_method,
+            **kwargs,
         )
 
 
