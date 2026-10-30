@@ -1100,7 +1100,17 @@ class MiniMaxH3Cache:
                 "MiniMax H3 cache device is set to cuda, but the model is not running on CUDA."
             )
 
-        target_device = torch.device("cpu") if self.device == "cpu" else residual.device
+        if self.device == "cpu":
+            target_device = torch.device("cpu")
+        elif self.device == "cuda":
+            target_device = residual.device
+        else:
+            try:
+                free_mem = comfy.model_management.get_free_memory(residual.device)
+                target_device = torch.device("cpu") if free_mem < 2 * 1024**3 else residual.device
+            except Exception:
+                target_device = residual.device
+
         residual = residual.detach()
         try:
             buffer = state.residual_buffer
@@ -1213,10 +1223,28 @@ class MiniMaxH3Cache:
         state.consecutive_skips = 0
         state.cache_valid = False
         state.previous_feature_signature = self._feature_signature(hidden_states, cache_ranges)
-        start_hidden_states = hidden_states.clone()
+
+        try:
+            free_mem = comfy.model_management.get_free_memory(hidden_states.device)
+            offload_baseline = self.device == "cpu" or free_mem < 2 * 1024**3
+        except Exception:
+            offload_baseline = self.device == "cpu"
+
+        start_hidden_states = (
+            hidden_states.detach().cpu()
+            if offload_baseline
+            else hidden_states.detach().clone()
+        )
         result = original_block(args)
         output = result["img"]
-        self._store_residual(output - start_hidden_states, state)
+        diff = output - (
+            start_hidden_states.to(output.device)
+            if offload_baseline
+            else start_hidden_states
+        )
+        del start_hidden_states
+        self._store_residual(diff, state)
+        del diff
         state.accumulated_relative_l1 = 0.0
         return result
 
@@ -1398,50 +1426,58 @@ def minimax_h3_block_patch_forward(
         else:
             mod_segments.append((start, end, row_base + seg_tag[kind]))
 
-    img_update = layout.img_update.to(device)
-    audio_update = layout.audio_update.to(device)
-    video_rows = minimax_model.patchify_video(video_x.to(torch.float32), self.patch_size)
-    audio_rows = minimax_model.pack_audio(audio_x.to(torch.float32))
-    cond_video_rows = self._cond_video_rows(payload, device)
-    cond_audio_rows = self._cond_audio_rows(payload, device)
-
-    all_video_rows = video_rows
-    if cond_video_rows is not None:
-        all_video_rows = torch.empty(
-            img_update.shape[0], video_rows.shape[1], dtype=torch.float32, device=device
+    if hasattr(self, "_embed_and_pack"):
+        hidden_states = self._embed_and_pack(
+            video_x, audio_x, context, layout, payload, transformer_options
         )
-        all_video_rows[~img_update] = cond_video_rows
-        all_video_rows[img_update] = video_rows
-    all_audio_rows = audio_rows
-    if cond_audio_rows is not None:
-        all_audio_rows = torch.empty(
-            audio_update.shape[0], audio_rows.shape[1], dtype=torch.float32, device=device
-        )
-        all_audio_rows[~audio_update] = cond_audio_rows
-        all_audio_rows[audio_update] = audio_rows
+    else:
+        img_update = layout.img_update.to(device)
+        audio_update = layout.audio_update.to(device)
+        video_rows = minimax_model.patchify_video(video_x.to(torch.float32), self.patch_size)
+        audio_rows = minimax_model.pack_audio(audio_x.to(torch.float32))
+        cond_video_rows = self._cond_video_rows(payload, device)
+        cond_audio_rows = self._cond_audio_rows(payload, device)
 
-    video_embed = self.video_patch_proj(all_video_rows).to(dtype)
-    audio_embed = self.audio_patch_proj(all_audio_rows).to(dtype)
-    text_states = context[0]
-    if text_states.shape[-1] != self.hidden_size:
-        text_states = self.token_refiner(
-            self.condition_proj(text_states), transformer_options=transformer_options
-        )
+        all_video_rows = video_rows
+        if cond_video_rows is not None:
+            all_video_rows = torch.empty(
+                img_update.shape[0], video_rows.shape[1], dtype=torch.float32, device=device
+            )
+            all_video_rows[~img_update] = cond_video_rows
+            all_video_rows[img_update] = video_rows
+        all_audio_rows = audio_rows
+        if cond_audio_rows is not None:
+            all_audio_rows = torch.empty(
+                audio_update.shape[0], audio_rows.shape[1], dtype=torch.float32, device=device
+            )
+            all_audio_rows[~audio_update] = cond_audio_rows
+            all_audio_rows[audio_update] = audio_rows
 
-    hidden_states = torch.empty(
-        layout.seq_len, self.hidden_size, dtype=dtype, device=device
-    )
-    video_offset = audio_offset = 0
-    for start, end, kind in layout.segments:
-        length = end - start
-        if kind == "text":
-            hidden_states[start:end] = text_states
-        elif kind in ("cond", "ref_img", "video"):
-            hidden_states[start:end] = video_embed[video_offset : video_offset + length]
-            video_offset += length
-        else:
-            hidden_states[start:end] = audio_embed[audio_offset : audio_offset + length]
-            audio_offset += length
+        video_embed = self.video_patch_proj(all_video_rows).to(dtype)
+        audio_embed = self.audio_patch_proj(all_audio_rows).to(dtype)
+        text_states = context[0]
+        if text_states.shape[-1] != self.hidden_size:
+            text_states = self.token_refiner(
+                self.condition_proj(text_states), transformer_options=transformer_options
+            )
+
+        hidden_states = torch.empty(
+            layout.seq_len, self.hidden_size, dtype=dtype, device=device
+        )
+        video_offset = audio_offset = 0
+        for start, end, kind in layout.segments:
+            length = end - start
+            if kind == "text":
+                hidden_states[start:end] = text_states
+            elif kind in ("cond", "ref_img", "video"):
+                hidden_states[start:end] = video_embed[video_offset : video_offset + length]
+                video_offset += length
+            else:
+                hidden_states[start:end] = audio_embed[audio_offset : audio_offset + length]
+                audio_offset += length
+    out_v_dtype = video_x.dtype
+    out_a_dtype = audio_x.dtype
+    del video_x, audio_x
 
     t_values = torch.tensor(unique_t, dtype=torch.float32, device=device)
     if self.use_adaln_curves:
@@ -1537,8 +1573,8 @@ def minimax_h3_block_patch_forward(
     video_out = video_out[:, :, :orig_t, :orig_h, :orig_w]
     audio_out = minimax_model.unpack_audio(audio_result)
     return [
-        -video_out.to(video_x.dtype),
-        -audio_out.to(audio_x.dtype),
+        -video_out.to(out_v_dtype),
+        -audio_out.to(out_a_dtype),
     ]
 
 
@@ -1811,10 +1847,28 @@ class MiniMaxH3DiffusionCache(MiniMaxH3Cache):
         state.cache_valid = False
         state.cached_at_sigma = normalized_noise
         state.previous_feature_signature = self._feature_signature(hidden_states, cache_ranges)
-        start_hidden_states = hidden_states.clone()
+
+        try:
+            free_mem = comfy.model_management.get_free_memory(hidden_states.device)
+            offload_baseline = self.device == "cpu" or free_mem < 2 * 1024**3
+        except Exception:
+            offload_baseline = self.device == "cpu"
+
+        start_hidden_states = (
+            hidden_states.detach().cpu()
+            if offload_baseline
+            else hidden_states.detach().clone()
+        )
         result = original_block(args)
         output = result["img"]
-        self._store_residual(output - start_hidden_states, state)
+        diff = output - (
+            start_hidden_states.to(output.device)
+            if offload_baseline
+            else start_hidden_states
+        )
+        del start_hidden_states
+        self._store_residual(diff, state)
+        del diff
         state.accumulated_relative_l1 = 0.0
         return result
 
