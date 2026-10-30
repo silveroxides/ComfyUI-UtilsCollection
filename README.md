@@ -355,6 +355,7 @@ The left sidebar stays visible and shows the selected foreground's context actio
 - `UC_ImageToVideoPrompt`
 - `UC_TagNormalizeCombine`
 - `UC_FromList`
+- `UC_CreateListOfSame`
 - `UC_GetJsonValue`
 - `UC_MiniMaxH3Cache`
 - `UC_MiniMaxH3DiffusionCache`

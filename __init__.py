@@ -156,6 +156,7 @@ class SamplingUtils(ComfyExtension):
             UC_ListToAudioBatch,
             UC_AudioBatchToList,
             UC_FromList,
+            UC_CreateListOfSame,
             UC_SwitchInverseNode,
             UC_SoftSwitchInverseNode,
             UC_IntegerRangeRandom,

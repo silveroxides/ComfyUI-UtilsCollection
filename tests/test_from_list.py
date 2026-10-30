@@ -14,7 +14,7 @@ from comfy.cli_args import args as cli_args
 prior_cpu = cli_args.cpu
 cli_args.cpu = True
 try:
-    from utils_collection_from_list_test.nodes.utils_nodes import UC_FromList
+    from utils_collection_from_list_test.nodes.utils_nodes import UC_FromList, UC_CreateListOfSame
 finally:
     cli_args.cpu = prior_cpu
 
@@ -53,3 +53,25 @@ def test_execute_stops_cleanly_at_end_of_list():
     )
 
     assert output.args == ([30],)
+
+
+def test_create_list_of_same_schema():
+    schema = UC_CreateListOfSame.define_schema()
+
+    assert schema.node_id == "UC_CreateListOfSame"
+    assert schema.display_name == "Create List of Same"
+    assert [value.id for value in schema.inputs] == ["item", "count"]
+    assert schema.inputs[1].default == 2
+    assert schema.inputs[1].min == 1
+    assert schema.outputs[0].is_output_list is True
+
+
+def test_create_list_of_same_execute():
+    output = UC_CreateListOfSame.execute("item_val", count=3)
+    assert output.args == (["item_val", "item_val", "item_val"],)
+
+    output_single = UC_CreateListOfSame.execute(42, count=1)
+    assert output_single.args == ([42],)
+
+    output_zero = UC_CreateListOfSame.execute("none", count=0)
+    assert output_zero.args == ([],)

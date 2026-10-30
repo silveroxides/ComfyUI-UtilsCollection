@@ -668,6 +668,34 @@ class UC_FromList(io.ComfyNode):
         return io.NodeOutput(items[start : start + count])
 
 
+class UC_CreateListOfSame(io.ComfyNode):
+    @classmethod
+    def define_schema(cls) -> io.Schema:
+        return io.Schema(
+            node_id="UC_CreateListOfSame",
+            display_name="Create List of Same",
+            category="utils/list",
+            description="Creates a list containing the same input item repeated a specified number of times.",
+            search_aliases=["Create List of Same", "Repeat Item", "List of Same", "Duplicate Item", "List Duplicator"],
+            inputs=[
+                io.AnyType.Input("item", tooltip="Input item of any type to repeat in the list."),
+                io.Int.Input("count", default=2, min=1, max=999999, step=1, tooltip="Number of times to repeat the item in the output list."),
+            ],
+            outputs=[
+                io.AnyType.Output(
+                    id="list",
+                    display_name="list",
+                    is_output_list=True,
+                    tooltip="List containing the repeated item.",
+                ),
+            ],
+        )
+
+    @classmethod
+    def execute(cls, item, count: int) -> io.NodeOutput:
+        return io.NodeOutput([item] * max(0, int(count)))
+
+
 class UC_SwitchInverseNode(SwitchNode):
     @classmethod
     def define_schema(cls):
