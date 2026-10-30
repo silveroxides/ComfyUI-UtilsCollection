@@ -95,6 +95,7 @@ export class BoundingBoxesEditor {
     this.drawFrame = 0;
     this.layoutFrame = 0;
     this.layoutMinWidth = 0;
+    this.layoutPanelWidth = 0;
     this.layoutMinHeight = 0;
     this.manualNodeSize = [...(node.size || [0, 0])];
     this.applyingLayoutSize = false;
@@ -289,7 +290,7 @@ export class BoundingBoxesEditor {
         resized[0] = Math.max(resized[0], minimum[0]);
         resized[1] = Math.max(resized[1], minimum[1]);
         if (!this.applyingLayoutSize) {
-          this.manualNodeSize = [resized[0], resized[1]];
+          this.manualNodeSize = [resized[0] - this.layoutPanelWidth, resized[1]];
         }
       }
       const result = originalResize?.call(this.node, resized);
@@ -385,7 +386,9 @@ export class BoundingBoxesEditor {
       pickerWidth,
       sidePanelCount * panelGap,
     );
-    this.layoutMinWidth = requiredWidth + panelLayout.extraWidth;
+    const pickerExtra = panelLayout.extraWidth;
+    this.layoutPanelWidth = pickerExtra;
+    this.layoutMinWidth = requiredWidth + pickerExtra;
     const nodeWidth = panelLayout.nodeWidth;
     const stageWidth = panelLayout.previewWidth;
     const dims = this.dimensions();
