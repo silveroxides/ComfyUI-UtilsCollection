@@ -18,11 +18,10 @@ from struct import error as StructError
 import torch
 from safetensors import SafetensorError
 from unifiedefficientloader import (
-    IncrementalSafetensorsWriter,
-    UnifiedSafetensorsLoader,
     dict_to_tensor,
     tensor_to_dict,
 )
+from .helper_functions import atomic_uel_writer, read_uel_safetensors_dict
 
 import folder_paths
 import comfy.model_management
@@ -315,54 +314,26 @@ class H3EncoderCache:
         return description
 
     def _read(self, path, stage, key, dependencies):
-        with UnifiedSafetensorsLoader(str(path), low_memory=True) as loader:
-            expected = {"uc_h3_cache_version": "2", "uc_h3_cache_stage": stage, "uc_h3_cache_key": key}
-            if loader.metadata() != expected:
-                raise ValueError("H3 cache header mismatch")
-            properties_key = f"{key}.properties"
-            if loader.get_dtype(properties_key) != torch.uint8 or loader.get_ndim(properties_key) != 1:
-                raise ValueError("H3 cache properties must be uint8")
-            properties_tensor = None
-            prop_stream = loader.async_stream([properties_key], batch_size=1, prefetch_batches=1, pin_memory=False)
-            try:
-                for batch in prop_stream:
-                    for name, tensor in batch:
-                        try:
-                            if name == properties_key:
-                                properties_tensor = tensor
-                        finally:
-                            loader.mark_processed(name)
-            finally:
-                close_prop = getattr(prop_stream, "close", None)
-                if callable(close_prop):
-                    close_prop()
-            if properties_tensor is None:
-                raise ValueError("H3 cache properties missing from stream")
-            properties = tensor_to_dict(properties_tensor)
-            if (properties["version"], properties["stage"], properties["fingerprint"], properties["dependencies"]) != (2, stage, key, dependencies):
-                raise ValueError("H3 cache dependencies mismatch")
-            specs = _tensor_specs(properties["result"])
-            names = [spec["key"] for spec in specs]
-            if len(set(names)) != len(names) or set(loader.keys()) != {properties_key, *names}:
-                raise ValueError("H3 cache tensor manifest mismatch")
-            for spec in specs:
-                if list(loader.get_shape(spec["key"])) != spec["shape"] or str(loader.get_dtype(spec["key"])) != spec["dtype"]:
-                    raise ValueError("H3 cache tensor declaration mismatch")
-                torch.device(spec["device"])
-            tensors = {}
-            if names:
-                tensor_stream = loader.async_stream(names, batch_size=1, prefetch_batches=1, pin_memory=False)
-                try:
-                    for batch in tensor_stream:
-                        for name, tensor in batch:
-                            try:
-                                tensors[name] = tensor
-                            finally:
-                                loader.mark_processed(name)
-                finally:
-                    close_tensor = getattr(tensor_stream, "close", None)
-                    if callable(close_tensor):
-                        close_tensor()
+        tensors, metadata = read_uel_safetensors_dict(path)
+        expected = {"uc_h3_cache_version": "2", "uc_h3_cache_stage": stage, "uc_h3_cache_key": key}
+        if metadata != expected:
+            raise ValueError("H3 cache header mismatch")
+        properties_key = f"{key}.properties"
+        properties_tensor = tensors.pop(properties_key, None)
+        if properties_tensor is None or properties_tensor.dtype != torch.uint8 or properties_tensor.ndim != 1:
+            raise ValueError("H3 cache properties missing or invalid")
+        properties = tensor_to_dict(properties_tensor)
+        if (properties["version"], properties["stage"], properties["fingerprint"], properties["dependencies"]) != (2, stage, key, dependencies):
+            raise ValueError("H3 cache dependencies mismatch")
+        specs = _tensor_specs(properties["result"])
+        names = [spec["key"] for spec in specs]
+        if len(set(names)) != len(names) or set(tensors.keys()) != set(names):
+            raise ValueError("H3 cache tensor manifest mismatch")
+        for spec in specs:
+            tensor = tensors.get(spec["key"])
+            if tensor is None or list(tensor.shape) != spec["shape"] or str(tensor.dtype) != spec["dtype"]:
+                raise ValueError("H3 cache tensor declaration mismatch")
+            torch.device(spec["device"])
         return _unpack(properties["result"], tensors)
 
     def _write(self, path, stage, key, dependencies, result):
@@ -370,25 +341,13 @@ class H3EncoderCache:
         properties = {"version": 2, "stage": stage, "fingerprint": key,
                       "dependencies": dependencies, "result": _pack(result, key, tensors)}
         properties_tensor = dict_to_tensor(properties)
-        path.parent.mkdir(parents=True, exist_ok=True)
-        temporary = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
-        try:
-            with IncrementalSafetensorsWriter(
-                str(temporary),
-                metadata={
-                    "uc_h3_cache_version": "2",
-                    "uc_h3_cache_stage": stage,
-                    "uc_h3_cache_key": key,
-                },
-                max_workers=1,
-            ) as writer:
-                writer.write_batch([(f"{key}.properties", properties_tensor), *tensors.items()])
-            os.replace(temporary, path)
-        finally:
-            try:
-                temporary.unlink(missing_ok=True)
-            except OSError as error:
-                self._warning(error)
+        metadata = {
+            "uc_h3_cache_version": "2",
+            "uc_h3_cache_stage": stage,
+            "uc_h3_cache_key": key,
+        }
+        with atomic_uel_writer(path, metadata=metadata) as writer:
+            writer.write_batch([(f"{key}.properties", properties_tensor), *tensors.items()])
 
     def _allows_media(self, media):
         return self.enable_caching == "all" or (
