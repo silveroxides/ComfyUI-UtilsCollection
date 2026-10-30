@@ -2166,6 +2166,10 @@ def test_minimax_h3_context_patcher_execution_and_grid_snapping():
     assert handler.context_length == 37
     assert handler.context_overlap == 12
     assert handler.freenoise is True
+    assert callable(handler.context_schedule.func)
+    assert callable(handler.fuse_method.func)
+    windows = handler.get_context_windows(None, torch.zeros(1, 24, 72, 16, 16), {})
+    assert len(windows) == 3
     assert "prepare_sampling" in patched.wrappers
     assert "sampler_sample" in patched.wrappers
 

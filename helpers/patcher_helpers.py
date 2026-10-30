@@ -4309,7 +4309,7 @@ def patch_minimax_h3_context_windows(
     ctx_ov = min(ctx_ov, max(0, ctx_len - 5))
 
     fuse_enum = comfy.context_windows.get_matching_fuse_method(str(blend_profile).strip().lower())
-    sched_enum = comfy.context_windows.ContextSchedules.STATIC_STANDARD
+    sched_enum = comfy.context_windows.get_matching_context_schedule(comfy.context_windows.ContextSchedules.STATIC_STANDARD)
 
     patched = model.clone()
     patched.model_options["context_handler"] = comfy.context_windows.IndexListContextHandler(
