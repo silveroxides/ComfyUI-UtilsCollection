@@ -882,6 +882,50 @@ def patch_minimax_h3_pdd_model(model: Any, pdd_lora: str, nfe: int, partition: s
 
 # Cache heuristic adapted from ComfyUI-MiniMaxH3-Cache by lihaoyun6:
 # https://github.com/lihaoyun6/ComfyUI-MiniMaxH3-Cache (GPL-3.0).
+def _extract_window_key(args: dict[str, Any]) -> Any:
+    transformer_options = args.get("transformer_options", {})
+    context_window = transformer_options.get("context_window")
+    win_part = None
+    if context_window is not None:
+        index_list = getattr(context_window, "index_list", None)
+        if index_list and len(index_list) >= 2:
+            win_part = (int(index_list[0]), int(index_list[-1]))
+        elif index_list:
+            win_part = tuple(int(x) for x in index_list)
+        else:
+            win_part = id(context_window)
+    cond_part = tuple(transformer_options.get("cond_or_uncond", ()))
+    if win_part is None and not cond_part:
+        return None
+    return (win_part, cond_part)
+
+
+class _MiniMaxH3WindowState:
+    """Isolated step and residual state for one context window or whole clip."""
+
+    def __init__(self) -> None:
+        self.residual_buffer: torch.Tensor | None = None
+        self.cache_valid = False
+        self.previous_feature_signature: torch.Tensor | None = None
+        self.layout_signature: tuple[Any, ...] | None = None
+        self.last_seen_timestep: float | None = None
+        self.step_counter = 0
+        self.accumulated_relative_l1 = 0.0
+        self.consecutive_skips = 0
+        self.cached_at_sigma: float | None = None
+
+    def reset(self) -> None:
+        self.cache_valid = False
+        self.residual_buffer = None
+        self.previous_feature_signature = None
+        self.layout_signature = None
+        self.last_seen_timestep = None
+        self.step_counter = 0
+        self.accumulated_relative_l1 = 0.0
+        self.consecutive_skips = 0
+        self.cached_at_sigma = None
+
+
 class MiniMaxH3Cache:
     """Reuse the residual produced by the complete MiniMax H3 block stack."""
 
@@ -901,19 +945,100 @@ class MiniMaxH3Cache:
         self.device = device
         self.verbose = verbose
         self.total_steps = 1
-        self._residual_buffer: torch.Tensor | None = None
-        self._cache_valid = False
+        self._window_states: dict[Any, _MiniMaxH3WindowState] = {}
+        self._active_window_key: Any = None
         self.reset()
 
+    def _get_window_state(self, key: Any) -> _MiniMaxH3WindowState:
+        self._active_window_key = key
+        if key not in self._window_states:
+            self._window_states[key] = _MiniMaxH3WindowState()
+        return self._window_states[key]
+
+    @property
+    def _active_state(self) -> _MiniMaxH3WindowState:
+        key = self._active_window_key
+        if key not in self._window_states:
+            self._window_states[key] = _MiniMaxH3WindowState()
+        return self._window_states[key]
+
+    @property
+    def cached_residual(self) -> torch.Tensor | None:
+        s = self._active_state
+        return s.residual_buffer if s.cache_valid else None
+
+    @cached_residual.setter
+    def cached_residual(self, val: torch.Tensor | None) -> None:
+        self._active_state.residual_buffer = val
+        self._active_state.cache_valid = val is not None
+
+    @property
+    def _residual_buffer(self) -> torch.Tensor | None:
+        return self._active_state.residual_buffer
+
+    @_residual_buffer.setter
+    def _residual_buffer(self, val: torch.Tensor | None) -> None:
+        self._active_state.residual_buffer = val
+
+    @property
+    def _cache_valid(self) -> bool:
+        return self._active_state.cache_valid
+
+    @_cache_valid.setter
+    def _cache_valid(self, val: bool) -> None:
+        self._active_state.cache_valid = val
+
+    @property
+    def previous_feature_signature(self) -> torch.Tensor | None:
+        return self._active_state.previous_feature_signature
+
+    @previous_feature_signature.setter
+    def previous_feature_signature(self, val: torch.Tensor | None) -> None:
+        self._active_state.previous_feature_signature = val
+
+    @property
+    def layout_signature(self) -> tuple[Any, ...] | None:
+        return self._active_state.layout_signature
+
+    @layout_signature.setter
+    def layout_signature(self, val: tuple[Any, ...] | None) -> None:
+        self._active_state.layout_signature = val
+
+    @property
+    def last_seen_timestep(self) -> float | None:
+        return self._active_state.last_seen_timestep
+
+    @last_seen_timestep.setter
+    def last_seen_timestep(self, val: float | None) -> None:
+        self._active_state.last_seen_timestep = val
+
+    @property
+    def step_counter(self) -> int:
+        return self._active_state.step_counter
+
+    @step_counter.setter
+    def step_counter(self, val: int) -> None:
+        self._active_state.step_counter = val
+
+    @property
+    def accumulated_relative_l1(self) -> float:
+        return self._active_state.accumulated_relative_l1
+
+    @accumulated_relative_l1.setter
+    def accumulated_relative_l1(self, val: float) -> None:
+        self._active_state.accumulated_relative_l1 = val
+
+    @property
+    def consecutive_skips(self) -> int:
+        return self._active_state.consecutive_skips
+
+    @consecutive_skips.setter
+    def consecutive_skips(self, val: int) -> None:
+        self._active_state.consecutive_skips = val
+
     def reset(self) -> None:
-        self._cache_valid = False
-        self._residual_buffer = None
-        self.previous_feature_signature: torch.Tensor | None = None
-        self.layout_signature: tuple[Any, ...] | None = None
-        self.last_seen_timestep: float | None = None
-        self.step_counter = 0
-        self.accumulated_relative_l1 = 0.0
-        self.consecutive_skips = 0
+        self._window_states.clear()
+        self._active_window_key = None
         self.run_count = 0
         self.skip_count = 0
 
@@ -925,12 +1050,14 @@ class MiniMaxH3Cache:
         if self.verbose and self.run_count + self.skip_count:
             total = self.run_count + self.skip_count
             speedup = total / max(1, self.run_count)
+            win_count = max(1, len(self._window_states))
             logging.info(
                 "[UtilsCollection MiniMax H3 Cache] Skipped %s/%s block-stack "
-                "executions (%.2fx theoretical block-stack speedup).",
+                "executions (%.2fx theoretical block-stack speedup across %s window(s)).",
                 self.skip_count,
                 total,
                 speedup,
+                win_count,
             )
         self.reset()
 
@@ -965,11 +1092,9 @@ class MiniMaxH3Cache:
             return float(timestep)
         return None
 
-    @property
-    def cached_residual(self) -> torch.Tensor | None:
-        return self._residual_buffer if self._cache_valid else None
-
-    def _store_residual(self, residual: torch.Tensor) -> None:
+    def _store_residual(self, residual: torch.Tensor, state: _MiniMaxH3WindowState | None = None) -> None:
+        if state is None:
+            state = self._active_state
         if self.device == "cuda" and residual.device.type != "cuda":
             raise ValueError(
                 "MiniMax H3 cache device is set to cuda, but the model is not running on CUDA."
@@ -978,7 +1103,7 @@ class MiniMaxH3Cache:
         target_device = torch.device("cpu") if self.device == "cpu" else residual.device
         residual = residual.detach()
         try:
-            buffer = self._residual_buffer
+            buffer = state.residual_buffer
             if (
                 buffer is None
                 or buffer.shape != residual.shape
@@ -986,17 +1111,19 @@ class MiniMaxH3Cache:
                 or buffer.device != target_device
             ):
                 buffer = torch.empty(residual.shape, dtype=residual.dtype, device=target_device)
-                self._residual_buffer = buffer
+                state.residual_buffer = buffer
             buffer.copy_(residual, non_blocking=(target_device.type == "cuda"))
-            self._cache_valid = True
+            state.cache_valid = True
         except torch.OutOfMemoryError:
             if self.device == "cuda":
                 raise
-            self._residual_buffer = residual.to("cpu", copy=True)
-            self._cache_valid = True
+            state.residual_buffer = residual.to("cpu", copy=True)
+            state.cache_valid = True
 
-    def _apply_residual(self, hidden_states: torch.Tensor) -> torch.Tensor:
-        residual = self.cached_residual
+    def _apply_residual(self, hidden_states: torch.Tensor, state: _MiniMaxH3WindowState | None = None) -> torch.Tensor:
+        if state is None:
+            state = self._active_state
+        residual = state.residual_buffer if state.cache_valid else None
         if residual is None:
             return hidden_states
         if residual.device != hidden_states.device or residual.dtype != hidden_states.dtype:
@@ -1010,6 +1137,9 @@ class MiniMaxH3Cache:
     def __call__(self, args: dict[str, Any], extra_options: dict[str, Any]) -> dict[str, Any]:
         original_block = extra_options["original_block"]
         hidden_states = args["img"]
+        window_key = _extract_window_key(args)
+        state = self._get_window_state(window_key)
+
         cache_ranges = tuple(tuple(pair) for pair in args.get("cache_ranges", ()))
         current_layout = (
             tuple(hidden_states.shape),
@@ -1019,47 +1149,47 @@ class MiniMaxH3Cache:
             cache_ranges,
         )
 
-        if self.layout_signature is None:
-            self.layout_signature = current_layout
-        elif self.layout_signature != current_layout:
-            total_steps = self.total_steps
-            self.reset()
-            self.total_steps = total_steps
-            self.layout_signature = current_layout
+        if state.layout_signature is None:
+            state.layout_signature = current_layout
+        elif state.layout_signature != current_layout:
+            state.reset()
+            state.layout_signature = current_layout
 
         timestep = self._timestep_value(args.get("timestep"))
         if timestep is None:
             return original_block(args)
-        if self.last_seen_timestep != timestep:
-            self.last_seen_timestep = timestep
-            self.step_counter += 1
+        if state.last_seen_timestep != timestep:
+            state.last_seen_timestep = timestep
+            state.step_counter += 1
 
-        progress = self.step_counter / self.total_steps
+        progress = state.step_counter / self.total_steps
         in_cache_range = self.start_percent <= progress <= self.end_percent
         skip_reason = "initial step"
 
-        if self.cached_residual is not None and self.previous_feature_signature is not None:
+        if state.cache_valid and state.residual_buffer is not None and state.previous_feature_signature is not None:
             current_signature = self._feature_signature(hidden_states, cache_ranges)
             current_float = current_signature.float()
-            previous_float = self.previous_feature_signature.float()
+            previous_float = state.previous_feature_signature.float()
             difference = (current_float - previous_float).abs().mean().item()
             denominator = previous_float.abs().mean().item() + 1e-6
-            self.accumulated_relative_l1 += difference / denominator
+            state.accumulated_relative_l1 += difference / denominator
 
-            below_threshold = self.accumulated_relative_l1 < self.reuse_threshold
-            below_skip_limit = self.consecutive_skips < self.max_steps
+            below_threshold = state.accumulated_relative_l1 < self.reuse_threshold
+            below_skip_limit = state.consecutive_skips < self.max_steps
             if below_threshold and below_skip_limit and in_cache_range:
                 self.skip_count += 1
-                self.consecutive_skips += 1
+                state.consecutive_skips += 1
                 if self.verbose:
+                    win_tag = f" [window {window_key[0][0]}..{window_key[0][1]}]" if (window_key and window_key[0]) else ""
                     logging.info(
-                        "[UtilsCollection MiniMax H3 Cache] Step %s SKIP "
+                        "[UtilsCollection MiniMax H3 Cache%s] Step %s SKIP "
                         "(relative L1 %.4f < %.4f).",
-                        self.step_counter,
-                        self.accumulated_relative_l1,
+                        win_tag,
+                        state.step_counter,
+                        state.accumulated_relative_l1,
                         self.reuse_threshold,
                     )
-                return {"img": self._apply_residual(hidden_states)}
+                return {"img": self._apply_residual(hidden_states, state)}
 
             reasons = []
             if not below_threshold:
@@ -1071,21 +1201,23 @@ class MiniMaxH3Cache:
             skip_reason = ", ".join(reasons)
 
         if self.verbose:
+            win_tag = f" [window {window_key[0][0]}..{window_key[0][1]}]" if (window_key and window_key[0]) else ""
             logging.info(
-                "[UtilsCollection MiniMax H3 Cache] Step %s RUN (%s).",
-                self.step_counter,
+                "[UtilsCollection MiniMax H3 Cache%s] Step %s RUN (%s).",
+                win_tag,
+                state.step_counter,
                 skip_reason,
             )
 
         self.run_count += 1
-        self.consecutive_skips = 0
-        self._cache_valid = False
-        self.previous_feature_signature = self._feature_signature(hidden_states, cache_ranges)
+        state.consecutive_skips = 0
+        state.cache_valid = False
+        state.previous_feature_signature = self._feature_signature(hidden_states, cache_ranges)
         start_hidden_states = hidden_states.clone()
         result = original_block(args)
         output = result["img"]
-        self._store_residual(output - start_hidden_states)
-        self.accumulated_relative_l1 = 0.0
+        self._store_residual(output - start_hidden_states, state)
+        state.accumulated_relative_l1 = 0.0
         return result
 
 
@@ -1511,8 +1643,8 @@ class MiniMaxH3DiffusionCache(MiniMaxH3Cache):
         self.sigma_max: float = 1.0
         self.sigma_min: float = 0.0
         self.total_steps: int = 1
-        self._residual_buffer: torch.Tensor | None = None
-        self._cache_valid = False
+        self._window_states: dict[Any, _MiniMaxH3WindowState] = {}
+        self._active_window_key: Any = None
         self.cached_at_sigma: float | None = None
         self.reset()
 
@@ -1538,16 +1670,26 @@ class MiniMaxH3DiffusionCache(MiniMaxH3Cache):
             self.sigma_max = 1.0
             self.sigma_min = 0.0
 
+    @property
+    def cached_at_sigma(self) -> float | None:
+        return self._active_state.cached_at_sigma
+
+    @cached_at_sigma.setter
+    def cached_at_sigma(self, val: float | None) -> None:
+        self._active_state.cached_at_sigma = val
+
     def finish(self) -> None:
         if self.verbose and self.run_count + self.skip_count:
             total = self.run_count + self.skip_count
             speedup = total / max(1, self.run_count)
+            win_count = max(1, len(self._window_states))
             logging.info(
                 "[UtilsCollection MiniMax H3 Diffusion Cache] Skipped %s/%s block-stack "
-                "executions (%.2fx speedup).",
+                "executions (%.2fx speedup across %s window(s)).",
                 self.skip_count,
                 total,
                 speedup,
+                win_count,
             )
         self.reset()
 
@@ -1573,6 +1715,9 @@ class MiniMaxH3DiffusionCache(MiniMaxH3Cache):
     def __call__(self, args: dict[str, Any], extra_options: dict[str, Any]) -> dict[str, Any]:
         original_block = extra_options["original_block"]
         hidden_states = args["img"]
+        window_key = _extract_window_key(args)
+        state = self._get_window_state(window_key)
+
         cache_ranges = tuple(tuple(pair) for pair in args.get("cache_ranges", ()))
         current_layout = (
             tuple(hidden_states.shape),
@@ -1582,59 +1727,54 @@ class MiniMaxH3DiffusionCache(MiniMaxH3Cache):
             cache_ranges,
         )
 
-        if self.layout_signature is None:
-            self.layout_signature = current_layout
-        elif self.layout_signature != current_layout:
-            total_steps = self.total_steps
-            sigmas = self.sigmas
-            self.reset()
-            self.total_steps = total_steps
-            self.sigmas = sigmas
-            if sigmas is not None:
-                self.sigma_max = float(sigmas[0].item())
-                self.sigma_min = float(sigmas[-1].item())
-            self.layout_signature = current_layout
+        if state.layout_signature is None:
+            state.layout_signature = current_layout
+        elif state.layout_signature != current_layout:
+            state.reset()
+            state.layout_signature = current_layout
 
         timestep = self._timestep_value(args.get("timestep"))
         if timestep is None:
             return original_block(args)
-        if self.last_seen_timestep != timestep:
-            self.last_seen_timestep = timestep
-            self.step_counter += 1
+        if state.last_seen_timestep != timestep:
+            state.last_seen_timestep = timestep
+            state.step_counter += 1
 
         normalized_noise = self._normalize_sigma(timestep)
         in_cache_phase = self.detail_protection <= normalized_noise <= self.composition_cutoff
         skip_reason = "initial step"
         noise_delta = 0.0
 
-        if self.cached_residual is not None and self.previous_feature_signature is not None:
+        if state.cache_valid and state.residual_buffer is not None and state.previous_feature_signature is not None:
             current_signature = self._feature_signature(hidden_states, cache_ranges)
             current_float = current_signature.float()
-            previous_float = self.previous_feature_signature.float()
+            previous_float = state.previous_feature_signature.float()
             difference = (current_float - previous_float).abs().mean().item()
             denominator = previous_float.abs().mean().item() + 1e-6
-            self.accumulated_relative_l1 += difference / denominator
+            state.accumulated_relative_l1 += difference / denominator
 
-            cached_sigma = self.cached_at_sigma if self.cached_at_sigma is not None else normalized_noise
+            cached_sigma = state.cached_at_sigma if state.cached_at_sigma is not None else normalized_noise
             noise_delta = abs(cached_sigma - normalized_noise)
             within_noise_budget = noise_delta <= self.max_noise_span
-            below_threshold = self.accumulated_relative_l1 < self.reuse_threshold
+            below_threshold = state.accumulated_relative_l1 < self.reuse_threshold
 
             if in_cache_phase and within_noise_budget and below_threshold:
                 self.skip_count += 1
-                self.consecutive_skips += 1
+                state.consecutive_skips += 1
                 if self.verbose:
+                    win_tag = f" [window {window_key[0][0]}..{window_key[0][1]}]" if (window_key and window_key[0]) else ""
                     logging.info(
-                        "[UtilsCollection MiniMax H3 Diffusion Cache] Step %s (noise %.3f) SKIP "
+                        "[UtilsCollection MiniMax H3 Diffusion Cache%s] Step %s (noise %.3f) SKIP "
                         "(relative L1 %.4f < %.4f, delta noise %.3f <= %.3f).",
-                        self.step_counter,
+                        win_tag,
+                        state.step_counter,
                         normalized_noise,
-                        self.accumulated_relative_l1,
+                        state.accumulated_relative_l1,
                         self.reuse_threshold,
                         noise_delta,
                         self.max_noise_span,
                     )
-                return {"img": self._apply_residual(hidden_states)}
+                return {"img": self._apply_residual(hidden_states, state)}
 
             reasons = []
             if not in_cache_phase:
@@ -1652,28 +1792,30 @@ class MiniMaxH3DiffusionCache(MiniMaxH3Cache):
                 )
             if not below_threshold:
                 reasons.append(
-                    f"drift threshold reached (L1 {self.accumulated_relative_l1:.4f} >= {self.reuse_threshold:.4f})"
+                    f"drift threshold reached (L1 {state.accumulated_relative_l1:.4f} >= {self.reuse_threshold:.4f})"
                 )
             skip_reason = ", ".join(reasons)
 
         if self.verbose:
+            win_tag = f" [window {window_key[0][0]}..{window_key[0][1]}]" if (window_key and window_key[0]) else ""
             logging.info(
-                "[UtilsCollection MiniMax H3 Diffusion Cache] Step %s (noise %.3f) RUN (%s).",
-                self.step_counter,
+                "[UtilsCollection MiniMax H3 Diffusion Cache%s] Step %s (noise %.3f) RUN (%s).",
+                win_tag,
+                state.step_counter,
                 normalized_noise,
                 skip_reason,
             )
 
         self.run_count += 1
-        self.consecutive_skips = 0
-        self._cache_valid = False
-        self.cached_at_sigma = normalized_noise
-        self.previous_feature_signature = self._feature_signature(hidden_states, cache_ranges)
+        state.consecutive_skips = 0
+        state.cache_valid = False
+        state.cached_at_sigma = normalized_noise
+        state.previous_feature_signature = self._feature_signature(hidden_states, cache_ranges)
         start_hidden_states = hidden_states.clone()
         result = original_block(args)
         output = result["img"]
-        self._store_residual(output - start_hidden_states)
-        self.accumulated_relative_l1 = 0.0
+        self._store_residual(output - start_hidden_states, state)
+        state.accumulated_relative_l1 = 0.0
         return result
 
 

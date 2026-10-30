@@ -687,6 +687,80 @@ def test_sampling_scope_always_clears_cache_state():
     assert cache.step_counter == 0
 
 
+def test_cache_isolates_and_skips_across_context_windows():
+    cache = _cache(max_steps=2, start=0.0, end=1.0)
+    calls = []
+
+    def original(args):
+        calls.append(args["img"].clone())
+        win = patcher_helpers._extract_window_key(args)
+        delta = 10.0 if (win and win[0] == (0, 36)) else 20.0
+        return {"img": args["img"] + delta}
+
+    win_a = types.SimpleNamespace(index_list=[0, 36])
+    win_b = types.SimpleNamespace(index_list=[25, 61])
+
+    # Step 0 (t = 1000): both windows run and cache their own delta
+    img_a0 = torch.full((1, 8), 1.0)
+    res_a0 = cache(
+        {
+            "img": img_a0,
+            "timestep": torch.tensor([1000.0]),
+            "cache_ranges": ((0, 4),),
+            "block_count": 2,
+            "transformer_options": {"context_window": win_a},
+        },
+        {"original_block": original},
+    )["img"]
+    assert torch.allclose(res_a0, torch.full((1, 8), 11.0))
+
+    img_b0 = torch.full((1, 8), 2.0)
+    res_b0 = cache(
+        {
+            "img": img_b0,
+            "timestep": torch.tensor([1000.0]),
+            "cache_ranges": ((0, 4),),
+            "block_count": 2,
+            "transformer_options": {"context_window": win_b},
+        },
+        {"original_block": original},
+    )["img"]
+    assert torch.allclose(res_b0, torch.full((1, 8), 22.0))
+    assert len(calls) == 2
+
+    # Step 1 (t = 900): both windows skip and reuse their own isolated residual
+    img_a1 = img_a0 + 0.001
+    res_a1 = cache(
+        {
+            "img": img_a1,
+            "timestep": torch.tensor([900.0]),
+            "cache_ranges": ((0, 4),),
+            "block_count": 2,
+            "transformer_options": {"context_window": win_a},
+        },
+        {"original_block": original},
+    )["img"]
+    assert torch.allclose(res_a1, torch.full((1, 8), 11.001), atol=1e-4)
+
+    img_b1 = img_b0 + 0.001
+    res_b1 = cache(
+        {
+            "img": img_b1,
+            "timestep": torch.tensor([900.0]),
+            "cache_ranges": ((0, 4),),
+            "block_count": 2,
+            "transformer_options": {"context_window": win_b},
+        },
+        {"original_block": original},
+    )["img"]
+    assert torch.allclose(res_b1, torch.full((1, 8), 22.001), atol=1e-4)
+
+    # Zero additional calls to original block on step 1 (both skipped!)
+    assert len(calls) == 2
+    assert cache.skip_count == 2
+    assert cache.run_count == 2
+
+
 def test_diffusion_cache_schema_exposes_physical_controls():
     schema = patcher_nodes.UC_MiniMaxH3DiffusionCache.define_schema()
     inputs = {value.id: value for value in schema.inputs}
