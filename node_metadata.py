@@ -188,6 +188,7 @@ DESCRIPTIONS = {
     "UC_MiniMaxH3RefVid": "Prepares video frames, audio, and matching generation dimensions for MiniMax H3 reference video workflows.",
     "UC_H3RefVideoSegments": "Prepares all sequential H3 reference segments as list outputs for multi-chunk captioning and conditioning workflows.",
     "UC_CreateListOfSame": "Creates a list containing the input item repeated a specified number of times.",
+    "UC_MiniMaxH3ContextPatcher": "Patches a MiniMax H3 model with sliding temporal context windows to generate longer continuous video latents without out-of-memory errors.",
 }
 
 
@@ -256,6 +257,7 @@ EXTRA_ALIASES = {
     "UC_MiniMaxH3RefVid": ["minimax", "h3", "reference video", "h3 ref video", "24 fps"],
     "UC_H3RefVideoSegments": ["minimax", "h3", "reference", "video", "segments", "list", "h3 segments"],
     "UC_CreateListOfSame": ["create list", "repeat item", "list of same", "duplicate item", "list duplicator"],
+    "UC_MiniMaxH3ContextPatcher": ["minimax context", "h3 context windows", "context patcher", "sliding window", "long video patcher"],
 }
 
 

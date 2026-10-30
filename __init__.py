@@ -184,6 +184,7 @@ class SamplingUtils(ComfyExtension):
             UC_Krea2EditPatcher,
             UC_MOSSImageEditPatcher,
             UC_MiniMaxH3ClipProjectionPatcher,
+            UC_MiniMaxH3ContextPatcher,
             UC_MiniMaxH3PDDAcc,
             UC_MiniMaxH3Cache,
             UC_MiniMaxH3DiffusionCache,

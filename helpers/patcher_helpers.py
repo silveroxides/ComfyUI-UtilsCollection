@@ -3194,6 +3194,15 @@ def _embed_moss_rope_ids(diffusion_model: Any, ids: torch.Tensor) -> torch.Tenso
         bands = rope_mod.bands.to(device=ids.device, dtype=torch.float32)
         phase = ids.unsqueeze(-1) * bands
         return torch.cat((phase.sin(), phase.cos()), -2).flatten(-2).unsqueeze(0)
+    if hasattr(diffusion_model, "rope_axes_dim"):
+        import comfy.ldm.flux.math
+
+        ids_3d = ids.unsqueeze(0) if ids.ndim == 2 else ids
+        pe = torch.cat(
+            [comfy.ldm.flux.math.rope(ids_3d[..., i], d, 10000) for i, d in enumerate(diffusion_model.rope_axes_dim)],
+            dim=-3,
+        )
+        return pe.unsqueeze(1).transpose(1, 2).contiguous()
     raise RuntimeError("MOSS-Image diffusion model does not expose a compatible RoPE embedder.")
 
 
@@ -3375,10 +3384,12 @@ def make_moss_edit_layer_forward(
         mod: tuple[torch.Tensor, ...],
         pe: torch.Tensor,
         transformer_options: dict[str, Any] = {},
+        *args: Any,
+        **kwargs: Any,
     ) -> torch.Tensor:
         step_state = exec_state.step.get()
-        if step_state is None:
-            return orig_forward(x, mod, pe, transformer_options)
+        if step_state is None or "kv_out" in kwargs:
+            return orig_forward(x, mod, pe, transformer_options, *args, **kwargs)
 
         is_uncond_skip = layer_idx == step_state["uncond_skip_layer"] and step_state["has_uncond"]
         if is_uncond_skip and step_state["all_uncond"]:
@@ -3393,7 +3404,7 @@ def make_moss_edit_layer_forward(
 
         ref_entries: list[dict[str, Any]] = step_state["ref_entries"]
         if not ref_entries or not hasattr(self, "norm1") or not hasattr(self, "proj"):
-            out = orig_forward(x, mod, pe, transformer_options)
+            out = orig_forward(x, mod, pe, transformer_options, *args, **kwargs)
             if uncond_skip_buf is not None:
                 for idx in uncond_indices:
                     out[idx].copy_(uncond_skip_buf[idx])
@@ -4264,6 +4275,60 @@ def patch_krea2_edit_model(
         Krea2EditSamplingScope(exec_state),
     )
     patched.model_options[KREA2_EDIT_OWNER_KEY] = True
+    return patched
+
+
+def parse_h3_context_frames(option: Any, default: int) -> int:
+    """Extract integer frame count from option string or numeric value."""
+    if isinstance(option, (int, float)):
+        return int(option)
+    match = re.search(r"\d+", str(option or ""))
+    return int(match.group()) if match else default
+
+
+def patch_minimax_h3_context_windows(
+    model: Any,
+    window_size: Any = "124 frames (~5.2s - Standard)",
+    overlap: Any = "39 frames (~1.6s - Standard)",
+    blend_profile: str = "pyramid",
+    freenoise: bool = True,
+) -> Any:
+    """Patch a MiniMax H3 model with sliding temporal context windows aligned to its 17n+5 grid."""
+    if str(window_size).strip().lower().startswith("disable"):
+        return model
+
+    import comfy.context_windows
+    from .sampling_helpers import h3_snap_frame_count
+
+    w_frames = h3_snap_frame_count(parse_h3_context_frames(window_size, 124))
+    ov_frames = h3_snap_frame_count(parse_h3_context_frames(overlap, 39))
+
+    # Convert frames on the 17n+5 grid to DiT video latent temporal units (5n+2)
+    ctx_len = 2 if w_frames <= 5 else ((w_frames - 5) // 17) * 5 + 2
+    ctx_ov = 2 if ov_frames <= 5 else ((ov_frames - 5) // 17) * 5 + 2
+    ctx_ov = min(ctx_ov, max(0, ctx_len - 5))
+
+    fuse_enum = comfy.context_windows.get_matching_fuse_method(str(blend_profile).strip().lower())
+    sched_enum = comfy.context_windows.ContextSchedules.STATIC_STANDARD
+
+    patched = model.clone()
+    patched.model_options["context_handler"] = comfy.context_windows.IndexListContextHandler(
+        context_schedule=sched_enum,
+        fuse_method=fuse_enum,
+        context_length=ctx_len,
+        context_overlap=ctx_ov,
+        context_stride=1,
+        closed_loop=False,
+        dim=2,
+        freenoise=bool(freenoise),
+        cond_retain_index_list="",
+        split_conds_to_windows=False,
+        latent_retain_index_list="",
+        causal_window_fix=False,
+    )
+    comfy.context_windows.create_prepare_sampling_wrapper(patched)
+    if freenoise:
+        comfy.context_windows.create_sampler_sample_wrapper(patched)
     return patched
 
 

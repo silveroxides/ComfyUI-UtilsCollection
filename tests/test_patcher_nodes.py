@@ -2108,4 +2108,74 @@ def test_krea2_edit_patcher_end_to_end():
     assert patched.object_patches["diffusion_model.txtfusion"].cache is None
 
 
+def test_minimax_h3_context_patcher_schema():
+    schema = patcher_nodes.UC_MiniMaxH3ContextPatcher.define_schema()
+    assert schema.node_id == "UC_MiniMaxH3ContextPatcher"
+    assert schema.display_name == "MiniMax H3 Context Patcher"
+    assert schema.category == "advanced/model/patches"
+    inputs = {inp.id: inp for inp in schema.inputs}
+    assert "model" in inputs
+    assert inputs["window_size"].default == "124 frames (~5.2s - Standard)"
+    assert "124 frames (~5.2s - Standard)" in inputs["window_size"].options
+    assert "Disabled (Full Latent)" in inputs["window_size"].options
+    assert inputs["overlap"].default == "39 frames (~1.6s - Standard)"
+    assert "39 frames (~1.6s - Standard)" in inputs["overlap"].options
+    assert inputs["blend_profile"].default == "pyramid"
+    assert inputs["freenoise"].default is True
+    assert len(schema.outputs) == 1
+    assert schema.outputs[0].id == "model"
+
+
+def test_minimax_h3_context_patcher_option_parsing():
+    assert patcher_helpers.parse_h3_context_frames("124 frames (~5.2s - Standard)", 124) == 124
+    assert patcher_helpers.parse_h3_context_frames("73 frames (~3.0s - Low VRAM)", 124) == 73
+    assert patcher_helpers.parse_h3_context_frames(141, 124) == 141
+    assert patcher_helpers.parse_h3_context_frames(None, 124) == 124
+
+
+def test_minimax_h3_context_patcher_execution_and_grid_snapping():
+    import comfy.context_windows
+
+    class FakePatcher:
+        def __init__(self):
+            self.model_options = {}
+            self.wrappers = {}
+
+        def clone(self):
+            f = FakePatcher()
+            f.model_options = copy.deepcopy(self.model_options)
+            f.wrappers = copy.deepcopy(self.wrappers)
+            return f
+
+        def add_wrapper_with_key(self, wrapper_type, key, wrapper):
+            self.wrappers.setdefault(wrapper_type, {}).setdefault(key, []).append(wrapper)
+
+    base = FakePatcher()
+    out = patcher_nodes.UC_MiniMaxH3ContextPatcher.execute(
+        base,
+        window_size="124 frames (~5.2s - Standard)",
+        overlap="39 frames (~1.6s - Standard)",
+        blend_profile="pyramid",
+        freenoise=True,
+    )
+    patched = out.args[0]
+    assert patched is not base
+    handler = patched.model_options.get("context_handler")
+    assert isinstance(handler, comfy.context_windows.IndexListContextHandler)
+    # 124 frames -> 37 latents; 39 frames -> 12 latents
+    assert handler.context_length == 37
+    assert handler.context_overlap == 12
+    assert handler.freenoise is True
+    assert "prepare_sampling" in patched.wrappers
+    assert "sampler_sample" in patched.wrappers
+
+    # Disabled mode leaves model untouched
+    out_disabled = patcher_nodes.UC_MiniMaxH3ContextPatcher.execute(
+        base,
+        window_size="Disabled (Full Latent)",
+    )
+    assert out_disabled.args[0] is base
+
+
+
 

@@ -22,6 +22,7 @@ from ..helpers.patcher_helpers import (
     KREA2_EDIT_BOOST_MODES,
     KREA2_EDIT_ROPE_POSITIONS,
     patch_krea2_edit_model,
+    patch_minimax_h3_context_windows,
 )
 
 
@@ -823,5 +824,100 @@ class UC_Krea2EditPatcher(io.ComfyNode):
                 **kwargs,
             )
         )
+
+
+class UC_MiniMaxH3ContextPatcher(io.ComfyNode):
+    @classmethod
+    def define_schema(cls) -> io.Schema:
+        return io.Schema(
+            node_id="UC_MiniMaxH3ContextPatcher",
+            display_name="MiniMax H3 Context Patcher",
+            category="advanced/model/patches",
+            description=(
+                "Patches a MiniMax H3 model with sliding temporal context windows. "
+                "Enables generating longer continuous video latents (10s, 15s+) without out-of-memory errors."
+            ),
+            search_aliases=["minimax context", "h3 context windows", "context patcher", "sliding window", "long video patcher"],
+            inputs=[
+                io.Model.Input(
+                    "model",
+                    tooltip="MiniMax H3 model to patch with sliding context windows.",
+                ),
+                io.Combo.Input(
+                    "window_size",
+                    options=[
+                        "124 frames (~5.2s - Standard)",
+                        "73 frames (~3.0s - Low VRAM)",
+                        "141 frames (~5.9s - High VRAM)",
+                        "158 frames (~6.6s - Extra High VRAM)",
+                        "Disabled (Full Latent)",
+                    ],
+                    default="124 frames (~5.2s - Standard)",
+                    tooltip=(
+                        "Maximum temporal window evaluated in a single DiT pass. "
+                        "124 frames fits standard GPU memory. Total video length is controlled "
+                        "by your latent or encoder node, not this setting."
+                    ),
+                ),
+                io.Combo.Input(
+                    "overlap",
+                    options=[
+                        "39 frames (~1.6s - Standard)",
+                        "22 frames (~0.9s - Fast)",
+                        "56 frames (~2.3s - Deep Blend)",
+                        "5 frames (~0.2s - Minimal)",
+                    ],
+                    default="39 frames (~1.6s - Standard)",
+                    tooltip=(
+                        "Overlap between adjacent sliding windows. 39 frames provides smooth "
+                        "seamless blending on the H3 grid; 22 is faster; 56 gives maximum seam smoothing."
+                    ),
+                ),
+                io.Combo.Input(
+                    "blend_profile",
+                    options=["pyramid", "flat"],
+                    default="pyramid",
+                    optional=True,
+                    advanced=True,
+                    tooltip=(
+                        "Window weighting profile. Pyramid linearly fades window boundaries to zero "
+                        "for smooth, artifact-free transitions."
+                    ),
+                ),
+                io.Boolean.Input(
+                    "freenoise",
+                    default=True,
+                    optional=True,
+                    advanced=True,
+                    tooltip="Applies FreeNoise noise shuffling across sliding windows to prevent repetitive patterns.",
+                ),
+            ],
+            outputs=[
+                io.Model.Output(
+                    "model",
+                    display_name="model",
+                    tooltip="Patched MiniMax H3 model ready to connect to Guider or Sampler.",
+                ),
+            ],
+        )
+
+    @classmethod
+    def execute(
+        cls,
+        model,
+        window_size="124 frames (~5.2s - Standard)",
+        overlap="39 frames (~1.6s - Standard)",
+        blend_profile="pyramid",
+        freenoise=True,
+    ) -> io.NodeOutput:
+        patched = patch_minimax_h3_context_windows(
+            model=model,
+            window_size=window_size,
+            overlap=overlap,
+            blend_profile=blend_profile,
+            freenoise=freenoise,
+        )
+        return io.NodeOutput(patched)
+
 
 
