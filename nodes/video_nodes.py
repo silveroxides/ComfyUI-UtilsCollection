@@ -151,7 +151,7 @@ class UC_SaveVideo(io.ComfyNode):
             node_id="UC_SaveVideo",
             display_name="Save Video (Keyframe Optimized)",
             category="advanced/video",
-            search_aliases=["save video", "export video", "video combine", "nvenc video"],
+            search_aliases=["save video", "export video", "video combine", "nvenc video", "av1 video", "av1 nvenc"],
             description="Saves video with clean seekable keyframes at scene cuts so players and video editors scrub and edit smoothly without black frames or visual glitching.",
             inputs=[
                 io.Video.Input("video", optional=True, tooltip="Connect a video to save. Either video or images must be connected."),
@@ -160,7 +160,15 @@ class UC_SaveVideo(io.ComfyNode):
                 io.Float.Input("fps", default=24.0, min=0.01, max=240.0, step=0.01, tooltip="Playback speed in frames per second. Matches input video speed automatically when video is connected."),
                 io.Combo.Input(
                     "codec",
-                    options=["auto", "h264_nvenc", "hevc_nvenc", "libx264", "libx265"],
+                    options=[
+                        "auto",
+                        "h264_nvenc",
+                        "hevc_nvenc",
+                        "av1_nvenc",
+                        "libx264",
+                        "libx265",
+                        "libsvtav1",
+                    ],
                     default="auto",
                     tooltip="Compression format. 'auto' uses NVIDIA GPU acceleration when available for fast export, or high-quality CPU encoding otherwise.",
                 ),

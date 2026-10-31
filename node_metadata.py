@@ -239,7 +239,7 @@ EXTRA_ALIASES = {
     "UC_Krea2NAG": ["nag", "normalized attention guidance", "krea2 negative prompt", "negative guidance"],
     "UC_Krea2EditPatcher": ["krea2 edit", "krea2 reference", "identity edit", "krea edit patcher", "ref boost", "ref position", "reference latent", "pixel path"],
     "UC_MOSSImageEditPatcher": ["moss image edit", "moss reference", "image editing", "inpaint", "character transfer", "style reference", "reference latent", "uncond skip"],
-    "UC_SaveVideo": ["save video", "export video", "video combine", "keyframe video", "mp4 export"],
+    "UC_SaveVideo": ["save video", "export video", "video combine", "keyframe video", "mp4 export", "av1 video", "av1 export", "nvenc av1"],
     "UC_ConcatenateVideoList": ["join videos", "merge videos", "stitch videos", "video concat", "video list"],
     "UC_ConcatenateAudioList": ["join audio", "merge audio", "stitch audio", "audio concat", "audio list"],
     "UC_ListToAudioBatch": ["audio list to batch", "batch audio", "combine audio list"],

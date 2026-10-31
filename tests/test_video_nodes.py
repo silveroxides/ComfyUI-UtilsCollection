@@ -216,3 +216,32 @@ def test_save_video_schema_and_execution(tmp_path, monkeypatch):
     assert cat_frames.shape[0] == 80
     assert pathlib.Path(cat_path).is_file()
     assert cat_audio is not None
+
+    # Test AV1 encoding through UC_SaveVideo (CPU libsvtav1 and GPU av1_nvenc when supported)
+    save_av1 = video_nodes.UC_SaveVideo.execute(
+        images=images[:4],
+        fps=24.0,
+        codec="libsvtav1",
+        filename_prefix="test_save_av1_svt",
+    )
+    _, av1_path, av1_obj, _ = save_av1.args
+    assert pathlib.Path(av1_path).is_file()
+    assert av1_obj is not None
+    with av.open(av1_path) as av1_container:
+        stream_codec = av1_container.streams.video[0].codec_context.name
+        assert "av1" in stream_codec.lower() or "dav1d" in stream_codec.lower()
+
+    if "av1_nvenc" in av.codecs_available and torch.cuda.is_available():
+        images_hd = torch.zeros((4, 256, 256, 3), dtype=torch.float32)
+        save_nvenc = video_nodes.UC_SaveVideo.execute(
+            images=images_hd,
+            fps=24.0,
+            codec="av1_nvenc",
+            filename_prefix="test_save_av1_nvenc",
+        )
+        _, nvenc_path, nvenc_obj, _ = save_nvenc.args
+        assert pathlib.Path(nvenc_path).is_file()
+        assert nvenc_obj is not None
+        with av.open(nvenc_path) as nvenc_container:
+            s_codec = nvenc_container.streams.video[0].codec_context.name
+            assert "av1" in s_codec.lower() or "dav1d" in s_codec.lower()

@@ -494,6 +494,16 @@ def save_keyframe_optimized_video(
             target_codec = "h264_nvenc"
         else:
             target_codec = "libx264"
+    elif "av1" in target_codec:
+        if "nvenc" in target_codec:
+            if "av1_nvenc" in available and torch.cuda.is_available() and out_width >= 144 and out_height >= 144:
+                target_codec = "av1_nvenc"
+            elif "libsvtav1" in available:
+                target_codec = "libsvtav1"
+            else:
+                target_codec = "libx264"
+        else:
+            target_codec = "libsvtav1" if "libsvtav1" in available else "libx264"
     elif "nvenc" in target_codec and (out_width < 128 or out_height < 128 or not torch.cuda.is_available()):
         target_codec = "libx265" if "hevc" in target_codec else "libx264"
 
@@ -510,7 +520,18 @@ def save_keyframe_optimized_video(
                 container.metadata[k] = v if isinstance(v, str) else json.dumps(v)
 
         rate = Fraction(round(fps * 1000), 1000)
-        stream = container.add_stream(target_codec, rate=rate)
+        try:
+            stream = container.add_stream(target_codec, rate=rate)
+        except Exception as exc:
+            if target_codec == "av1_nvenc" and "libsvtav1" in available:
+                logging.warning(
+                    "[UC_SaveVideo] av1_nvenc stream initialization failed (%s); falling back to libsvtav1.",
+                    exc,
+                )
+                target_codec = "libsvtav1"
+                stream = container.add_stream(target_codec, rate=rate)
+            else:
+                raise
         stream.width = out_width
         stream.height = out_height
         stream.pix_fmt = "yuv420p"
@@ -535,6 +556,12 @@ def save_keyframe_optimized_video(
                 "crf": str(int(crf)),
                 "preset": "medium",
                 "x265-params": f"no-open-gop=1:keyint={int(gop_size)}",
+            }
+        elif "svtav1" in target_codec or "av1" in target_codec:
+            stream.options = {
+                "crf": str(int(crf)),
+                "preset": "6",
+                "svtav1-params": f"keyint={int(gop_size)}",
             }
         else:
             stream.options = {"crf": str(int(crf))}
