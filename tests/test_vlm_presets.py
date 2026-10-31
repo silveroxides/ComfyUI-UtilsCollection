@@ -347,7 +347,7 @@ def test_qwen_query_variants_use_plain_request_delimiters():
 def test_character_transfer_query_presets_keep_provider_reference_contracts_separate():
     presets = vlm_presets.system_query_additional_vlm
     variants = {
-        "character_transfer_gemma": ("[image 1]", "[image 2]"),
+        "character_transfer_gemma": ("[`image 1`]", "[`image 2`]"),
         "character_transfer_qwen": ("<Picture 1>", "<Picture 2>"),
     }
 
@@ -559,11 +559,11 @@ def test_h3_t2va_query_uses_images_only_as_prompt_evidence():
     assert "requested target visual direction" in prefix
     assert "overrides conflicting source rendering style" in prefix
     assert "concrete target-appropriate visual vocabulary" in prefix
-    assert ("state the governing target visual direction in `summary:`" in prefix or "state the governing target visual direction in summary:" in prefix)
+    assert "state the governing target visual direction in `summary:`" in prefix
     assert "Do not invent production methods or unsupported visual additions" in prefix
     assert ("never output `<Picture N>`" in prefix or "never output <Picture N>" in prefix)
     assert "MiniMax H3 receives this text and none of the supplied VLM images" in suffix
-    assert ("governs every subject definition and `summary:`" in suffix or "governs every subject definition and summary:" in suffix)
+    assert "governs every subject definition and `summary:`" in suffix
     assert "without being restated inside [VISUAL]" in suffix
     assert "cannot substitute for requested visual-style adherence in those fields" in suffix
     assert ("Do not output `<Picture N>`" in suffix or "Do not output <Picture N>" in suffix)
@@ -622,15 +622,13 @@ def test_h3_fl2va_query_preset_enforces_available_boundary_pictures():
     prefix = presets["h3_fl2va_prefix"]
     suffix = presets["h3_fl2va_suffix"]
 
-    assert ("Treat `<Picture 1>` as the fixed first frame" in prefix or "Treat <Picture 1> as the fixed first frame" in prefix)
+    assert "Treat `<Picture 1>` as the fixed first frame" in prefix
     assert (
         "If and only if a second image was supplied, treat `<Picture 2>` as the fixed final frame"
         in prefix
-        or "If and only if a second image was supplied, treat <Picture 2> as the fixed final frame"
-        in prefix
     )
-    assert ("When only one image was supplied, do not mention `<Picture 2>`" in prefix or "When only one image was supplied, do not mention <Picture 2>" in prefix)
-    assert ("use `<Picture 2>` as the fixed ending only when it exists" in suffix or "use <Picture 2> as the fixed ending only when it exists" in suffix)
+    assert "When only one image was supplied, do not mention `<Picture 2>`" in prefix
+    assert "use `<Picture 2>` as the fixed ending only when it exists" in suffix
 
 
 def test_h3_ref2va_alt_preserves_explicit_timeline_and_replacement_contract():
@@ -1025,7 +1023,7 @@ def test_eight_part_video_preset_keeps_channels_in_each_part():
     assert "eight or more distinct one-second segments" in instruction
     assert "Part 1:" in instruction
     assert "Part 8:" in instruction
-    assert ("inside the appropriate `Part N:`" in instruction or "inside the appropriate Part N:" in instruction)
+    assert "inside the appropriate `Part N:`" in instruction
 
 
 def test_timeline_video_preset_uses_adaptive_contiguous_ranges():
@@ -1033,7 +1031,7 @@ def test_timeline_video_preset_uses_adaptive_contiguous_ranges():
         "video_timeline_system_instruction"
     ]
 
-    assert ("first output text must be exactly `Timeline:`" in instruction or "first output text must be exactly Timeline:" in instruction)
+    assert "first output text must be exactly `Timeline:`" in instruction
     assert "[00.00s-01.00s]:" in instruction
     assert "[01.00s-02.50s]:" in instruction
     assert "3-second request using three meaningful sections" in instruction
@@ -1043,7 +1041,7 @@ def test_timeline_video_preset_uses_adaptive_contiguous_ranges():
     assert "not mandatory one-second intervals" in instruction
     assert "Every range touches the next without a gap or overlap" in instruction
     assert "final range ends at the exact total duration" in instruction
-    assert ("no `Part N:` headings" in instruction or "no Part N: headings" in instruction)
+    assert "no `Part N:` headings" in instruction
 
 
 def test_timeline_presets_create_requested_dialogue_and_balance_channels():
@@ -1051,7 +1049,7 @@ def test_timeline_presets_create_requested_dialogue_and_balance_channels():
         instruction = vlm_presets.system_instructions_vlm[name]
 
         assert "**Requested Dialogue Creation:**" in instruction
-        assert ("`Add dialogue` or another direct user request" in instruction or "Add dialogue or another direct user request" in instruction)
+        assert "`Add dialogue` or another direct user request" in instruction
         assert "not as a request to detect speech already present" in instruction
         assert "The user does not need to provide wording or timestamps" in instruction
         assert "do not force dialogue into every block" in instruction
@@ -1102,9 +1100,6 @@ def test_minimax_h3_timeline_presets_mark_actual_cuts_with_shot_references():
         assert "**Shot Continuity:**" in instruction or "Place [Shot 1]" in instruction
         assert (
             "Introduce sequential `[Shot N]` markers inside [VISUAL] only when the "
-            "scene changes or perspective shifts instantly."
-            in instruction
-            or "Introduce sequential [Shot N] markers inside [VISUAL] only when the "
             "scene changes or perspective shifts instantly."
             in instruction
             or "Introduce sequential later [Shot N] markers only when the scene "
@@ -1161,7 +1156,7 @@ def test_stable_timeline_presets_require_zero_padded_two_decimal_seconds():
     for name in TIMELINE_CHANNEL_BALANCE_PRESETS:
         instruction = vlm_presets.system_instructions_vlm[name]
 
-        assert ("first range begins at `00.00s`" in instruction or "first range begins at 00.00s" in instruction)
+        assert "first range begins at `00.00s`" in instruction
         assert "[00.00s-00.00s]:" in instruction
         assert "total elapsed seconds" in instruction
         assert "at least two integer digits" in instruction or "Pad single-digit seconds with one leading zero" in instruction
@@ -1176,12 +1171,7 @@ def test_experimental_timeline_presets_keep_minimal_width_contract():
     for instruction in (
         vlm_experimental_presets.system_instructions_vlm_experimental.values()
     ):
-        assert (
-            "first range begins at `0.00s`" in instruction
-            or "first range begins at 0.00s" in instruction
-            or "first range begins at `00.00s`" in instruction
-            or "first range begins at 00.00s" in instruction
-        )
+        assert "first range begins at `0.00s`" in instruction or "first range begins at `00.00s`" in instruction
         assert "[0.00s-0.00s]:" in instruction or "[00.00s-00.00s]:" in instruction
         assert ("fewest integer digits needed" in instruction or "zero-padded total-seconds format" in instruction)
         assert "zero-padded two-decimal" not in instruction
@@ -1225,19 +1215,13 @@ def test_minimax_h3_t2va_uses_general_standalone_timeline_contract():
     assert "Concrete lighting or color changes may appear there only when materially relevant" in instruction
     assert "cannot substitute for target-style information in the subject definitions and summary" in instruction
     assert "preserve supported source-image style evidence" in instruction
-    assert (
-        "requested target-style adherence in every subject definition and in `summary:`" in instruction
-        or "requested target-style adherence in every subject definition and in summary:" in instruction
-    )
+    assert "requested target-style adherence in every subject definition and in `summary:`" in instruction
     assert "no global target-style restatement inside [VISUAL]" in instruction
     assert "opening [VISUAL] block" not in instruction
     assert "maintain it through every later [VISUAL] block" not in instruction
     assert "visual style, and physical state" not in instruction
     assert "Keep [VISUAL] focused on scene state, action, interaction, camera movement" in instruction
-    assert (
-        "Write `summary:` immediately after the completed timeline" in instruction
-        or "Write summary: immediately after the completed timeline" in instruction
-    )
+    assert "Write `summary:` immediately after the completed timeline" in instruction
     assert "governing target visual style, medium, era, and subject presentation" in instruction
     assert "subject_definitions:  \r\n<Subject 1>: complete definition" in instruction
     assert "beginning in column one" in instruction
@@ -1264,27 +1248,16 @@ def test_minimax_h3_t2va_uses_general_standalone_timeline_contract():
     positions = [instruction.index(field) for field in fields]
     assert positions == sorted(positions)
     assert "exactly five top-level fields" in instruction
-    assert (
-        "Place `Timeline:` immediately beneath `detailed_description:`" in instruction
-        or "Place Timeline: immediately beneath detailed_description:" in instruction
-    )
+    assert "Place `Timeline:` immediately beneath `detailed_description:`" in instruction
     assert (
         "Place `summary:` immediately after `subject_definitions`" in instruction
-        or "Place summary: immediately after subject_definitions" in instruction
         or "Write `summary:` immediately after the complete" in instruction
-        or "Write summary: immediately after the complete" in instruction
     )
     assert "Do not enumerate, sequence, condense, restate, paraphrase" in instruction
-    assert (
-        "duplicate timeline progression in `summary:`" in instruction
-        or "duplicate timeline progression in summary:" in instruction
-    )
+    assert "duplicate timeline progression in `summary:`" in instruction
 
     assert "[00.00s-00.00s]:" in instruction
-    assert (
-        "The first range begins at `00.00s`" in instruction
-        or "The first range begins at 00.00s" in instruction
-    )
+    assert "The first range begins at `00.00s`" in instruction
     assert "Pad single-digit seconds with one leading zero" in instruction
     for forbidden in (
         "MM:SS.mmm",
@@ -1351,7 +1324,7 @@ def test_minimax_h3_base_timeline_field_order():
     assert [instruction.index(field) for field in fields] == sorted(
         instruction.index(field) for field in fields
     )
-    assert ("place `Timeline:` immediately beneath it" in instruction or "place Timeline: immediately beneath it" in instruction)
+    assert "place `Timeline:` immediately beneath it" in instruction
     assert "Analyze the VLM images in their supplied order" in instruction
     assert "Do not require the user to predeclare these roles" not in instruction
 
@@ -1528,7 +1501,6 @@ def test_minimax_h3_full_reference_assigns_video_motion_transfer_in_retention():
                 "Use `partially_preserved` only when some source Video content itself remains visible." in value
                 or "Use `partially_preserved` only when some source <Video N> content itself remains visible." in value
                 or "Use `partially_preserved` only when some source `<Video N>` content itself remains visible." in value
-                or "Use partially_preserved only when some source <Video N> content itself remains visible." in value
             )
             assert "Exclude choreography, event progression" not in value
             assert "Never emit `<Video N>`" not in value
@@ -1541,28 +1513,28 @@ def test_minimax_h3_full_reference_protected_prefixes_are_unchanged():
     )
     protected = {
         "video_timeline_minimax_h3_ref2va_general": (
-            6558,
-            "589607c8402fb00ce0406ff148dd762237943e0b936d2496782b25a781e9986d",
+            6560,
+            "34838a0a0cc0f5e520652f8a2df26d264e11d188364e2b9b06c7fbf5fc0747a0",
         ),
         "video_timeline_minimax_h3_reference_alt_system_instruction": (
-            6558,
-            "589607c8402fb00ce0406ff148dd762237943e0b936d2496782b25a781e9986d",
+            6560,
+            "34838a0a0cc0f5e520652f8a2df26d264e11d188364e2b9b06c7fbf5fc0747a0",
         ),
         "video_timeline_minimax_h3_mixed_system_instruction": (
-            6767,
-            "69b5c0632feafd2c47f9d44b5645064033e8936d0656db8fe19bed6df3771156",
+            6769,
+            "3b0dfd8966484e3e36ab7b6e43b1916f114e1b51e649979e41ace9c1079adcba",
         ),
         "video_timeline_minimax_h3_reference_system_instruction_new": (
-            6558,
-            "589607c8402fb00ce0406ff148dd762237943e0b936d2496782b25a781e9986d",
+            6560,
+            "34838a0a0cc0f5e520652f8a2df26d264e11d188364e2b9b06c7fbf5fc0747a0",
         ),
         "video_timeline_minimax_h3_reference_alt_system_instruction_new": (
-            6558,
-            "589607c8402fb00ce0406ff148dd762237943e0b936d2496782b25a781e9986d",
+            6560,
+            "34838a0a0cc0f5e520652f8a2df26d264e11d188364e2b9b06c7fbf5fc0747a0",
         ),
         "video_timeline_minimax_h3_mixed_system_instruction_new": (
-            6812,
-            "615ebe2519b0af660d69fee098b6582b05e1aa9ef3a5a86eb34e33b2f5540b62",
+            6816,
+            "d95aed84d9d4cb13af343dddfaa4a24f6786e36ef8e5e1d389b4ffd39b2bdf2a",
         ),
     }
 
@@ -1708,7 +1680,7 @@ def test_minimax_h3_reference_debug_preserves_control_and_fixes_label_contract()
     assert ("| `<Subject N>:` |" in control_subjects or "| <Subject N>: |" in control_subjects)
     assert ("every mentioned Subject action must include" in control_subjects or "every mentioned <Subject N> action must include" in control_subjects)
     for tag in ("Subject", "Picture", "Video", "Audio"):
-        assert (f"| `<{tag} N> is ...` |" in debug_subjects or f"| <{tag} N> is ... |" in debug_subjects)
+        assert f"| `<{tag} N> is ...` |" in debug_subjects
         assert (f"| `<{tag} N>:` |" not in debug_subjects and f"| <{tag} N>: |" not in debug_subjects)
     assert ("every mentioned Subject action must include" not in debug_subjects and "every mentioned <Subject N> action must include" not in debug_subjects)
     assert "In generated output, emit it as plain text" in debug_subjects
@@ -1749,6 +1721,7 @@ def test_minimax_h3_reference_newdebug_preserves_literal_template_contract():
     assert runtime_key in advanced_options
     assert newdebug != debug
     for required in (
+        "everything within curly brace `{}` contains elements to replace",
         "Completely leave out lyrics for theme music.",
         "Do NOT invent sounds.",
         "[SOUNDS] is not for music or instruments.",
@@ -1787,23 +1760,11 @@ def test_experimental_h3_reference_keeps_regression_contract():
     assert [instruction.index(field) for field in fields] == sorted(
         instruction.index(field) for field in fields
     )
-    assert (
-        "Place `summary:` immediately after the complete timeline" in instruction
-        or "Place summary: immediately after the complete timeline" in instruction
-    )
+    assert "Place `summary:` immediately after the complete timeline" in instruction
     assert "as an internal picture-to-time map" in instruction
-    assert (
-        "Do not write `<Picture N>` anywhere inside" in instruction
-        or "Do not write <Picture N> anywhere inside" in instruction
-    )
-    assert (
-        "never cite `<Picture N>` in a timestamp block" in instruction
-        or "never cite <Picture N> in a timestamp block" in instruction
-    )
-    assert (
-        "cite ComfyUI's existing `<Picture N>` identifiers only as subject provenance" in instruction
-        or "cite ComfyUI's existing <Picture N> identifiers only as subject provenance" in instruction
-    )
+    assert "Do not write `<Picture N>` anywhere inside" in instruction
+    assert "never cite `<Picture N>` in a timestamp block" in instruction
+    assert "cite ComfyUI's existing `<Picture N>` identifiers only as subject provenance" in instruction
     assert "**Atomic Subject Labels:**" in instruction
     assert "Never append possessive markers" in instruction
     assert "without modifying the alias" in instruction
@@ -1925,10 +1886,7 @@ def test_minimax_h3_scene_image_any2va_contract():
         assert "MiniMax H3 Scene Image to Video Adaptive Timeline" in instruction
         assert "The single supplied image acts as the visual seed" in instruction
         assert "extrapolate a continuous, escalating progression of motion" in instruction
-        assert (
-            "do not emit `<Picture 1>` or any media identifier inside the summary or timeline" in instruction
-            or "do not emit <Picture 1> or any media identifier inside the summary or timeline" in instruction
-        )
+        assert "do not emit `<Picture 1>` or any media identifier inside the summary or timeline" in instruction
         assert "do not create a <Video N> namespace from the image" in instruction
         assert "Conditional User-Instructed Reference Rule:" in instruction
         assert "Only when the user instruction explicitly specifies" in instruction
@@ -1937,16 +1895,10 @@ def test_minimax_h3_scene_image_any2va_contract():
         assert "Segment Visual and Motion Density Requirement:" in instruction
         assert "Detailed 3-5 sentence" in instruction
         assert "short single sentence" not in instruction
-        assert (
-            "when no `<Video N>` reference is explicitly specified by the user instruction" in instruction
-            or "when no <Video N> reference is explicitly specified by the user instruction" in instruction
-        )
-        assert ("never write `of the video`" in instruction or "never write of the video" in instruction)
+        assert "when no `<Video N>` reference is explicitly specified by the user instruction" in instruction
+        assert "never write `of the video`" in instruction
         assert "First and foremost, when an <Audio N> item supplies the soundtrack, background music, or musical beat for the video" in instruction
-        assert (
-            "`non_diegetic_music:` must begin with `<Audio N>`" in instruction
-            or "non_diegetic_music: must begin with <Audio N>" in instruction
-        )
+        assert "`non_diegetic_music:` must begin with `<Audio N>`" in instruction
         assert "Never use the word 'both' or 'Both' in any context inside [VISUAL]" in instruction
         assert "In-Place Character Replacement Rule (No Replacement Instructions):" in instruction
         assert "never write a prompt that instructs replacement, swapping, editing, or transfer" in instruction
@@ -1967,10 +1919,7 @@ def test_minimax_h3_scene_image_t2va_contract():
         assert "MiniMax H3 Scene Image to Video Adaptive Timeline" in instruction
         assert "The single supplied image acts as the visual seed" in instruction
         assert "extrapolate a continuous, escalating progression of motion" in instruction
-        assert (
-            "Do not emit `<Picture 1>` or any media identifier inside the timeline" in instruction
-            or "Do not emit <Picture 1> or any media identifier inside the timeline" in instruction
-        )
+        assert "Do not emit `<Picture 1>` or any media identifier inside the timeline" in instruction
         assert (
             "Do not create a Video namespace from the image" in instruction
             or "Do not create a <Video N> namespace from the image" in instruction
@@ -2006,10 +1955,7 @@ def test_minimax_h3_storyboard_any2va_contract():
         assert "Strict Graphic Strip Rule:" in instruction
         assert "comic book or graphic conventions, or the storyboard itself, be described or included in the output prompt" in instruction
         assert "Strip panel borders, speech bubbles, sound effect lettering, and graphic conventions." in instruction
-        assert (
-            "Dialogue text visibly printed in speech bubbles must be transcribed into `[SPEECH]` rows" in instruction
-            or "Dialogue text visibly printed in speech bubbles must be transcribed into [SPEECH] rows" in instruction
-        )
+        assert "Dialogue text visibly printed in speech bubbles must be transcribed into `[SPEECH]` rows" in instruction
         assert "Conditional User-Instructed Reference Rule:" in instruction
         assert "Only when the user instruction explicitly specifies" in instruction
         assert "referenced from <Picture N>" in instruction
@@ -2017,16 +1963,10 @@ def test_minimax_h3_storyboard_any2va_contract():
         assert "Segment Visual and Motion Density Requirement:" in instruction
         assert "Detailed 3-5 sentence" in instruction
         assert "short single sentence" not in instruction
-        assert (
-            "when no `<Video N>` reference is explicitly specified by the user instruction" in instruction
-            or "when no <Video N> reference is explicitly specified by the user instruction" in instruction
-        )
-        assert ("never write `of the video`" in instruction or "never write of the video" in instruction)
+        assert "when no `<Video N>` reference is explicitly specified by the user instruction" in instruction
+        assert "never write `of the video`" in instruction
         assert "First and foremost, when an <Audio N> item supplies the soundtrack, background music, or musical beat for the video" in instruction
-        assert (
-            "`non_diegetic_music:` must begin with `<Audio N>`" in instruction
-            or "non_diegetic_music: must begin with <Audio N>" in instruction
-        )
+        assert "`non_diegetic_music:` must begin with `<Audio N>`" in instruction
         assert "Never use the word 'both' or 'Both' in any context inside [VISUAL]" in instruction
         assert "In-Place Character Replacement Rule (No Replacement Instructions):" in instruction
         assert "never write a prompt that instructs replacement, swapping, editing, or transfer" in instruction
@@ -2054,10 +1994,7 @@ def test_minimax_h3_storyboard_t2va_contract():
         assert "Strict Graphic Strip Rule:" in instruction
         assert "comic book or graphic conventions, or the storyboard itself, be described or included in the output prompt" in instruction
         assert "Strip panel borders, speech bubbles, sound effect lettering, and graphic conventions." in instruction
-        assert (
-            "Dialogue text visibly printed in speech bubbles must be transcribed into `[SPEECH]` rows" in instruction
-            or "Dialogue text visibly printed in speech bubbles must be transcribed into [SPEECH] rows" in instruction
-        )
+        assert "Dialogue text visibly printed in speech bubbles must be transcribed into `[SPEECH]` rows" in instruction
         assert "In-Place Character Replacement Rule (No Replacement Instructions):" in instruction
         assert "never write a prompt that instructs replacement, swapping, editing, or transfer" in instruction
         assert "completely replace the character in the full description across all instances" in instruction
@@ -2142,7 +2079,7 @@ def test_h3_dedicated_query_presets_contracts():
 
     timbre_pref = vlm_presets.system_query_additional_vlm["h3_ref2va_attr_transfer_audio_timbre_prefix"]
     timbre_suff = vlm_presets.system_query_additional_vlm["h3_ref2va_attr_transfer_audio_timbre_suffix"]
-    assert ("vocal-timbre and vocal-delivery reference for `<Subject 1> (S1)`" in timbre_pref or "vocal-timbre and vocal-delivery reference for <Subject 1> (S1)" in timbre_pref)
+    assert "vocal-timbre and vocal-delivery reference for `<Subject 1> (S1)`" in timbre_pref
     assert "cannot replace, omit, or override the mandatory attribute transfer roles" in timbre_pref
     assert "[video editing + reference generation + audio reference]" in timbre_suff
     assert "<Audio 1>: reference - vocal timbre and delivery guide speech" in timbre_suff
@@ -2150,7 +2087,7 @@ def test_h3_dedicated_query_presets_contracts():
 
     copy_pref = vlm_presets.system_query_additional_vlm["h3_ref2va_attr_transfer_audio_copy_prefix"]
     copy_suff = vlm_presets.system_query_additional_vlm["h3_ref2va_attr_transfer_audio_copy_suffix"]
-    assert ("full synchronized soundtrack copied from `<Video 1>`" in copy_pref or "full synchronized soundtrack copied from <Video 1>" in copy_pref)
+    assert "full synchronized soundtrack copied from `<Video 1>`" in copy_pref
     assert "[video editing + reference generation + audio reuse]" in copy_suff
     assert "<Audio 1>: fully_copy" in copy_suff
 
@@ -2167,7 +2104,7 @@ def test_h3_dedicated_query_presets_contracts():
     assert "never write a prompt that instructs replacement" in scene_any_pref
     assert "completely replace the character in the full description at all instances" in scene_any_pref
     assert "[reference generation]" in scene_any_suff
-    assert ("Omit by default; include `retention_analysis:`" in scene_any_suff or "Omit by default; include retention_analysis:" in scene_any_suff)
+    assert "Omit by default; include `retention_analysis:`" in scene_any_suff
     assert "only when the user request explicitly specifies downstream reference media" in scene_any_suff
     assert "completely replace the character in-place across all instances" in scene_any_suff
 
@@ -2190,7 +2127,7 @@ def test_h3_dedicated_query_presets_contracts():
     assert "never write a prompt that instructs replacement" in story_any_pref
     assert "completely replace the character in the full description at all instances" in story_any_pref
     assert "[reference generation]" in story_any_suff
-    assert ("Omit by default; include `retention_analysis:`" in story_any_suff or "Omit by default; include retention_analysis:" in story_any_suff)
+    assert "Omit by default; include `retention_analysis:`" in story_any_suff
     assert "only when the user request explicitly specifies downstream reference media" in story_any_suff
     assert "completely replace the character in-place across all instances" in story_any_suff
 
@@ -2219,38 +2156,14 @@ def test_minimax_h3_attr_transfer_multi_subject_contracts():
             vlm_motion_presets.motion_system_instructions_vlm,
         ):
             instruction = collection[key]
-            assert (
-                "Original subjects from `<Video 1>` designated for replacement must NEVER be defined under `subject_definitions:`" in instruction
-                or "Original subjects from <Video 1> designated for replacement must NEVER be defined under subject_definitions:" in instruction
-            )
-            assert (
-                "Every other non-replaced subject present in `<Video 1>` must be defined as its own `<Subject {N}>` under `subject_definitions:` using its visible traits from `<Video 1>`." in instruction
-                or "Every other non-replaced subject present in <Video 1> must be defined as its own <Subject {N}> under subject_definitions: using its visible traits from <Video 1>." in instruction
-            )
-            assert (
-                "When other subjects in `<Video 1>` have dialogue, attribute their `[SPEECH]` lines to their own `<Subject {N}> (S{N})` tag and never set their dialogue to be spoken by the reference-replaced subject." in instruction
-                or "When other subjects in <Video 1> have dialogue, attribute their [SPEECH] lines to their own <Subject {N}> (S{N}) tag and never set their dialogue to be spoken by the reference-replaced subject." in instruction
-            )
-            assert (
-                "Every other non-replaced subject present in `<Video 1>` must be defined as its own <Subject N> in `subject_definitions:` using its visible traits from `<Video 1>`." in instruction
-                or "Every other non-replaced subject present in <Video 1> must be defined as its own <Subject N> in subject_definitions: using its visible traits from <Video 1>." in instruction
-            )
-            assert (
-                "Attribute every [SPEECH] line strictly to the <Subject N> (Sx) who speaks it; if other subjects in `<Video 1>` have dialogue, assign their dialogue to their own <Subject N> (Sx) tag and never set it to be spoken by the reference-replaced subject." in instruction
-                or "Attribute every [SPEECH] line strictly to the <Subject N> (Sx) who speaks it; if other subjects in <Video 1> have dialogue, assign their dialogue to their own <Subject N> (Sx) tag and never set it to be spoken by the reference-replaced subject." in instruction
-            )
-            assert (
-                "`<Subject {N}>` is a {visual description of the subject that will be used in the video}, referenced from `<Picture {N}>`." in instruction
-                or "<Subject {N}> is a {visual description of the subject that will be used in the video}, referenced from <Picture {N}>." in instruction
-            )
-            assert (
-                "where on-screen subject(s) are replaced by defined `<Subject {N}>` entities from `<Picture {N}>`" in instruction
-                or "where on-screen subject(s) are replaced by defined <Subject {N}> entities from <Picture {N}>" in instruction
-            )
-            assert (
-                "with source subjects replaced by defined `<Subject {N}>` entities" in instruction
-                or "with source subjects replaced by defined <Subject {N}> entities" in instruction
-            )
+            assert "Original subjects from `<Video 1>` designated for replacement must NEVER be defined under `subject_definitions:`" in instruction
+            assert "Every other non-replaced subject present in `<Video 1>` must be defined as its own `<Subject {N}>` under `subject_definitions:` using its visible traits from `<Video 1>`." in instruction
+            assert "When other subjects in `<Video 1>` have dialogue, attribute their `[SPEECH]` lines to their own `<Subject {N}> (S{N})` tag and never set their dialogue to be spoken by the reference-replaced subject." in instruction
+            assert "Every other non-replaced subject present in `<Video 1>` must be defined as its own <Subject N> in `subject_definitions:` using its visible traits from `<Video 1>`." in instruction
+            assert "Attribute every [SPEECH] line strictly to the <Subject N> (Sx) who speaks it; if other subjects in `<Video 1>` have dialogue, assign their dialogue to their own <Subject N> (Sx) tag and never set it to be spoken by the reference-replaced subject." in instruction
+            assert "`<Subject {N}>` is a {visual description of the subject that will be used in the video}, referenced from `<Picture {N}>`." in instruction
+            assert "where on-screen subject(s) are replaced by defined `<Subject {N}>` entities from `<Picture {N}>`" in instruction
+            assert "with source subjects replaced by defined `<Subject {N}>` entities" in instruction
             assert (
                 "Strict Visual Appearance Continuity: In every single shot and timestamp block, all visual details (face, body, materials, textures, geometry, colors) for each defined `<Subject N>` must strictly and exclusively depict that `<Subject N>` using the visual traits established by matching `<Picture N>`"
                 in instruction
@@ -2262,8 +2175,6 @@ def test_minimax_h3_attr_transfer_multi_subject_contracts():
                 in instruction
                 or "Original subjects from `<Video 1>` designated for replacement are NEVER defined, named, described, or assigned <Subject N> aliases under `subject_definitions:`"
                 in instruction
-                or "Original subjects from <Video 1> designated for replacement are NEVER defined, named, described, or assigned <Subject N> aliases under subject_definitions:"
-                in instruction
             )
 
     for collection in (
@@ -2271,10 +2182,7 @@ def test_minimax_h3_attr_transfer_multi_subject_contracts():
         vlm_motion_presets.motion_system_instructions_vlm,
     ):
         attr_transfer = collection["video_timeline_minimax_h3_ref2va_attribute_transfer"]
-        assert (
-            "Every other non-replaced subject present in `<Video 1>` must be defined as its own `<Subject {N}>` under `subject_definitions:` using its visible traits from `<Video 1>`." in attr_transfer
-            or "Every other non-replaced subject present in <Video 1> must be defined as its own <Subject {N}> under subject_definitions: using its visible traits from <Video 1>." in attr_transfer
-        )
+        assert "Every other non-replaced subject present in `<Video 1>` must be defined as its own `<Subject {N}>` under `subject_definitions:` using its visible traits from `<Video 1>`." in attr_transfer
         assert "Attribute every [SPEECH] line strictly to the <Subject N> (Sx) who speaks it; if other subjects in <Video 1> have dialogue, assign their dialogue to their own <Subject N> (Sx) tag and never set it to be spoken by the reference-replaced subject." in attr_transfer
 
         ref2va_general = collection["video_timeline_minimax_h3_ref2va_general"]
@@ -2289,20 +2197,11 @@ def test_minimax_h3_attr_transfer_multi_subject_contracts():
         pref = vlm_presets.system_query_additional_vlm[f"{query_key}_prefix"]
         suff = vlm_presets.system_query_additional_vlm[f"{query_key}_suffix"]
         raw = vlm_presets.system_query_raw_vlm[query_key]
-        assert (
-            "Any other non-replaced subjects in `<Video 1>` must be defined as separate `<Subject N>` entities" in pref
-            or "Any other non-replaced subjects in <Video 1> must be defined as separate <Subject N> entities" in pref
-        )
-        assert (
-            "define any other non-replaced subjects in `<Video 1>` as their own `<Subject N>` entities" in suff
-            or "define any other non-replaced subjects in <Video 1> as their own <Subject N> entities" in suff
-        )
-        assert "never set" in suff and ("spoken by `<Subject 1>`" in suff or "spoken by <Subject 1>" in suff)
-        assert (
-            "define any other non-replaced subjects in `<Video 1>` as their own `<Subject N>` entities" in raw
-            or "define any other non-replaced subjects in <Video 1> as their own <Subject N> entities" in raw
-        )
-        assert "never set" in raw and ("spoken by `<Subject 1>`" in raw or "spoken by <Subject 1>" in raw)
+        assert "Any other non-replaced subjects in `<Video 1>` must be defined as separate `<Subject N>` entities" in pref
+        assert "define any other non-replaced subjects in `<Video 1>` as their own `<Subject N>` entities" in suff
+        assert "never set" in suff and "spoken by `<Subject 1>`" in suff
+        assert "define any other non-replaced subjects in `<Video 1>` as their own `<Subject N>` entities" in raw
+        assert "never set" in raw and "spoken by `<Subject 1>`" in raw
 
 
 
