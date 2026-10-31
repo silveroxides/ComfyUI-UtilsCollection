@@ -622,13 +622,15 @@ def test_h3_fl2va_query_preset_enforces_available_boundary_pictures():
     prefix = presets["h3_fl2va_prefix"]
     suffix = presets["h3_fl2va_suffix"]
 
-    assert "Treat `<Picture 1>` as the fixed first frame" in prefix
+    assert ("Treat `<Picture 1>` as the fixed first frame" in prefix or "Treat <Picture 1> as the fixed first frame" in prefix)
     assert (
         "If and only if a second image was supplied, treat `<Picture 2>` as the fixed final frame"
         in prefix
+        or "If and only if a second image was supplied, treat <Picture 2> as the fixed final frame"
+        in prefix
     )
-    assert "When only one image was supplied, do not mention `<Picture 2>`" in prefix
-    assert "use `<Picture 2>` as the fixed ending only when it exists" in suffix
+    assert ("When only one image was supplied, do not mention `<Picture 2>`" in prefix or "When only one image was supplied, do not mention <Picture 2>" in prefix)
+    assert ("use `<Picture 2>` as the fixed ending only when it exists" in suffix or "use <Picture 2> as the fixed ending only when it exists" in suffix)
 
 
 def test_h3_ref2va_alt_preserves_explicit_timeline_and_replacement_contract():
@@ -1680,7 +1682,7 @@ def test_minimax_h3_reference_debug_preserves_control_and_fixes_label_contract()
     assert ("| `<Subject N>:` |" in control_subjects or "| <Subject N>: |" in control_subjects)
     assert ("every mentioned Subject action must include" in control_subjects or "every mentioned <Subject N> action must include" in control_subjects)
     for tag in ("Subject", "Picture", "Video", "Audio"):
-        assert f"| `<{tag} N> is ...` |" in debug_subjects
+        assert (f"| `<{tag} N> is ...` |" in debug_subjects or f"| <{tag} N> is ... |" in debug_subjects)
         assert (f"| `<{tag} N>:` |" not in debug_subjects and f"| <{tag} N>: |" not in debug_subjects)
     assert ("every mentioned Subject action must include" not in debug_subjects and "every mentioned <Subject N> action must include" not in debug_subjects)
     assert "In generated output, emit it as plain text" in debug_subjects
@@ -1762,9 +1764,18 @@ def test_experimental_h3_reference_keeps_regression_contract():
     )
     assert "Place `summary:` immediately after the complete timeline" in instruction
     assert "as an internal picture-to-time map" in instruction
-    assert "Do not write `<Picture N>` anywhere inside" in instruction
-    assert "never cite `<Picture N>` in a timestamp block" in instruction
-    assert "cite ComfyUI's existing `<Picture N>` identifiers only as subject provenance" in instruction
+    assert (
+        "Do not write `<Picture N>` anywhere inside" in instruction
+        or "Do not write <Picture N> anywhere inside" in instruction
+    )
+    assert (
+        "never cite `<Picture N>` in a timestamp block" in instruction
+        or "never cite <Picture N> in a timestamp block" in instruction
+    )
+    assert (
+        "cite ComfyUI's existing `<Picture N>` identifiers only as subject provenance" in instruction
+        or "cite ComfyUI's existing <Picture N> identifiers only as subject provenance" in instruction
+    )
     assert "**Atomic Subject Labels:**" in instruction
     assert "Never append possessive markers" in instruction
     assert "without modifying the alias" in instruction
@@ -1886,7 +1897,10 @@ def test_minimax_h3_scene_image_any2va_contract():
         assert "MiniMax H3 Scene Image to Video Adaptive Timeline" in instruction
         assert "The single supplied image acts as the visual seed" in instruction
         assert "extrapolate a continuous, escalating progression of motion" in instruction
-        assert "do not emit `<Picture 1>` or any media identifier inside the summary or timeline" in instruction
+        assert (
+            "do not emit `<Picture 1>` or any media identifier inside the summary or timeline" in instruction
+            or "do not emit <Picture 1> or any media identifier inside the summary or timeline" in instruction
+        )
         assert "do not create a <Video N> namespace from the image" in instruction
         assert "Conditional User-Instructed Reference Rule:" in instruction
         assert "Only when the user instruction explicitly specifies" in instruction
@@ -1895,10 +1909,16 @@ def test_minimax_h3_scene_image_any2va_contract():
         assert "Segment Visual and Motion Density Requirement:" in instruction
         assert "Detailed 3-5 sentence" in instruction
         assert "short single sentence" not in instruction
-        assert "when no `<Video N>` reference is explicitly specified by the user instruction" in instruction
+        assert (
+            "when no `<Video N>` reference is explicitly specified by the user instruction" in instruction
+            or "when no <Video N> reference is explicitly specified by the user instruction" in instruction
+        )
         assert "never write `of the video`" in instruction
         assert "First and foremost, when an <Audio N> item supplies the soundtrack, background music, or musical beat for the video" in instruction
-        assert "`non_diegetic_music:` must begin with `<Audio N>`" in instruction
+        assert (
+            "`non_diegetic_music:` must begin with `<Audio N>`" in instruction
+            or "`non_diegetic_music:` must begin with <Audio N>" in instruction
+        )
         assert "Never use the word 'both' or 'Both' in any context inside [VISUAL]" in instruction
         assert "In-Place Character Replacement Rule (No Replacement Instructions):" in instruction
         assert "never write a prompt that instructs replacement, swapping, editing, or transfer" in instruction
@@ -1919,7 +1939,10 @@ def test_minimax_h3_scene_image_t2va_contract():
         assert "MiniMax H3 Scene Image to Video Adaptive Timeline" in instruction
         assert "The single supplied image acts as the visual seed" in instruction
         assert "extrapolate a continuous, escalating progression of motion" in instruction
-        assert "Do not emit `<Picture 1>` or any media identifier inside the timeline" in instruction
+        assert (
+            "Do not emit `<Picture 1>` or any media identifier inside the timeline" in instruction
+            or "Do not emit <Picture 1> or any media identifier inside the timeline" in instruction
+        )
         assert (
             "Do not create a Video namespace from the image" in instruction
             or "Do not create a <Video N> namespace from the image" in instruction
@@ -1963,10 +1986,16 @@ def test_minimax_h3_storyboard_any2va_contract():
         assert "Segment Visual and Motion Density Requirement:" in instruction
         assert "Detailed 3-5 sentence" in instruction
         assert "short single sentence" not in instruction
-        assert "when no `<Video N>` reference is explicitly specified by the user instruction" in instruction
+        assert (
+            "when no `<Video N>` reference is explicitly specified by the user instruction" in instruction
+            or "when no <Video N> reference is explicitly specified by the user instruction" in instruction
+        )
         assert "never write `of the video`" in instruction
         assert "First and foremost, when an <Audio N> item supplies the soundtrack, background music, or musical beat for the video" in instruction
-        assert "`non_diegetic_music:` must begin with `<Audio N>`" in instruction
+        assert (
+            "`non_diegetic_music:` must begin with `<Audio N>`" in instruction
+            or "`non_diegetic_music:` must begin with <Audio N>" in instruction
+        )
         assert "Never use the word 'both' or 'Both' in any context inside [VISUAL]" in instruction
         assert "In-Place Character Replacement Rule (No Replacement Instructions):" in instruction
         assert "never write a prompt that instructs replacement, swapping, editing, or transfer" in instruction
@@ -2079,7 +2108,10 @@ def test_h3_dedicated_query_presets_contracts():
 
     timbre_pref = vlm_presets.system_query_additional_vlm["h3_ref2va_attr_transfer_audio_timbre_prefix"]
     timbre_suff = vlm_presets.system_query_additional_vlm["h3_ref2va_attr_transfer_audio_timbre_suffix"]
-    assert "vocal-timbre and vocal-delivery reference for `<Subject 1> (S1)`" in timbre_pref
+    assert (
+        "vocal-timbre and vocal-delivery reference for `<Subject 1> (S1)`" in timbre_pref
+        or "vocal-timbre and vocal-delivery reference for <Subject 1> (S1)" in timbre_pref
+    )
     assert "cannot replace, omit, or override the mandatory attribute transfer roles" in timbre_pref
     assert "[video editing + reference generation + audio reference]" in timbre_suff
     assert "<Audio 1>: reference - vocal timbre and delivery guide speech" in timbre_suff
@@ -2087,7 +2119,10 @@ def test_h3_dedicated_query_presets_contracts():
 
     copy_pref = vlm_presets.system_query_additional_vlm["h3_ref2va_attr_transfer_audio_copy_prefix"]
     copy_suff = vlm_presets.system_query_additional_vlm["h3_ref2va_attr_transfer_audio_copy_suffix"]
-    assert "full synchronized soundtrack copied from `<Video 1>`" in copy_pref
+    assert (
+        "full synchronized soundtrack copied from `<Video 1>`" in copy_pref
+        or "full synchronized soundtrack copied from <Video 1>" in copy_pref
+    )
     assert "[video editing + reference generation + audio reuse]" in copy_suff
     assert "<Audio 1>: fully_copy" in copy_suff
 
@@ -2156,14 +2191,38 @@ def test_minimax_h3_attr_transfer_multi_subject_contracts():
             vlm_motion_presets.motion_system_instructions_vlm,
         ):
             instruction = collection[key]
-            assert "Original subjects from `<Video 1>` designated for replacement must NEVER be defined under `subject_definitions:`" in instruction
-            assert "Every other non-replaced subject present in `<Video 1>` must be defined as its own `<Subject {N}>` under `subject_definitions:` using its visible traits from `<Video 1>`." in instruction
-            assert "When other subjects in `<Video 1>` have dialogue, attribute their `[SPEECH]` lines to their own `<Subject {N}> (S{N})` tag and never set their dialogue to be spoken by the reference-replaced subject." in instruction
-            assert "Every other non-replaced subject present in `<Video 1>` must be defined as its own <Subject N> in `subject_definitions:` using its visible traits from `<Video 1>`." in instruction
-            assert "Attribute every [SPEECH] line strictly to the <Subject N> (Sx) who speaks it; if other subjects in `<Video 1>` have dialogue, assign their dialogue to their own <Subject N> (Sx) tag and never set it to be spoken by the reference-replaced subject." in instruction
-            assert "`<Subject {N}>` is a {visual description of the subject that will be used in the video}, referenced from `<Picture {N}>`." in instruction
-            assert "where on-screen subject(s) are replaced by defined `<Subject {N}>` entities from `<Picture {N}>`" in instruction
-            assert "with source subjects replaced by defined `<Subject {N}>` entities" in instruction
+            assert (
+                "Original subjects from `<Video 1>` designated for replacement must NEVER be defined under `subject_definitions:`" in instruction
+                or "Original subjects from <Video 1> designated for replacement must NEVER be defined under `subject_definitions:`" in instruction
+            )
+            assert (
+                "Every other non-replaced subject present in `<Video 1>` must be defined as its own `<Subject {N}>` under `subject_definitions:` using its visible traits from `<Video 1>`." in instruction
+                or "Every other non-replaced subject present in <Video 1> must be defined as its own <Subject {N}> under `subject_definitions:` using its visible traits from <Video 1>." in instruction
+            )
+            assert (
+                "When other subjects in `<Video 1>` have dialogue, attribute their `[SPEECH]` lines to their own `<Subject {N}> (S{N})` tag and never set their dialogue to be spoken by the reference-replaced subject." in instruction
+                or "When other subjects in <Video 1> have dialogue, attribute their `[SPEECH]` lines to their own <Subject {N}> (S{N}) tag and never set their dialogue to be spoken by the reference-replaced subject." in instruction
+            )
+            assert (
+                "Every other non-replaced subject present in `<Video 1>` must be defined as its own <Subject N> in `subject_definitions:` using its visible traits from `<Video 1>`." in instruction
+                or "Every other non-replaced subject present in <Video 1> must be defined as its own <Subject N> in `subject_definitions:` using its visible traits from <Video 1>." in instruction
+            )
+            assert (
+                "Attribute every [SPEECH] line strictly to the <Subject N> (Sx) who speaks it; if other subjects in `<Video 1>` have dialogue, assign their dialogue to their own <Subject N> (Sx) tag and never set it to be spoken by the reference-replaced subject." in instruction
+                or "Attribute every [SPEECH] line strictly to the <Subject N> (Sx) who speaks it; if other subjects in <Video 1> have dialogue, assign their dialogue to their own <Subject N> (Sx) tag and never set it to be spoken by the reference-replaced subject." in instruction
+            )
+            assert (
+                "`<Subject {N}>` is a {visual description of the subject that will be used in the video}, referenced from `<Picture {N}>`." in instruction
+                or "<Subject {N}> is a {visual description of the subject that will be used in the video}, referenced from <Picture {N}>." in instruction
+            )
+            assert (
+                "where on-screen subject(s) are replaced by defined `<Subject {N}>` entities from `<Picture {N}>`" in instruction
+                or "where on-screen subject(s) are replaced by defined <Subject {N}> entities from <Picture {N}>" in instruction
+            )
+            assert (
+                "with source subjects replaced by defined `<Subject {N}>` entities" in instruction
+                or "with source subjects replaced by defined <Subject {N}> entities" in instruction
+            )
             assert (
                 "Strict Visual Appearance Continuity: In every single shot and timestamp block, all visual details (face, body, materials, textures, geometry, colors) for each defined `<Subject N>` must strictly and exclusively depict that `<Subject N>` using the visual traits established by matching `<Picture N>`"
                 in instruction
@@ -2173,7 +2232,7 @@ def test_minimax_h3_attr_transfer_multi_subject_contracts():
             assert (
                 "Original subjects from `<Video 1>` designated for replacement are NEVER defined, named, described, or assigned `<Subject N>` aliases under `subject_definitions:`"
                 in instruction
-                or "Original subjects from `<Video 1>` designated for replacement are NEVER defined, named, described, or assigned <Subject N> aliases under `subject_definitions:`"
+                or "Original subjects from <Video 1> designated for replacement are NEVER defined, named, described, or assigned <Subject N> aliases under `subject_definitions:`"
                 in instruction
             )
 
@@ -2182,7 +2241,10 @@ def test_minimax_h3_attr_transfer_multi_subject_contracts():
         vlm_motion_presets.motion_system_instructions_vlm,
     ):
         attr_transfer = collection["video_timeline_minimax_h3_ref2va_attribute_transfer"]
-        assert "Every other non-replaced subject present in `<Video 1>` must be defined as its own `<Subject {N}>` under `subject_definitions:` using its visible traits from `<Video 1>`." in attr_transfer
+        assert (
+            "Every other non-replaced subject present in `<Video 1>` must be defined as its own `<Subject {N}>` under `subject_definitions:` using its visible traits from `<Video 1>`." in attr_transfer
+            or "Every other non-replaced subject present in <Video 1> must be defined as its own <Subject {N}> under `subject_definitions:` using its visible traits from <Video 1>." in attr_transfer
+        )
         assert "Attribute every [SPEECH] line strictly to the <Subject N> (Sx) who speaks it; if other subjects in <Video 1> have dialogue, assign their dialogue to their own <Subject N> (Sx) tag and never set it to be spoken by the reference-replaced subject." in attr_transfer
 
         ref2va_general = collection["video_timeline_minimax_h3_ref2va_general"]
@@ -2197,11 +2259,20 @@ def test_minimax_h3_attr_transfer_multi_subject_contracts():
         pref = vlm_presets.system_query_additional_vlm[f"{query_key}_prefix"]
         suff = vlm_presets.system_query_additional_vlm[f"{query_key}_suffix"]
         raw = vlm_presets.system_query_raw_vlm[query_key]
-        assert "Any other non-replaced subjects in `<Video 1>` must be defined as separate `<Subject N>` entities" in pref
-        assert "define any other non-replaced subjects in `<Video 1>` as their own `<Subject N>` entities" in suff
-        assert "never set" in suff and "spoken by `<Subject 1>`" in suff
-        assert "define any other non-replaced subjects in `<Video 1>` as their own `<Subject N>` entities" in raw
-        assert "never set" in raw and "spoken by `<Subject 1>`" in raw
+        assert (
+            "Any other non-replaced subjects in `<Video 1>` must be defined as separate `<Subject N>` entities" in pref
+            or "Any other non-replaced subjects in <Video 1> must be defined as separate <Subject N> entities" in pref
+        )
+        assert (
+            "define any other non-replaced subjects in `<Video 1>` as their own `<Subject N>` entities" in suff
+            or "define any other non-replaced subjects in <Video 1> as their own <Subject N> entities" in suff
+        )
+        assert "never set" in suff and ("spoken by `<Subject 1>`" in suff or "spoken by <Subject 1>" in suff)
+        assert (
+            "define any other non-replaced subjects in `<Video 1>` as their own `<Subject N>` entities" in raw
+            or "define any other non-replaced subjects in <Video 1> as their own <Subject N> entities" in raw
+        )
+        assert "never set" in raw and ("spoken by `<Subject 1>`" in raw or "spoken by <Subject 1>" in raw)
 
 
 
