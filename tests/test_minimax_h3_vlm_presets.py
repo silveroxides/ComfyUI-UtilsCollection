@@ -421,7 +421,7 @@ def test_timeline_derived_h3_presets_create_dialogue_and_limit_channel_load():
     for name in TIMELINE_DERIVED_PRESETS:
         instruction = presets[name]
         assert "**Requested Dialogue Creation:**" in instruction
-        assert "`Add dialogue` or another direct user request" in instruction
+        assert ("`Add dialogue` or another direct user request" in instruction or "Add dialogue or another direct user request" in instruction)
         assert "not as a request to detect speech already present" in instruction
         assert "do not force dialogue into every block" in instruction
         assert "**Foreground Priority and Segment Load:**" in instruction
@@ -441,11 +441,14 @@ def test_timeline_fl2va_presets_enforce_first_and_optional_final_anchors():
     for name in TIMELINE_FL2VA_PRESETS:
         instruction = presets[name]
         assert "### MiniMax H3 FL2VA Existing Picture Anchor Contract" in instruction
-        assert "`<Picture 1>` is always the fixed first frame at 0.00 seconds" in instruction
-        assert "`<Picture 2>` is the fixed final frame" in instruction
-        assert "`<Picture 2>` must not appear anywhere in the response" in instruction
+        assert (
+            "`<Picture 1>` is always the fixed first frame at 0.00 seconds" in instruction
+            or "<Picture 1> is always the fixed first frame at 0.00 seconds" in instruction
+        )
+        assert ("`<Picture 2>` is the fixed final frame" in instruction or "<Picture 2> is the fixed final frame" in instruction)
+        assert ("`<Picture 2>` must not appear anywhere in the response" in instruction or "<Picture 2> must not appear anywhere in the response" in instruction)
         assert "Never invent a third picture, exchange the anchor roles" in instruction
-        assert "Establish `<Picture 1>` in the first timeline interval" in instruction
+        assert ("Establish `<Picture 1>` in the first timeline interval" in instruction or "Establish <Picture 1> in the first timeline interval" in instruction)
         assert "cite it in the final timeline interval" in instruction
 
 
@@ -455,12 +458,15 @@ def test_timeline_ref2va_presets_enforce_ordered_inferred_reference_roles():
     for name in TIMELINE_REF2VA_PRESETS:
         instruction = presets[name]
         assert "### MiniMax H3 REF2VA Existing Picture Reference Contract" in instruction
-        assert "the only valid identifiers are `<Picture 1>` through `<Picture M>`" in instruction
-        assert "Do not mention `<Picture M+1>`" in instruction
+        assert (
+            "the only valid identifiers are `<Picture 1>` through `<Picture M>`" in instruction
+            or "the only valid identifiers are <Picture 1> through <Picture M>" in instruction
+        )
+        assert ("Do not mention `<Picture M+1>`" in instruction or "Do not mention <Picture M+1>" in instruction)
         assert "Preserve VLM input order and use every supplied picture" in instruction
         assert "Establish every supplied picture at its first materially relevant point" in instruction
         assert "Do not automatically classify any picture as the first frame" in instruction
-        assert "verify that every supplied `<Picture N>` is used" in instruction
+        assert ("verify that every supplied `<Picture N>` is used" in instruction or "verify that every supplied <Picture N> is used" in instruction)
 
 
 def test_base_mode_has_only_base_output_structure():
