@@ -2203,6 +2203,8 @@ class UC_AdvancedVisualConditioningEncode(io.ComfyNode):
         fusion_method=None,
     ) -> io.NodeOutput:
         method = cls.DEFAULT_FUSION_METHOD if fusion_method is None else fusion_method
+        if isinstance(method, list):
+            method = method[0] if method else cls.DEFAULT_FUSION_METHOD
         if method not in ("conds_fusion", "token_fusion"):
             raise ValueError(f"Unsupported visual fusion method: {method}")
         execute = cls._execute_token_fusion if method == "token_fusion" else cls._execute_conds_fusion
@@ -4108,6 +4110,8 @@ class UC_AdvancedMiniMaxH3ImageToVideo(io.ComfyNode):
         **kwargs,
     ) -> io.NodeOutput:
         fusion_method = cls.DEFAULT_FUSION_METHOD if fusion_method is None else fusion_method
+        if isinstance(fusion_method, list):
+            fusion_method = fusion_method[0] if fusion_method else cls.DEFAULT_FUSION_METHOD
         if fusion_method not in ("conds_fusion", "token_fusion"):
             raise ValueError(f"Unsupported MiniMax H3 fusion method: {fusion_method}")
         conditioning, latent = execute_advanced_minimax_h3_image_to_video(
