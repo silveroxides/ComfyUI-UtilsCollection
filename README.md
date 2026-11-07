@@ -222,6 +222,7 @@ the base-resolution conditioning fusion.
 - `UC_OverlayPoseKeypoints`
 - `UC_AnimalPoseEstimator`
 - `UC_DensePoseEstimator`
+- `UC_LoadVideo`
 - `UC_LoadVideoPath`
 - `UC_LoadVideoDirectory`
 - `UC_SaveVideo`

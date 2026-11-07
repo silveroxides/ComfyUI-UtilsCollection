@@ -25,6 +25,10 @@ from comfy_api.latest import ComfyExtension, io
 from .node_replacements import register_replacements
 from .node_metadata import enrich_node_list
 from .helpers.scheduler_helpers import register_scheduler_handlers
+from .helpers.video_helpers import register_uc_video_upload_route
+
+WEB_DIRECTORY = "./web"
+
 
 class SamplingUtils(ComfyExtension):
     @override
@@ -138,6 +142,7 @@ class SamplingUtils(ComfyExtension):
             UC_MiniMaxH3BasePromptBuilder,
             UC_LoadImagePath,
             UC_LoadImageDirectory,
+            UC_LoadVideo,
             UC_LoadVideoPath,
             UC_LoadVideoDirectory,
             UC_SaveVideo,
@@ -306,6 +311,7 @@ class SamplingUtils(ComfyExtension):
     async def on_load(self) -> None:
         """Called by ComfyUI backend on startup to initialize resources and register API extensions."""
         register_scheduler_handlers()
+        register_uc_video_upload_route()
         await register_replacements()
 
 async def comfy_entrypoint() -> SamplingUtils:

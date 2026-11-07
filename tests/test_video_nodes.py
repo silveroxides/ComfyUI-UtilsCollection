@@ -245,3 +245,128 @@ def test_save_video_schema_and_execution(tmp_path, monkeypatch):
         with av.open(nvenc_path) as nvenc_container:
             s_codec = nvenc_container.streams.video[0].codec_context.name
             assert "av1" in s_codec.lower() or "dav1d" in s_codec.lower()
+
+
+def test_uc_load_video_schema():
+    schema = video_nodes.UC_LoadVideo.define_schema()
+    assert schema.node_id == "UC_LoadVideo"
+    assert schema.display_name == "Load Video (UC)"
+    assert [inp.id for inp in schema.inputs] == ["file", "preview_mode"]
+
+    file_inp = next(inp for inp in schema.inputs if inp.id == "file")
+    assert file_inp.tooltip is not None and len(file_inp.tooltip) > 0
+
+    preview_inp = next(inp for inp in schema.inputs if inp.id == "preview_mode")
+    assert preview_inp.default == "none"
+    assert preview_inp.options == ["none", "thumbnail", "reduced_proxy", "full"]
+    assert preview_inp.tooltip is not None and len(preview_inp.tooltip) > 0
+
+    assert [out.id for out in schema.outputs] == ["video"]
+    assert schema.outputs[0].tooltip is not None and len(schema.outputs[0].tooltip) > 0
+
+
+def test_uc_load_video_preview_modes(tmp_path, write_video, monkeypatch):
+    import folder_paths
+    from utils_collection_video_nodes_test.helpers import video_helpers
+
+    clip = tmp_path / "test_clip.mp4"
+    write_video(clip)
+
+    temp_dir = tmp_path / "temp"
+    temp_dir.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setattr(folder_paths, "get_temp_directory", lambda: str(temp_dir))
+    monkeypatch.setattr(folder_paths, "get_annotated_filepath", lambda f: str(clip))
+    monkeypatch.setattr(video_nodes.InputImpl, "VideoFromFile", lambda path: ("VIDEO", path))
+
+    # 1. preview_mode='none' should return ui=None (no preview streamed)
+    res_none = video_nodes.UC_LoadVideo.execute("test_clip.mp4", preview_mode="none")
+    assert res_none.args[0] == ("VIDEO", str(clip))
+    assert res_none.ui is None
+
+    # 2. preview_mode='thumbnail' should extract a webp still
+    res_thumb = video_nodes.UC_LoadVideo.execute("test_clip.mp4", preview_mode="thumbnail")
+    assert res_thumb.ui is not None
+    assert "images" in res_thumb.ui
+    thumb_name = res_thumb.ui["images"][0]["filename"]
+    assert thumb_name.endswith(".webp")
+    assert (temp_dir / thumb_name).is_file()
+
+    # 3. preview_mode='reduced_proxy' should generate a proxy mp4
+    res_proxy = video_nodes.UC_LoadVideo.execute("test_clip.mp4", preview_mode="reduced_proxy")
+    assert res_proxy.ui is not None
+    assert "images" in res_proxy.ui
+    proxy_name = res_proxy.ui["images"][0]["filename"]
+    assert proxy_name.endswith(".mp4")
+    assert (temp_dir / proxy_name).is_file()
+
+    # 4. preview_mode='full' should point to input file
+    res_full = video_nodes.UC_LoadVideo.execute("test_clip.mp4", preview_mode="full")
+    assert res_full.ui is not None
+    assert "images" in res_full.ui
+    assert res_full.ui["images"][0]["type"] == "input"
+
+
+def test_uc_video_upload_streaming_and_traversal_guard(tmp_path, monkeypatch):
+    import asyncio
+    import folder_paths
+    from utils_collection_video_nodes_test.helpers import video_helpers
+
+    input_dir = tmp_path / "input"
+    input_dir.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setattr(folder_paths, "get_input_directory", lambda: str(input_dir))
+
+    # Mock multipart parts
+    class MockPart:
+        def __init__(self, name, filename=None, text_val="", chunks=None):
+            self.name = name
+            self.filename = filename
+            self._text_val = text_val
+            self._chunks = list(chunks or [])
+
+        async def text(self):
+            return self._text_val
+
+        async def read_chunk(self, size=262144):
+            if self._chunks:
+                return self._chunks.pop(0)
+            return b""
+
+    class MockReader:
+        def __init__(self, parts):
+            self._parts = list(parts)
+
+        async def next(self):
+            if self._parts:
+                return self._parts.pop(0)
+            return None
+
+    class MockRequest:
+        def __init__(self, parts):
+            self._reader = MockReader(parts)
+
+        async def multipart(self):
+            return self._reader
+
+    async def run_scenario():
+        # 1. Normal streaming upload
+        file_bytes = b"fake-video-bytes-for-test"
+        req_ok = MockRequest([
+            MockPart(name="file", filename="my_movie.mp4", chunks=[file_bytes[:10], file_bytes[10:]]),
+        ])
+        resp_ok = await video_helpers.handle_uc_video_upload(req_ok)
+        assert resp_ok.status == 200
+        saved_file = input_dir / "my_movie.mp4"
+        assert saved_file.is_file()
+        assert saved_file.read_bytes() == file_bytes
+
+        # 2. Block path traversal
+        req_bad = MockRequest([
+            MockPart(name="subfolder", text_val="../../evil_path"),
+            MockPart(name="file", filename="escape.mp4", chunks=[b"123"]),
+        ])
+        resp_bad = await video_helpers.handle_uc_video_upload(req_bad)
+        assert resp_bad.status == 400
+
+    asyncio.run(run_scenario())
+
+

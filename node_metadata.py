@@ -7,6 +7,7 @@ DESCRIPTIONS = {
     "UC_VideoResolutionAndLengthPicker": "Calculates multiple-aligned video dimensions and generation frame length from aspect ratio and duration, with optional image or video frame resizing and cropping.",
     "UC_ImageScaleAndResolutionPicker": "Resizes an image to a megapixel target and returns base and upscaled dimensions.",
     "UC_Image_Color_Noise": "Adds configurable color noise to an image.",
+    "UC_LoadVideo": "Loads a video from ComfyUI's input directory with lightweight preview options and uncapped in-browser upload.",
     "UC_LoadImagePath": "Loads an image and mask from an explicit filesystem path.",
     "UC_LoadImageDirectory": "Loads images from a directory for batch or iterative workflows.",
     "UC_LoadImageWithAlpha": "Loads an image like Core Load Image and also returns an RGBA IMAGE with its alpha preserved.",
@@ -193,6 +194,7 @@ DESCRIPTIONS = {
 
 
 EXTRA_ALIASES = {
+    "UC_LoadVideo": ["load video uc", "uc load video", "upload video", "import video"],
     "UC_TextConcatenateAutogrow": ["concatenate", "text concat", "join text", "merge text", "combine strings", "autogrow"],
     "UC_Newline": ["newline", "new line", "line break", r"\n"],
     "UC_StaticInt": ["primitive integer", "number", "shared integer", "constant int"],

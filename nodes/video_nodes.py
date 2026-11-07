@@ -3,6 +3,7 @@ import logging
 import os
 from typing import Any
 
+import folder_paths
 import torch
 from tqdm import tqdm
 from comfy_api.latest import InputImpl, Types, io, ui
@@ -12,12 +13,74 @@ from ..helpers.sampling_helpers import (
     parse_h3_seconds_option,
 )
 from ..helpers.video_helpers import (
+    generate_video_preview,
     is_video_file,
     list_video_files,
     normalize_video_path,
     save_keyframe_optimized_video,
     split_h3_video_components_into_segments,
 )
+
+
+class UC_LoadVideo(io.ComfyNode):
+    @classmethod
+    def define_schema(cls) -> io.Schema:
+        input_dir = folder_paths.get_input_directory()
+        files = (
+            [f for f in os.listdir(input_dir) if os.path.isfile(os.path.join(input_dir, f))]
+            if os.path.isdir(input_dir)
+            else []
+        )
+        files = folder_paths.filter_files_content_types(files, ["video"])
+        return io.Schema(
+            node_id="UC_LoadVideo",
+            display_name="Load Video (UC)",
+            category="advanced/video",
+            search_aliases=["import video", "open video", "video file", "upload video"],
+            description="Load video with lightweight preview options and uncapped in-browser upload.",
+            inputs=[
+                io.Combo.Input(
+                    "file",
+                    options=sorted(files),
+                    tooltip="Select an existing video from ComfyUI's input folder or upload a new video file.",
+                ),
+                io.Combo.Input(
+                    "preview_mode",
+                    options=["none", "thumbnail", "reduced_proxy", "full"],
+                    default="none",
+                    tooltip="Preview mode for the loaded video. 'none' disables preview entirely to avoid canvas lag. 'thumbnail' extracts a single static still. 'reduced_proxy' generates a small downscaled video proxy. 'full' previews the raw input video.",
+                ),
+            ],
+            outputs=[
+                io.Video.Output(
+                    "video",
+                    display_name="VIDEO",
+                    tooltip="The loaded video object ready for downstream video nodes.",
+                ),
+            ],
+        )
+
+    @classmethod
+    def execute(cls, file: str, preview_mode: str = "none") -> io.NodeOutput:
+        video_path = folder_paths.get_annotated_filepath(file)
+        if not video_path or not os.path.isfile(video_path):
+            raise ValueError(f"Invalid video file: {file}")
+        source = InputImpl.VideoFromFile(video_path)
+        ui_preview = generate_video_preview(video_path, file, preview_mode)
+        return io.NodeOutput(source, ui=ui_preview)
+
+    @classmethod
+    def fingerprint_inputs(cls, file: str, preview_mode: str = "none"):
+        video_path = folder_paths.get_annotated_filepath(file)
+        if not video_path or not os.path.isfile(video_path):
+            return ""
+        return f"{os.path.getmtime(video_path)}_{preview_mode}"
+
+    @classmethod
+    def validate_inputs(cls, file: str, preview_mode: str = "none"):
+        if not folder_paths.exists_annotated_filepath(file):
+            return f"Invalid video file: {file}"
+        return True
 
 
 class UC_LoadVideoPath(io.ComfyNode):

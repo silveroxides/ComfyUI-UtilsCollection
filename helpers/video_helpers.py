@@ -927,3 +927,203 @@ def split_h3_video_components_into_segments(
             trim_trailing_list,
         )
     return frames_list, audio_list, out_w, out_h, length_list, video_list, transcript_list
+
+
+_ALLOWED_VIDEO_EXTS = {
+    "mp4", "mov", "mkv", "webm", "avi", "m4v", "gif",
+    "mpg", "mpeg", "wmv", "flv", "ogv", "ts",
+}
+
+
+def generate_video_preview(video_path: str, file_input: str, preview_mode: str) -> dict[str, Any] | None:
+    """Generate or retrieve a lightweight preview UI output based on preview_mode.
+
+    Supported preview_mode options:
+      - 'none': returns None (no preview sent to frontend)
+      - 'thumbnail': single extracted static frame saved as compressed WebP in temp
+      - 'reduced_proxy': downscaled low-fps proxy clip encoded in temp
+      - 'full': raw original file reference (matches Core LoadVideo behavior)
+    """
+    from comfy_api.latest import io, ui
+
+    if preview_mode == "none":
+        return None
+
+    if preview_mode == "full":
+        name, _ = folder_paths.annotated_filepath(file_input)
+        subfolder, _, filename = name.replace("\\", "/").rpartition("/")
+        result = ui.SavedResult(filename, subfolder, io.FolderType.input)
+        return ui.PreviewVideo([result]).as_dict()
+
+    if not os.path.isfile(video_path):
+        return None
+
+    mtime = int(os.path.getmtime(video_path))
+    temp_dir = folder_paths.get_temp_directory()
+    path_stem = re.sub(r"[^A-Za-z0-9_]", "_", os.path.splitext(os.path.basename(video_path))[0])[:32]
+
+    if preview_mode == "thumbnail":
+        thumb_filename = f"UC_thumb_{path_stem}_{mtime}.webp"
+        thumb_path = os.path.join(temp_dir, thumb_filename)
+        if not os.path.isfile(thumb_path):
+            try:
+                with av.open(video_path) as container:
+                    stream = next((s for s in container.streams if s.type == "video"), None)
+                    if stream is None:
+                        return None
+                    frame = next(container.decode(stream), None)
+                    if frame is None:
+                        return None
+                    img = frame.to_image()
+                    w, h = img.size
+                    max_dim = max(w, h)
+                    if max_dim > 512:
+                        scale = 512.0 / max_dim
+                        new_w = max(1, round(w * scale))
+                        new_h = max(1, round(h * scale))
+                        img = img.resize((new_w, new_h), Image.Resampling.LANCZOS)
+                    img.save(thumb_path, format="WEBP", quality=80)
+            except Exception as e:
+                logging.warning("[UC_LoadVideo] Failed to generate thumbnail preview: %s", e)
+                return None
+
+        result = ui.SavedResult(thumb_filename, "", io.FolderType.temp)
+        return ui.SavedImages([result]).as_dict()
+
+    if preview_mode == "reduced_proxy":
+        proxy_filename = f"UC_proxy_{path_stem}_{mtime}.mp4"
+        proxy_path = os.path.join(temp_dir, proxy_filename)
+        if not os.path.isfile(proxy_path):
+            try:
+                with av.open(video_path) as in_container:
+                    in_stream = next((s for s in in_container.streams if s.type == "video"), None)
+                    if in_stream is None:
+                        return None
+
+                    orig_w = in_stream.width
+                    orig_h = in_stream.height
+                    target_h = 360
+                    target_w = max(2, round((orig_w * (target_h / orig_h)) / 2) * 2)
+
+                    with av.open(proxy_path, mode="w") as out_container:
+                        out_stream = out_container.add_stream("libx264", rate=10)
+                        out_stream.width = target_w
+                        out_stream.height = target_h
+                        out_stream.pix_fmt = "yuv420p"
+                        out_stream.options = {"crf": "28", "preset": "ultrafast"}
+
+                        max_frames = 100
+                        frame_count = 0
+                        source_fps = float(in_stream.average_rate or 24.0)
+                        step = max(1, round(source_fps / 10.0))
+
+                        for idx, frame in enumerate(in_container.decode(in_stream)):
+                            if idx % step != 0:
+                                continue
+                            re_frame = frame.reformat(width=target_w, height=target_h)
+                            for packet in out_stream.encode(re_frame):
+                                out_container.mux(packet)
+                            frame_count += 1
+                            if frame_count >= max_frames:
+                                break
+
+                        for packet in out_stream.encode():
+                            out_container.mux(packet)
+            except Exception as e:
+                logging.warning("[UC_LoadVideo] Failed to generate reduced proxy preview: %s", e)
+                return None
+
+        result = ui.SavedResult(proxy_filename, "", io.FolderType.temp)
+        return ui.PreviewVideo([result]).as_dict()
+
+    return None
+
+
+async def handle_uc_video_upload(request: Any) -> Any:
+    """Stream incoming video file upload straight to input/ without buffering whole body in memory."""
+    from aiohttp import web
+    import uuid
+
+    reader = await request.multipart()
+    field = None
+    subfolder = ""
+
+    while True:
+        part = await reader.next()
+        if part is None:
+            break
+        if part.name == "subfolder":
+            subfolder = (await part.text()).strip()
+        elif part.name == "file":
+            field = part
+            break
+
+    if field is None or not field.filename:
+        return web.json_response({"error": "No video file field in upload request."}, status=400)
+
+    base = os.path.basename(field.filename.replace("\\", "/"))
+    stem, ext = os.path.splitext(base)
+    ext = ext.lower().lstrip(".")
+    if ext not in _ALLOWED_VIDEO_EXTS:
+        return web.json_response(
+            {"error": f"Video extension {ext!r} not allowed. Supported: {', '.join(sorted(_ALLOWED_VIDEO_EXTS))}"},
+            status=400,
+        )
+
+    clean_stem = re.sub(r"[^A-Za-z0-9_\- ]", "_", stem).strip().strip(".") or "video"
+    input_base = os.path.realpath(folder_paths.get_input_directory())
+    target_dir = os.path.realpath(os.path.join(input_base, subfolder)) if subfolder else input_base
+
+    if os.path.commonpath([input_base, target_dir]) != input_base:
+        return web.json_response({"error": "Invalid subfolder path (path traversal blocked)."}, status=400)
+
+    os.makedirs(target_dir, exist_ok=True)
+
+    candidate = f"{clean_stem}.{ext}"
+    target_path = os.path.join(target_dir, candidate)
+    counter = 1
+    while os.path.exists(target_path):
+        candidate = f"{clean_stem}_{counter}.{ext}"
+        target_path = os.path.join(target_dir, candidate)
+        counter += 1
+
+    temp_path = os.path.join(target_dir, f".{clean_stem}_{uuid.uuid4().hex}.tmp")
+
+    try:
+        with open(temp_path, "wb") as f:
+            while True:
+                chunk = await field.read_chunk(262144)  # 256 KB
+                if not chunk:
+                    break
+                f.write(chunk)
+
+        os.replace(temp_path, target_path)
+    except Exception as e:
+        if os.path.exists(temp_path):
+            try:
+                os.remove(temp_path)
+            except OSError:
+                pass
+        logging.error("[UC_LoadVideo] Video upload failed: %s", e)
+        return web.json_response({"error": f"Failed to save uploaded video: {e}"}, status=500)
+
+    return web.json_response({"name": candidate, "subfolder": subfolder})
+
+
+_UC_UPLOAD_ROUTE_REGISTERED = False
+
+
+def register_uc_video_upload_route() -> None:
+    """Register /uc/api/upload_video route on ComfyUI's PromptServer if available."""
+    global _UC_UPLOAD_ROUTE_REGISTERED
+    if _UC_UPLOAD_ROUTE_REGISTERED:
+        return
+    try:
+        from server import PromptServer
+        routes = PromptServer.instance.routes
+        routes.post("/uc/api/upload_video")(handle_uc_video_upload)
+        _UC_UPLOAD_ROUTE_REGISTERED = True
+        logging.info("[UC_LoadVideo] Registered /uc/api/upload_video streaming upload endpoint.")
+    except Exception as e:
+        logging.debug("[UC_LoadVideo] PromptServer not available for route registration: %s", e)
+
