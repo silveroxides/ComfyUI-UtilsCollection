@@ -4203,6 +4203,8 @@ class UC_MiniMaxH3ClipContinuationEncoder(UC_AdvancedMiniMaxH3ImageToVideo):
         **kwargs,
     ) -> io.NodeOutput:
         fusion_method = cls.DEFAULT_FUSION_METHOD if fusion_method is None else fusion_method
+        if isinstance(fusion_method, list):
+            fusion_method = fusion_method[0] if fusion_method else cls.DEFAULT_FUSION_METHOD
         if fusion_method not in ("conds_fusion", "token_fusion"):
             raise ValueError(f"Unsupported MiniMax H3 fusion method: {fusion_method}")
         conditioning, latent = execute_advanced_minimax_h3_image_to_video(
