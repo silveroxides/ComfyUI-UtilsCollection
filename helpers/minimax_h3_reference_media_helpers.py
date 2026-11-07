@@ -441,22 +441,6 @@ def execute_advanced_minimax_h3_reference_media_image_to_video(
                 v_ref["audio_latent"] = None
             prepared_reference_videos.append((v_frames, soundtrack, v_ref, a_ref))
 
-    for aud in parsed_audios:
-        a_ref = None
-        if aud is not None and audio_vae is not None:
-            a_ref = _encode_minimax_h3_audio_reference(aud, audio_vae, cache=cache)
-        if aud is not None:
-            prepared_reference_audios.append((aud, a_ref))
-
-    # Build reference items for presentation tokenization
-    reference_items = []
-    # 1. Frames & Images
-    if first_frame is not None:
-        vlm_first = prepare_vlm_image(first_frame, vlm_resolution)
-        reference_items.append({"type": "image", "data": vlm_first})
-    if last_frame is not None:
-        vlm_last = prepare_vlm_image(last_frame, vlm_resolution)
-        reference_items.append({"type": "image", "data": vlm_last})
     flat_images = []
     if reference_images is not None:
         if isinstance(reference_images, dict):
@@ -486,6 +470,75 @@ def execute_advanced_minimax_h3_reference_media_image_to_video(
                     flat_images.append(reference_images[i:i+1])
             else:
                 flat_images.append(reference_images)
+
+    # --- Stage 1 (Keyframes & Images VAE Encoding) ---
+    keyframes = []
+    if first_frame is not None and ref_image_size != "none" and vae is not None:
+        samples = first_frame[..., :3].movedim(-1, 1)
+        samples = comfy.utils.common_upscale(samples, width, height, "lanczos", "disabled")
+        prepared_first = samples.movedim(1, -1)
+        latent_first = vae.encode(prepared_first) if cache is None else cache.encode_vae(vae, prepared_first, media="image")
+        keyframes.append({"resolved_frame_index": 0, "latent": latent_first})
+    if last_frame is not None and ref_image_size != "none" and vae is not None:
+        samples = last_frame[..., :3].movedim(-1, 1)
+        samples = comfy.utils.common_upscale(samples, width, height, "lanczos", "center")
+        prepared_last = samples.movedim(1, -1)
+        latent_last = vae.encode(prepared_last) if cache is None else cache.encode_vae(vae, prepared_last, media="image")
+        keyframes.append({"resolved_frame_index": frame_count - 1, "latent": latent_last})
+
+    references = []
+    for img in flat_images:
+        if ref_image_size != "none" and vae is not None:
+            img_h, img_w = img.shape[1], img.shape[2]
+            if ref_image_size == "match":
+                scale = min(1.0, math.sqrt((width * height) / (img_w * img_h)))
+            elif ref_image_size == "max":
+                scale = min(1.0, 2048.0 / min(img_w, img_h))
+            else:
+                scale = 1.0
+            tw = max(32, round(img_w * scale / 32) * 32)
+            th = max(32, round(img_h * scale / 32) * 32)
+
+            prepared_img = img
+            if (img.shape[2], img.shape[1]) != (tw, th):
+                samples = img[..., :3].movedim(-1, 1)
+                samples = comfy.utils.common_upscale(samples, tw, th, "lanczos", "disabled")
+                prepared_img = samples.movedim(1, -1)
+
+            latent_img = vae.encode(prepared_img) if cache is None else cache.encode_vae(vae, prepared_img, media="image")
+            references.append({
+                "kind": "image",
+                "latent_h": th // 16,
+                "latent_w": tw // 16,
+                "latent": latent_img,
+            })
+    for _, _, v_ref, _ in prepared_reference_videos:
+        if v_ref is not None:
+            references.append(v_ref)
+
+    # --- Stage 2: Audio VAE Encoding ---
+    for aud in parsed_audios:
+        a_ref = None
+        if aud is not None and audio_vae is not None:
+            a_ref = _encode_minimax_h3_audio_reference(aud, audio_vae, cache=cache)
+        if aud is not None:
+            prepared_reference_audios.append((aud, a_ref))
+    for _, _, _, a_ref in prepared_reference_videos:
+        if a_ref is not None:
+            references.append(a_ref)
+    for _, a_ref in prepared_reference_audios:
+        if a_ref is not None:
+            references.append(a_ref)
+
+    # Build reference items for presentation tokenization
+    reference_items = []
+    # 1. Frames & Images
+    if first_frame is not None:
+        vlm_first = prepare_vlm_image(first_frame, vlm_resolution)
+        reference_items.append({"type": "image", "data": vlm_first})
+    if last_frame is not None:
+        vlm_last = prepare_vlm_image(last_frame, vlm_resolution)
+        reference_items.append({"type": "image", "data": vlm_last})
     for img in flat_images:
         vlm_img = prepare_vlm_image(img, vlm_resolution)
         reference_items.append({"type": "image", "data": vlm_img})
@@ -607,57 +660,6 @@ def execute_advanced_minimax_h3_reference_media_image_to_video(
                 meta["pooled_output"] = pooled * multiplier
             scaled.append([tensor * multiplier, meta])
         conditioning = scaled
-
-    # Collect keyframes and references
-    keyframes = []
-    if first_frame is not None and ref_image_size != "none" and vae is not None:
-        samples = first_frame[..., :3].movedim(-1, 1)
-        samples = comfy.utils.common_upscale(samples, width, height, "lanczos", "disabled")
-        prepared_first = samples.movedim(1, -1)
-        latent_first = vae.encode(prepared_first) if cache is None else cache.encode_vae(vae, prepared_first, media="image")
-        keyframes.append({"resolved_frame_index": 0, "latent": latent_first})
-    if last_frame is not None and ref_image_size != "none" and vae is not None:
-        samples = last_frame[..., :3].movedim(-1, 1)
-        samples = comfy.utils.common_upscale(samples, width, height, "lanczos", "center")
-        prepared_last = samples.movedim(1, -1)
-        latent_last = vae.encode(prepared_last) if cache is None else cache.encode_vae(vae, prepared_last, media="image")
-        keyframes.append({"resolved_frame_index": frame_count - 1, "latent": latent_last})
-
-    references = []
-    for img in flat_images:
-        if ref_image_size != "none" and vae is not None:
-            img_h, img_w = img.shape[1], img.shape[2]
-            if ref_image_size == "match":
-                scale = min(1.0, math.sqrt((width * height) / (img_w * img_h)))
-            elif ref_image_size == "max":
-                scale = min(1.0, 2048.0 / min(img_w, img_h))
-            else:
-                scale = 1.0
-            tw = max(32, round(img_w * scale / 32) * 32)
-            th = max(32, round(img_h * scale / 32) * 32)
-
-            prepared_img = img
-            if (img.shape[2], img.shape[1]) != (tw, th):
-                samples = img[..., :3].movedim(-1, 1)
-                samples = comfy.utils.common_upscale(samples, tw, th, "lanczos", "disabled")
-                prepared_img = samples.movedim(1, -1)
-
-            latent_img = vae.encode(prepared_img) if cache is None else cache.encode_vae(vae, prepared_img, media="image")
-            references.append({
-                "kind": "image",
-                "latent_h": th // 16,
-                "latent_w": tw // 16,
-                "latent": latent_img,
-            })
-    for _, _, v_ref, _ in prepared_reference_videos:
-        if v_ref is not None:
-            references.append(v_ref)
-    for _, _, _, a_ref in prepared_reference_videos:
-        if a_ref is not None:
-            references.append(a_ref)
-    for _, a_ref in prepared_reference_audios:
-        if a_ref is not None:
-            references.append(a_ref)
 
     metadata = {}
     if keyframes:

@@ -641,6 +641,71 @@ def build_minimax_h3_media_config(
     }
 
 
+def normalize_h3_fusion_method(method, default="conds_fusion"):
+    while isinstance(method, list) and len(method) > 0:
+        method = method[0]
+    if method in (None, ""):
+        return default
+    if method in ("off", "disabled", "none", "false", "False"):
+        return "conds_fusion"
+    if method in ("conds_fusion", "token_fusion"):
+        return method
+    raise ValueError(f"Unsupported MiniMax H3 fusion method: {method}")
+
+
+def normalize_visual_fusion_method(method, default="conds_fusion"):
+    while isinstance(method, list) and len(method) > 0:
+        method = method[0]
+    if method in (None, ""):
+        return default
+    if method in ("off", "disabled", "none", "false", "False"):
+        return "conds_fusion"
+    if method in ("conds_fusion", "token_fusion"):
+        return method
+    raise ValueError(f"Unsupported visual fusion method: {method}")
+
+
+def is_list_batch_call(args_dict: dict) -> bool:
+    for k in ("clip", "prompt", "width", "height", "length", "vlm_resolution", "fusion_method", "video_latent_mode"):
+        if k in args_dict and isinstance(args_dict[k], list):
+            return True
+    return False
+
+
+def get_list_batch_size(args_dict: dict) -> int:
+    batch_size = 1
+    for k, v in args_dict.items():
+        if k == "cls":
+            continue
+        if isinstance(v, list) and len(v) > 0:
+            batch_size = max(batch_size, len(v))
+        elif isinstance(v, dict):
+            for sub_k, sub_v in v.items():
+                if isinstance(sub_v, list) and len(sub_v) > 0:
+                    batch_size = max(batch_size, len(sub_v))
+    return batch_size
+
+
+def slice_item_inputs(args_dict: dict, index: int) -> dict:
+    sliced = {}
+    for k, v in args_dict.items():
+        if k == "cls":
+            continue
+        if isinstance(v, list):
+            sliced[k] = None if len(v) == 0 else v[min(index, len(v) - 1)]
+        elif isinstance(v, dict):
+            sliced_dict = {}
+            for sub_k, sub_v in v.items():
+                if isinstance(sub_v, list):
+                    sliced_dict[sub_k] = None if len(sub_v) == 0 else sub_v[min(index, len(sub_v) - 1)]
+                else:
+                    sliced_dict[sub_k] = sub_v
+            sliced[k] = sliced_dict
+        else:
+            sliced[k] = v
+    return sliced
+
+
 def _validate_minimax_h3_media_config(media_config, output_frame_count):
     if not isinstance(media_config, dict) or media_config.get("schema_version") != 3:
         raise ValueError("Unsupported MiniMax H3 media config payload.")
@@ -4041,6 +4106,19 @@ def execute_advanced_minimax_h3_image_to_video(
     if native_reference_mode and ref_image_size not in ("match", "max", "none"):
         raise ValueError(f"Unsupported MiniMax H3 reference image size: {ref_image_size}")
 
+    config = dict(visual_fusion_config or {})
+    visual_method = config.get("visual_fusion_method", "off")
+    fusion_active = visual_method != "off" and bool(flat_fusion_images)
+    base_vlm_count = (1 if first_frame is not None else 0) + (1 if last_frame is not None else 0) + len(flat_references)
+    if fusion_active and keyframe_mode:
+        if any(
+            socket_number < 1 or socket_number > base_vlm_count
+            for socket_number, _ in fusion_socket_batches
+        ):
+            raise ValueError(
+                "MiniMax H3 frame fusion has a fusion image without a matching picture slot."
+            )
+
     frame_vae_enabled = ref_image_size != "none"
     visual_sources = []
     if first_frame is not None:
@@ -4169,33 +4247,8 @@ def execute_advanced_minimax_h3_image_to_video(
     )
     if continuation_frames is not None and vae is None:
         raise ValueError("MiniMax H3 Clip Continuation requires a video VAE.")
-    active_audio = audio
-    if active_audio is not None and continuation_media is not None:
-        merge_mode = continuation_media.get("video_merge_mode", "replace")
-        cont_audio = continuation_media.get("audio")
-        if merge_mode == "replace" and cont_audio is not None:
-            sample_rate = active_audio.get("sample_rate", 32000)
-            if continuation_frames is not None:
-                tail_samples = round(continuation_frames.shape[0] * sample_rate / 24)
-            elif torch.is_tensor(cont_audio.get("waveform")):
-                tail_samples = cont_audio["waveform"].shape[-1]
-            else:
-                tail_samples = 0
-            wave = active_audio.get("waveform")
-            if wave is not None and wave.shape[-1] > tail_samples:
-                active_audio = {"waveform": wave[..., tail_samples:], "sample_rate": sample_rate}
-            else:
-                active_audio = None
-    audio_reference = _encode_minimax_h3_audio_reference(active_audio, audio_vae, cache=cache)
-    continuation_audio_reference = (
-        _encode_minimax_h3_audio_reference(
-            continuation_media.get("audio") if continuation_media is not None else None,
-            audio_vae,
-            cache=cache,
-        )
-        if not continuation_has_latent
-        else None
-    )
+
+    # --- Stage 1: Video & Keyframe VAE Encoding (All VAE ops completed upfront) ---
     prepared_first = (
         prepare_minimax_h3_frame(first_frame, width, height, "disabled")
         if first_frame is not None and frame_vae_enabled
@@ -4223,6 +4276,96 @@ def execute_advanced_minimax_h3_image_to_video(
         if native_reference_mode and frame_vae_enabled
         else []
     )
+
+    keyframes = []
+    if prepared_continuation_tail is not None:
+        from .model_helpers import h3_step_offsets, h3_pixel_frames_for_latent_steps
+        enc_tail = cache.encode_vae(vae, prepared_continuation_tail)
+        steps = int(enc_tail.shape[2])
+        if h3_pixel_frames_for_latent_steps(steps) == continuation_frames.shape[0]:
+            offsets = h3_step_offsets(steps)
+            for p, k in zip(offsets, range(steps)):
+                keyframes.append({"resolved_frame_index": p, "latent": enc_tail[:, :, k : k + 1]})
+        else:
+            first_enc = cache.encode_vae(vae, prepared_continuation_tail[:1])
+            last_enc = cache.encode_vae(
+                vae,
+                prepare_minimax_h3_frame(continuation_frames[-1:], width, height, "center"),
+            )
+            keyframes.append({"resolved_frame_index": 0, "latent": first_enc})
+            keyframes.append({"resolved_frame_index": continuation_frames.shape[0] - 1, "latent": last_enc})
+    if prepared_first is not None:
+        keyframes.append(
+            {"resolved_frame_index": 0, "latent": cache.encode_vae(vae, prepared_first)}
+        )
+    if prepared_last is not None:
+        keyframes.append(
+            {
+                "resolved_frame_index": frame_count - 1,
+                "latent": cache.encode_vae(vae, prepared_last),
+            }
+        )
+    references = [
+        {
+            "kind": "image",
+            "latent_h": image.shape[1] // 16,
+            "latent_w": image.shape[2] // 16,
+            "latent": cache.encode_vae(vae, image),
+        }
+        for image in prepared_references
+    ] if native_reference_mode else []
+    if video_reference is not None:
+        references.append(video_reference)
+    if positioned_video_keyframes:
+        if continuation_frames is not None:
+            merge_mode = continuation_media.get("video_merge_mode", "replace") if continuation_media is not None else "replace"
+            if merge_mode in ("replace", "prepend"):
+                positioned_video_keyframes = align_minimax_h3_continuation_keyframes(
+                    positioned_video_keyframes, continuation_frames.shape[0], merge_mode
+                )
+        keyframes.extend(positioned_video_keyframes)
+        keyframes.sort(key=lambda keyframe: keyframe["resolved_frame_index"])
+
+    # --- Stage 2: Audio VAE Encoding ---
+    active_audio = audio
+    if active_audio is not None and continuation_media is not None:
+        merge_mode = continuation_media.get("video_merge_mode", "replace")
+        cont_audio = continuation_media.get("audio")
+        if merge_mode == "replace" and cont_audio is not None:
+            sample_rate = active_audio.get("sample_rate", 32000)
+            if continuation_frames is not None:
+                tail_samples = round(continuation_frames.shape[0] * sample_rate / 24)
+            elif torch.is_tensor(cont_audio.get("waveform")):
+                tail_samples = cont_audio["waveform"].shape[-1]
+            else:
+                tail_samples = 0
+            wave = active_audio.get("waveform")
+            if wave is not None and wave.shape[-1] > tail_samples:
+                active_audio = {"waveform": wave[..., tail_samples:], "sample_rate": sample_rate}
+            else:
+                active_audio = None
+    audio_reference = _encode_minimax_h3_audio_reference(active_audio, audio_vae, cache=cache)
+    continuation_audio_reference = (
+        _encode_minimax_h3_audio_reference(
+            continuation_media.get("audio") if continuation_media is not None else None,
+            audio_vae,
+            cache=cache,
+        )
+        if not continuation_has_latent
+        else None
+    )
+    if audio_reference is not None:
+        references.append(audio_reference)
+    if continuation_audio_reference is not None:
+        span_frames = continuation_frames.shape[0] if continuation_frames is not None else int(continuation_media.get("tail_frames", 22))
+        end_coord = round((5.0 / 3.0) * float(span_frames))
+        end_frame = end_coord / (5.0 / 3.0)
+        rt = int(continuation_audio_reference["audio_latent"].shape[-1])
+        keyframes.append({
+            "resolved_frame_index": end_frame - rt / (5.0 / 3.0),
+            "audio_latent": continuation_audio_reference["audio_latent"],
+        })
+        keyframes.sort(key=lambda keyframe: keyframe["resolved_frame_index"])
 
     base_vlm_images = []
     if first_frame is not None:
@@ -4651,66 +4794,6 @@ def execute_advanced_minimax_h3_image_to_video(
             scaled.append([tensor * multiplier, metadata])
         conditioning = scaled
 
-    keyframes = []
-    if prepared_continuation_tail is not None:
-        from .model_helpers import h3_step_offsets, h3_pixel_frames_for_latent_steps
-        enc_tail = cache.encode_vae(vae, prepared_continuation_tail)
-        steps = int(enc_tail.shape[2])
-        if h3_pixel_frames_for_latent_steps(steps) == continuation_frames.shape[0]:
-            offsets = h3_step_offsets(steps)
-            for p, k in zip(offsets, range(steps)):
-                keyframes.append({"resolved_frame_index": p, "latent": enc_tail[:, :, k : k + 1]})
-        else:
-            first_enc = cache.encode_vae(vae, prepared_continuation_tail[:1])
-            last_enc = cache.encode_vae(
-                vae,
-                prepare_minimax_h3_frame(continuation_frames[-1:], width, height, "center"),
-            )
-            keyframes.append({"resolved_frame_index": 0, "latent": first_enc})
-            keyframes.append({"resolved_frame_index": continuation_frames.shape[0] - 1, "latent": last_enc})
-    if prepared_first is not None:
-        keyframes.append(
-            {"resolved_frame_index": 0, "latent": cache.encode_vae(vae, prepared_first)}
-        )
-    if prepared_last is not None:
-        keyframes.append(
-            {
-                "resolved_frame_index": frame_count - 1,
-                "latent": cache.encode_vae(vae, prepared_last),
-            }
-        )
-    references = [
-        {
-            "kind": "image",
-            "latent_h": image.shape[1] // 16,
-            "latent_w": image.shape[2] // 16,
-            "latent": cache.encode_vae(vae, image),
-        }
-        for image in prepared_references
-    ] if native_reference_mode else []
-    if video_reference is not None:
-        references.append(video_reference)
-    if audio_reference is not None:
-        references.append(audio_reference)
-    if positioned_video_keyframes:
-        if continuation_frames is not None:
-            merge_mode = continuation_media.get("video_merge_mode", "replace") if continuation_media is not None else "replace"
-            if merge_mode in ("replace", "prepend"):
-                positioned_video_keyframes = align_minimax_h3_continuation_keyframes(
-                    positioned_video_keyframes, continuation_frames.shape[0], merge_mode
-                )
-        keyframes.extend(positioned_video_keyframes)
-        keyframes.sort(key=lambda keyframe: keyframe["resolved_frame_index"])
-    if continuation_audio_reference is not None:
-        span_frames = continuation_frames.shape[0] if continuation_frames is not None else int(continuation_media.get("tail_frames", 22))
-        end_coord = round((5.0 / 3.0) * float(span_frames))
-        end_frame = end_coord / (5.0 / 3.0)
-        rt = int(continuation_audio_reference["audio_latent"].shape[-1])
-        keyframes.append({
-            "resolved_frame_index": end_frame - rt / (5.0 / 3.0),
-            "audio_latent": continuation_audio_reference["audio_latent"],
-        })
-    keyframes.sort(key=lambda keyframe: keyframe["resolved_frame_index"])
     metadata = {}
     if keyframes:
         metadata["minimax_keyframes"] = keyframes

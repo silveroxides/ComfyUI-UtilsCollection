@@ -668,6 +668,86 @@ def test_minimax_h3_fusion_selector_preserves_legacy_defaults(monkeypatch, legac
     assert len(calls) == 3
 
 
+def test_minimax_h3_list_batch_execution_and_disabled_fusion(monkeypatch):
+    calls = []
+
+    def mock_execute(*args, **kwargs):
+        prompt = kwargs.get("prompt", args[2] if len(args) > 2 else None)
+        calls.append({"prompt": prompt, "token_fusion": kwargs.get("token_fusion")})
+        return [[torch.zeros(1, 4, 16), {}]], {"samples": torch.zeros(1, 16, 4, 4)}
+
+    monkeypatch.setattr(encoder_nodes, "execute_advanced_minimax_h3_image_to_video", mock_execute)
+
+    # 1. Test "off" and "disabled" normalize to token_fusion=False
+    UC_AdvancedMiniMaxH3ImageToVideo.execute(object(), prompt="single", fusion_method="off")
+    assert calls[-1]["token_fusion"] is False
+    UC_AdvancedMiniMaxH3ImageToVideo.execute(object(), prompt="single", fusion_method="disabled")
+    assert calls[-1]["token_fusion"] is False
+
+    # 2. Test ComfyUI list call with batch of 2 prompts and list-wrapped parameters
+    calls.clear()
+    out = UC_AdvancedMiniMaxH3ImageToVideo.execute(
+        clip=[object()],
+        prompt=["prompt_alpha", "prompt_beta"],
+        width=[1344],
+        height=[768],
+        length=[124],
+        fusion_method=["conds_fusion"],
+    )
+    assert len(calls) == 2
+    assert calls[0]["prompt"] == "prompt_alpha"
+    assert calls[1]["prompt"] == "prompt_beta"
+    assert len(out.args[0]) == 2  # list of 2 conditionings
+    assert len(out.args[1]) == 2  # list of 2 latents
+
+
+def test_continuation_encoder_list_batch_execution(monkeypatch):
+    calls = []
+
+    def mock_execute(*args, **kwargs):
+        calls.append(kwargs)
+        return [[torch.zeros(1, 4, 16), {"minimax_trim_frames": 22}]], {"samples": torch.zeros(1, 16, 4, 4)}
+
+    monkeypatch.setattr(encoder_nodes, "execute_advanced_minimax_h3_image_to_video", mock_execute)
+
+    out = encoder_nodes.UC_MiniMaxH3ClipContinuationEncoder.execute(
+        clip=[object()],
+        prompt=["scene 1", "scene 2"],
+        width=[1344],
+        fusion_method=["token_fusion"],
+    )
+    assert len(calls) == 2
+    assert calls[0]["token_fusion"] is True
+    assert calls[1]["token_fusion"] is True
+    conds, latents, trim_frames = out.args
+    assert len(conds) == 2
+    assert len(latents) == 2
+    assert trim_frames == [22, 22]
+
+
+def test_advanced_visual_conditioning_list_batch_execution(monkeypatch):
+    calls = []
+
+    def mock_conds_fusion(*args, **kwargs):
+        calls.append(kwargs)
+        return [[torch.zeros(1, 4, 16), {}]], {"samples": torch.zeros(1, 4, 8, 8)}
+
+    monkeypatch.setattr(encoder_nodes.UC_AdvancedVisualConditioningEncode, "_execute_conds_fusion", classmethod(lambda cls, **kwargs: mock_conds_fusion(**kwargs)))
+
+    out = encoder_nodes.UC_AdvancedVisualConditioningEncode.execute(
+        clip=[object()],
+        prompt=["p1", "p2"],
+        system_prompt=["sys"],
+        vlm_resolution=[384],
+        fusion_method=["off"],
+    )
+    assert len(calls) == 2
+    assert calls[0]["prompt"] == "p1"
+    assert calls[1]["prompt"] == "p2"
+    assert len(out.args[0]) == 2
+    assert len(out.args[1]) == 2
+
+
 def test_visual_fusion_images_schema_and_passthrough():
     schema = UC_VisualFusionImages.define_schema()
     assert schema.node_id == "UC_VisualFusionImages"
