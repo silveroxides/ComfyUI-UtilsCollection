@@ -748,3 +748,32 @@ def test_depth_anything_preprocess_and_run_pipeline():
     assert float(mv_mask[0, 2, 2]) < float(mv_mask[0, mv_mask.shape[1] - 5, 2])
 
 
+def test_depth_anything_normalization_supports_independent_tail_clipping():
+    values = torch.tensor([[[0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 100.0]]])
+
+    lower_only = image_helpers._normalize_depth_anything_tensor(
+        values, lower_clip_percentile=20.0
+    )
+    lower_bound = torch.quantile(values.flatten(), 0.2)
+    expected_lower = ((values - lower_bound) / (values.max() - lower_bound)).clamp(0.0, 1.0)
+    torch.testing.assert_close(lower_only, expected_lower)
+
+    upper_only = image_helpers._normalize_depth_anything_tensor(
+        values, upper_clip_percentile=20.0
+    )
+    upper_bound = torch.quantile(values.flatten(), 0.8)
+    expected_upper = ((values - values.min()) / (upper_bound - values.min())).clamp(0.0, 1.0)
+    torch.testing.assert_close(upper_only, expected_upper)
+
+    symmetric = image_helpers._normalize_depth_anything_tensor(values, percentile_clip=10.0)
+    separate_symmetric = image_helpers._normalize_depth_anything_tensor(
+        values, lower_clip_percentile=10.0, upper_clip_percentile=10.0
+    )
+    torch.testing.assert_close(symmetric, separate_symmetric)
+
+    with pytest.raises(ValueError, match="below 100%"):
+        image_helpers._normalize_depth_anything_tensor(
+            values, lower_clip_percentile=60.0, upper_clip_percentile=40.0
+        )
+
+

@@ -3757,20 +3757,28 @@ def _normalize_depth_anything_tensor(
     scope: str = "per_frame",
     percentile_clip: float = 0.0,
     invert: bool = False,
+    lower_clip_percentile: float = 0.0,
+    upper_clip_percentile: float = 0.0,
 ) -> torch.Tensor:
-    clip_q = max(0.0, min(49.0, float(percentile_clip))) / 100.0
+    symmetric_clip = max(0.0, min(49.0, float(percentile_clip)))
+    lower_clip = max(symmetric_clip, max(0.0, min(99.0, float(lower_clip_percentile))))
+    upper_clip = max(symmetric_clip, max(0.0, min(99.0, float(upper_clip_percentile))))
+    if lower_clip + upper_clip >= 100.0:
+        raise ValueError("Combined lower and upper depth clipping must be below 100%.")
+    lower_q = lower_clip / 100.0
+    upper_q = upper_clip / 100.0
     out = values.clone().float()
 
     def _norm_slice(tensor_slice: torch.Tensor) -> torch.Tensor:
         flat = tensor_slice.reshape(-1)
-        if clip_q > 0.0 and flat.numel() > 1:
+        if (lower_q > 0.0 or upper_q > 0.0) and flat.numel() > 1:
             if flat.numel() > 1_000_000:
                 step = max(1, flat.numel() // 1_000_000)
                 sampled = flat[::step]
             else:
                 sampled = flat
-            low = torch.quantile(sampled, clip_q)
-            high = torch.quantile(sampled, 1.0 - clip_q)
+            low = torch.quantile(sampled, lower_q) if lower_q > 0.0 else flat.min()
+            high = torch.quantile(sampled, 1.0 - upper_q) if upper_q > 0.0 else flat.max()
         else:
             low = flat.min()
             high = flat.max()
@@ -3803,6 +3811,8 @@ def run_depth_anything(
     keep_model_size: bool = False,
     batch_size: int = 4,
     forward=None,
+    lower_clip_percentile: float = 0.0,
+    upper_clip_percentile: float = 0.0,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, str]:
     if da3_model is None:
         raise ValueError("Connect a Depth Anything V3 model from Depth Anything V3 Loader.")
@@ -3921,6 +3931,8 @@ def run_depth_anything(
             scope=normalization_scope,
             percentile_clip=percentile_clip,
             invert=invert_depth,
+            lower_clip_percentile=lower_clip_percentile,
+            upper_clip_percentile=upper_clip_percentile,
         )
     elif output_mode == "depth":
         depth_mask = _normalize_depth_anything_tensor(
@@ -3928,6 +3940,8 @@ def run_depth_anything(
             scope=normalization_scope,
             percentile_clip=percentile_clip,
             invert=not invert_depth,
+            lower_clip_percentile=lower_clip_percentile,
+            upper_clip_percentile=upper_clip_percentile,
         )
     else:
         depth_mask = all_depth

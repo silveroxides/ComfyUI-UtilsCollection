@@ -408,7 +408,7 @@ class UC_DepthAnythingV3(io.ComfyNode):
             node_id="UC_DepthAnythingV3",
             display_name="Depth Anything V3",
             category="image/depth",
-            description="Estimates depth maps, confidence masks, sky masks, and camera poses across single images, multi-view sets, or video frame batches using Depth Anything V3.",
+            description="Estimates depth maps, confidence masks, sky masks, and camera poses across single images, multi-view sets, or video frame batches using Depth Anything V3, with independent lower- and upper-tail clipping for normalized depth outputs.",
             search_aliases=["depth anything", "depth anything v3", "da3", "depth map", "controlnet depth", "disparity", "camera pose", "sky mask"],
             inputs=[
                 DepthAnythingModel.Input(
@@ -463,7 +463,7 @@ class UC_DepthAnythingV3(io.ComfyNode):
                     min=0.0,
                     max=10.0,
                     step=0.1,
-                    tooltip="Percentage of extreme near and far pixels to clip at each end before 0–1 scaling. 0 uses exact minimum and maximum; 2 clips the lowest 2% and highest 2% to ignore outliers.",
+                    tooltip="Symmetric baseline percentage clipped from each end before 0–1 scaling. 0 uses exact minimum and maximum; 2 clips the lowest and highest 2%. The lower- and upper-tail controls can increase clipping on either side independently.",
                 ),
                 io.Boolean.Input(
                     "invert_depth",
@@ -487,6 +487,22 @@ class UC_DepthAnythingV3(io.ComfyNode):
                     max=64,
                     step=1,
                     tooltip="Maximum images or video frames processed together per network call, including partial tail chunks without padding. Lower if VRAM runs out; raise in multi_view mode to share scale across more frames at once.",
+                ),
+                io.Float.Input(
+                    "lower_clip_percentile",
+                    default=0.0,
+                    min=0.0,
+                    max=99.0,
+                    step=0.1,
+                    tooltip="Percentage of the lowest depth or disparity values to clip before 0–1 scaling. Effective lower-tail clipping is the larger of this value and percentile_clip. Keep at 0 to use only symmetric clipping.",
+                ),
+                io.Float.Input(
+                    "upper_clip_percentile",
+                    default=0.0,
+                    min=0.0,
+                    max=99.0,
+                    step=0.1,
+                    tooltip="Percentage of the highest depth or disparity values to clip before 0–1 scaling. Effective upper-tail clipping is the larger of this value and percentile_clip. Combined lower and upper clipping must stay below 100%.",
                 ),
             ],
             outputs=[
@@ -529,6 +545,8 @@ class UC_DepthAnythingV3(io.ComfyNode):
         sky_fill=True,
         keep_model_size=False,
         batch_size=4,
+        lower_clip_percentile=0.0,
+        upper_clip_percentile=0.0,
     ):
         return io.NodeOutput(
             *run_depth_anything(
@@ -545,6 +563,8 @@ class UC_DepthAnythingV3(io.ComfyNode):
                 sky_fill=sky_fill,
                 keep_model_size=keep_model_size,
                 batch_size=batch_size,
+                lower_clip_percentile=lower_clip_percentile,
+                upper_clip_percentile=upper_clip_percentile,
                 forward=depth_anything_forward,
             )
         )
