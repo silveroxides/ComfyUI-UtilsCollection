@@ -2103,6 +2103,7 @@ class UC_AdvancedVisualConditioningEncode(io.ComfyNode):
             node_id="UC_AdvancedVisualConditioningEncode",
             display_name="Advanced Visual Conditioning Encode",
             category="advanced/conditioning",
+            is_input_list=True,
             inputs=[
                 # --- Primary Inputs ---
                 io.Clip.Input("clip", tooltip="CLIP/T5 dual text encoder reference."),
@@ -2175,8 +2176,8 @@ class UC_AdvancedVisualConditioningEncode(io.ComfyNode):
                 io.Combo.Input("fusion_method", options=["conds_fusion", "token_fusion"], default=cls.DEFAULT_FUSION_METHOD, optional=True, tooltip="Fuse visual conditioning after encoding, or visual features and DeepStack before joint encoding. Off/no-image behavior remains unchanged."),
             ],
             outputs=[
-                io.Conditioning.Output("conditioning", display_name="conditioning"),
-                io.Latent.Output("latent", display_name="latent", tooltip="VAE reference latent encoded from input images (None if VAE or images disconnected)."),
+                io.Conditioning.Output(id="conditioning", display_name="conditioning", is_output_list=True),
+                io.Latent.Output(id="latent", display_name="latent", is_output_list=True, tooltip="VAE reference latent encoded from input images (None if VAE or images disconnected)."),
             ],
         )
 
@@ -3928,6 +3929,7 @@ class UC_AdvancedMiniMaxH3ImageToVideo(io.ComfyNode):
             node_id="UC_AdvancedMiniMaxH3ImageToVideo",
             display_name="Advanced MiniMax H3 Image to Video",
             category="advanced/conditioning",
+            is_input_list=True,
             description=(
                 "Creates coordinated MiniMax H3 Qwen conditioning from independent frame, reference, and fusion "
                 "inputs together with native visual controls and the matching joint video/audio latent. Optional media "
@@ -4060,9 +4062,11 @@ class UC_AdvancedMiniMaxH3ImageToVideo(io.ComfyNode):
             outputs=[
                 io.Conditioning.Output(
                     display_name="positive",
+                    is_output_list=True,
                     tooltip="Encoded prompt, visual, and audio guidance ready to connect to your guider or continuation sampler.",
                 ),
                 io.Latent.Output(
+                    is_output_list=True,
                     tooltip="Blank video and audio canvas sized to your selected width, height, and frame length.",
                 ),
             ],
@@ -4574,6 +4578,7 @@ class UC_AdvancedMiniMaxH3RefMediaImageToVideo(io.ComfyNode):
             node_id="UC_AdvancedMiniMaxH3RefMediaImageToVideo",
             display_name="Advanced MiniMax H3 Reference Media to Video",
             category="advanced/conditioning",
+            is_input_list=True,
             description="Encodes MiniMax H3 prompt conditioning, multi-video and audio references from a Reference Media container.",
             inputs=[
                 io.Clip.Input("clip", tooltip="MiniMax H3 Qwen3-VL 32B text encoder (qwen3vl_32b)."),
@@ -4602,9 +4607,11 @@ class UC_AdvancedMiniMaxH3RefMediaImageToVideo(io.ComfyNode):
             outputs=[
                 io.Conditioning.Output(
                     display_name="positive",
+                    is_output_list=True,
                     tooltip="Conditioning output containing MiniMax H3 prompt, VLM visual presentations, video and audio reference latents, and layout.",
                 ),
                 io.Latent.Output(
+                    is_output_list=True,
                     tooltip="Empty joint video/audio latent matching configured width, height, and length (at 24 fps).",
                 ),
             ],
