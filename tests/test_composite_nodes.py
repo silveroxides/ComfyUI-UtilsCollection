@@ -263,6 +263,73 @@ def test_image_pad_equal_target_preserves_fp32_pixels():
     assert torch.equal(padded, image)
 
 
+def test_image_pad_target_directional_slack():
+    image = torch.ones(1, 50, 100, 3)
+
+    # 1. Centered default (all 0)
+    padded_center, mask_center = image_nodes.UC_ImagePad.execute(
+        image, 0, 0, 0, 0, 0, "0, 0, 0", "color", target_width=100, target_height=100,
+    ).result
+    assert padded_center.shape == (1, 100, 100, 3)
+    assert mask_center[:, :25, :].sum() == 25 * 100
+    assert mask_center[:, 25:75, :].sum() == 0.0
+    assert mask_center[:, 75:, :].sum() == 25 * 100
+
+    # 2. Down = 1 (pad only bottom)
+    padded_down, mask_down = image_nodes.UC_ImagePad.execute(
+        image, 0, 0, 0, 1, 0, "0, 0, 0", "color", target_width=100, target_height=100,
+    ).result
+    assert padded_down.shape == (1, 100, 100, 3)
+    assert mask_down[:, :50, :].sum() == 0.0
+    assert mask_down[:, 50:, :].sum() == 50 * 100
+
+    # 3. Top = 1 (pad only top)
+    padded_top, mask_top = image_nodes.UC_ImagePad.execute(
+        image, 0, 0, 1, 0, 0, "0, 0, 0", "color", target_width=100, target_height=100,
+    ).result
+    assert padded_top.shape == (1, 100, 100, 3)
+    assert mask_top[:, :50, :].sum() == 50 * 100
+    assert mask_top[:, 50:, :].sum() == 0.0
+
+
+def test_image_pad_target_extra_padding_weighted():
+    image = torch.ones(1, 50, 100, 3)
+
+    # 1. Extra padding 32 with all directions 0: expands only height axis
+    padded_all0, mask_all0 = image_nodes.UC_ImagePad.execute(
+        image, 0, 0, 0, 0, 32, "0, 0, 0", "color", target_width=100, target_height=100,
+    ).result
+    # base slack h = 50 (25 top, 25 bottom), extra 32 top, extra 32 bottom -> total height = 50 + 25*2 + 32*2 = 164
+    assert padded_all0.shape == (1, 164, 100, 3)
+    assert mask_all0[:, 57:107, :].sum() == 0.0
+
+    # 2. Down = 1, extra padding 32: only down receives extra 32
+    padded_d1, mask_d1 = image_nodes.UC_ImagePad.execute(
+        image, 0, 0, 0, 1, 32, "0, 0, 0", "color", target_width=100, target_height=100,
+    ).result
+    # base top=0, base bottom=50, extra bottom=32 -> total height = 50 + 50 + 32 = 132, width=100
+    assert padded_d1.shape == (1, 132, 100, 3)
+    assert mask_d1[:, :50, :].sum() == 0.0
+    assert mask_d1[:, 50:, :].sum() == 82 * 100
+
+    # 3. Down = 1, Left = 1, Right = 1, extra padding 32
+    padded_d1_lr1, mask_d1_lr1 = image_nodes.UC_ImagePad.execute(
+        image, 1, 1, 0, 1, 32, "0, 0, 0", "color", target_width=100, target_height=100,
+    ).result
+    # extra: down=32, left=32, right=32 -> total width = 100 + 64 = 164, total height = 50 + 50 + 32 = 132
+    assert padded_d1_lr1.shape == (1, 132, 164, 3)
+    assert mask_d1_lr1[:, :50, 32:132].sum() == 0.0
+
+    # 4. Down = 1, Left = 2, Right = 2, extra padding 32
+    padded_d1_lr2, mask_d1_lr2 = image_nodes.UC_ImagePad.execute(
+        image, 2, 2, 0, 1, 32, "0, 0, 0", "color", target_width=100, target_height=100,
+    ).result
+    # extra: down = round(32 * 1/2) = 16, left = 32, right = 32
+    # total width = 100 + 64 = 164, total height = 50 + 50 + 16 = 116
+    assert padded_d1_lr2.shape == (1, 116, 164, 3)
+    assert mask_d1_lr2[:, :50, 32:132].sum() == 0.0
+
+
 def test_crop_by_mask_uses_batch_union_and_rejects_empty_masks():
     image = torch.zeros(2, 32, 32, 3)
     mask = torch.zeros(2, 32, 32)

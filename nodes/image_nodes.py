@@ -1896,11 +1896,11 @@ class UC_ImagePad(io.ComfyNode):
             category="advanced/image",
             inputs=[
                 io.Image.Input("image"),
-                io.Int.Input("left", default=0, min=0, max=MAX_RESOLUTION, step=1, tooltip="Pixels added to the left when target dimensions are not connected."),
-                io.Int.Input("right", default=0, min=0, max=MAX_RESOLUTION, step=1, tooltip="Pixels added to the right when target dimensions are not connected."),
-                io.Int.Input("top", default=0, min=0, max=MAX_RESOLUTION, step=1, tooltip="Pixels added above the image when target dimensions are not connected."),
-                io.Int.Input("bottom", default=0, min=0, max=MAX_RESOLUTION, step=1, tooltip="Pixels added below the image when target dimensions are not connected."),
-                io.Int.Input("extra_padding", default=0, min=0, max=MAX_RESOLUTION, step=1, tooltip="Additional padding on every side, or an inset margin when target dimensions are connected."),
+                io.Int.Input("left", default=0, min=0, max=MAX_RESOLUTION, step=1, tooltip="Pixels added to the left when target dimensions are disconnected. When target dimensions are connected, weights horizontal padding direction; 0 centers unless other horizontal direction is set."),
+                io.Int.Input("right", default=0, min=0, max=MAX_RESOLUTION, step=1, tooltip="Pixels added to the right when target dimensions are disconnected. When target dimensions are connected, weights horizontal padding direction; 0 centers unless other horizontal direction is set."),
+                io.Int.Input("top", default=0, min=0, max=MAX_RESOLUTION, step=1, tooltip="Pixels added above the image when target dimensions are disconnected. When target dimensions are connected, weights vertical padding direction; 0 centers unless other vertical direction is set."),
+                io.Int.Input("bottom", default=0, min=0, max=MAX_RESOLUTION, step=1, tooltip="Pixels added below the image when target dimensions are disconnected. When target dimensions are connected, weights vertical padding direction; 0 centers unless other vertical direction is set."),
+                io.Int.Input("extra_padding", default=0, min=0, max=MAX_RESOLUTION, step=1, tooltip="Additional padding on all sides when target dimensions are disconnected. When target dimensions are connected, adds extra padding in directions above 0 scaled relative to the maximum directional value, or expands existing target-padded axes if all directions are 0."),
                 io.Combo.Input(
                     "pad_mode",
                     default="edge",
@@ -1938,11 +1938,7 @@ class UC_ImagePad(io.ComfyNode):
         # Calculate padding sizes with extra padding
         if target_width is not None and target_height is not None:
             # Rescale to fit target boundaries proportionally
-            eff_target_w = max(1, target_width - 2 * extra_padding) if extra_padding > 0 else target_width
-            eff_target_h = max(1, target_height - 2 * extra_padding) if extra_padding > 0 else target_height
-
-            # Compute aspect-ratio preserving scaling factor
-            scale_factor = min(eff_target_w / W, eff_target_h / H)
+            scale_factor = min(target_width / W, target_height / H)
 
             new_W = max(1, round(W * scale_factor))
             new_H = max(1, round(H * scale_factor))
@@ -1955,12 +1951,52 @@ class UC_ImagePad(io.ComfyNode):
             if mask is not None:
                 mask = F.interpolate(mask.unsqueeze(1), size=(H, W), mode='nearest-exact').squeeze(1)
 
-            padded_width = target_width
-            padded_height = target_height
-            pad_left = (padded_width - W) // 2
-            pad_right = padded_width - W - pad_left
-            pad_top = (padded_height - H) // 2
-            pad_bottom = padded_height - H - pad_top
+            base_slack_w = target_width - W
+            base_slack_h = target_height - H
+
+            total_h = left + right
+            if total_h > 0:
+                base_left = round(base_slack_w * (left / total_h))
+                base_right = base_slack_w - base_left
+            else:
+                base_left = base_slack_w // 2
+                base_right = base_slack_w - base_left
+
+            total_v = top + bottom
+            if total_v > 0:
+                base_top = round(base_slack_h * (top / total_v))
+                base_bottom = base_slack_h - base_top
+            else:
+                base_top = base_slack_h // 2
+                base_bottom = base_slack_h - base_top
+
+            extra_left, extra_right, extra_top, extra_bottom = 0, 0, 0, 0
+            if extra_padding > 0:
+                max_dir = max(left, right, top, bottom)
+                if max_dir > 0:
+                    if left > 0:
+                        extra_left = round(extra_padding * (left / max_dir))
+                    if right > 0:
+                        extra_right = round(extra_padding * (right / max_dir))
+                    if top > 0:
+                        extra_top = round(extra_padding * (top / max_dir))
+                    if bottom > 0:
+                        extra_bottom = round(extra_padding * (bottom / max_dir))
+                else:
+                    if base_slack_h > 0:
+                        extra_top = extra_padding
+                        extra_bottom = extra_padding
+                    if base_slack_w > 0:
+                        extra_left = extra_padding
+                        extra_right = extra_padding
+
+            pad_left = base_left + extra_left
+            pad_right = base_right + extra_right
+            pad_top = base_top + extra_top
+            pad_bottom = base_bottom + extra_bottom
+
+            padded_width = W + pad_left + pad_right
+            padded_height = H + pad_top + pad_bottom
         else:
             pad_left = left + extra_padding
             pad_right = right + extra_padding
@@ -2454,10 +2490,9 @@ class UC_StitchImageGrid(io.ComfyNode):
             node_id="UC_StitchImageGrid",
             display_name="Stitch Image Grid",
             category="advanced/image",
-            description="Stitches a batch or list of images into a grid, row-by-row then vertically, using configurable spacing.",
-            is_input_list=True,
+            description="Stitches an image batch or list of images into a grid, row-by-row then vertically, using configurable spacing.",
             inputs=[
-                io.Image.Input("images", tooltip="Batch or list of images to stitch into a grid."),
+                io.Image.Input("images", tooltip="Image batch or list of images to stitch into a grid."),
                 io.Int.Input(
                     "max_images_per_row",
                     default=4,
