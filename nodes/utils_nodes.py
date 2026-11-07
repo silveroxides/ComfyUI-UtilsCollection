@@ -1904,7 +1904,7 @@ class UC_EncoderNodesGuide(io.ComfyNode):
                 "- Values from `256` through `4096` select an aspect-preserving equivalent-square target aligned to a 32-pixel grid.\n"
                 "- Values below `256` or above `4096` preserve the input resolution.\n\n"
                 "`UC_TextEncodeSystemEditAdvanced` and `UC_TextEncodeGemmaSystemEditAdvanced` retain the preset choices `Fast (384)`, `Balanced (512)`, `Detailed (768)`, `Large (1024)`, `X-Large (1280)`, `XX-Large (1536)`, and `Original`.\n\n"
-                "VAE reference resolution choices are `Ultra (512)`, `Turbo (768)`, `Fast (1024)`, `Balanced (1280)`, `Detailed (1536)`, and `Original`.\n\n"
+                "VAE reference resolution uses an integer `vae_resolution` (default `1024`, `0` preserves original resolution), aligned to `vae_dimension_multiple`.\n\n"
                 "`UC_AdvancedVisualConditioningEncode` and `UC_Krea2TokenAttentionWeight` encode only the selected base VLM resolution. `resolution_samples` belongs only to the `UC_AdvancedVisConEncoder` consensus stage and is not part of `UC_VisualFusionConfig`.\n\n"
                 "- `UC_AdvancedConsensusConfiguration` adds odd `resolution_samples` values from `1` through `15` with step `2`, plus `sample_offset` from `32` through `512` with step `32`, to the complete Text Consensus Blend Configurator contract.\n"
                 "- Samples alternate around the base resolution by `sample_offset`; candidates producing duplicate effective Qwen grids are skipped.\n"

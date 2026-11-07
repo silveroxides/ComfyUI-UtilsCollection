@@ -4989,19 +4989,10 @@ def _scale_and_attach_visual_consensus_references(
 
     ref_latents = []
     if vae is not None and ref_latent_mode != "off":
-        resolutions = {
-            "Ultra (512)": 512,
-            "Turbo (768)": 768,
-            "Fast (1024)": 1024,
-            "Balanced (1280)": 1280,
-            "Detailed (1536)": 1536,
-        }
+        target = None if int(vae_resolution) <= 0 else int(vae_resolution)
         for image in reference_images:
             if "single" in ref_latent_mode and ref_latents:
                 break
-            target = (
-                None if vae_resolution == "Original" else resolutions[vae_resolution]
-            )
             if is_qwen_image21_text_encoder(clip):
                 _, s_vae = prepare_qwen_image21_image(image, 0 if target is None else target)
                 ref_latents.append(vae.encode(s_vae))
@@ -5013,6 +5004,33 @@ def _scale_and_attach_visual_consensus_references(
     return apply_reference_latents(
         clip, conditioning, ref_latents, ref_latent_mode
     )
+
+
+def resolve_reference_latent_output(ref_latents: list | None) -> dict | None:
+    """Consolidates encoded reference latent dictionaries or tensors for node output."""
+    if not ref_latents:
+        return None
+
+    def _extract_samples(entry):
+        if isinstance(entry, Mapping) and "samples" in entry:
+            return entry["samples"]
+        if torch.is_tensor(entry):
+            return entry
+        return None
+
+    samples_list = [_extract_samples(l) for l in ref_latents]
+    valid_samples = [s for s in samples_list if s is not None]
+    if not valid_samples:
+        return ref_latents[0] if isinstance(ref_latents[0], Mapping) else None
+
+    if len(valid_samples) == 1:
+        return {"samples": valid_samples[0]}
+
+    first = valid_samples[0]
+    if all(s.shape[1:] == first.shape[1:] for s in valid_samples[1:]):
+        return {"samples": torch.cat(valid_samples, dim=0)}
+    return {"samples": first}
+
 
 def krea2_token_ids(clip, text):
     tok = clip.tokenize(text)

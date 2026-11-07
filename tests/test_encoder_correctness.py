@@ -242,7 +242,7 @@ def test_advanced_visual_encoder_applies_non_default_vae_alignment(monkeypatch):
         vlm_resolution=384,
         image_inputs={"image_1": torch.zeros(1, 101, 205, 3)},
         visual_fusion_config={"visual_fusion_method": "off"},
-        vae_resolution="Original",
+        vae_resolution=0,
         ref_latent_mode="single",
         vae=VAE(),
         vae_dimension_multiple=32,
@@ -4191,4 +4191,52 @@ def test_advanced_visual_conditioning_encode_image_strength_schema_and_metadata(
     bias = meta["context_attention_bias"]
     assert torch.is_tensor(bias)
     assert bias.shape == (1, 5)
+
+
+def test_advanced_visual_conditioning_outputs_latent():
+    schema = encoder_nodes.UC_AdvancedVisualConditioningEncode.define_schema()
+    assert len(schema.outputs) == 2
+    assert schema.outputs[0].display_name == "conditioning"
+    assert schema.outputs[1].display_name == "latent"
+
+    class MockVae:
+        @staticmethod
+        def encode(samples):
+            return {"samples": torch.zeros(1, 4, samples.shape[1] // 8, samples.shape[2] // 8)}
+
+    class DummyClip:
+        @staticmethod
+        def tokenize(prompt, **_kwargs):
+            return {"t5": [[(1, 1.0)]]}
+
+        @staticmethod
+        def encode_from_tokens_scheduled(_tokens):
+            return [[torch.ones(1, 1, 64), {}]]
+
+    # Without VAE, latent is None
+    out_no_vae = encoder_nodes.UC_AdvancedVisualConditioningEncode.execute(
+        clip=DummyClip(),
+        prompt="test",
+        system_prompt="",
+        vlm_resolution=384,
+        image_inputs={},
+    )
+    assert out_no_vae.args[1] is None
+
+    # With VAE and image, latent is returned
+    img = torch.zeros(1, 64, 64, 3)
+    out_with_vae = encoder_nodes.UC_AdvancedVisualConditioningEncode.execute(
+        clip=DummyClip(),
+        prompt="test",
+        system_prompt="",
+        vlm_resolution=384,
+        image_inputs={"image_1": img},
+        ref_latent_mode="single",
+        vae=MockVae(),
+    )
+    latent = out_with_vae.args[1]
+    assert isinstance(latent, dict)
+    assert "samples" in latent
+    assert torch.is_tensor(latent["samples"])
+
 

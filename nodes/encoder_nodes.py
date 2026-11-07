@@ -62,6 +62,7 @@ from ..helpers.encoder_helpers import(
     MINIMAX_H3_VIDEO_LATENT_MODES,
     execute_token_fusion_visual_conditioning,
     build_context_attention_bias,
+    resolve_reference_latent_output,
 )
 from ..helpers.minimax_h3_reference_media_helpers import execute_advanced_minimax_h3_reference_media_image_to_video
 from ..helpers.image_helpers import VIDEO_FRAME_TIMESTAMP_FORMATS
@@ -796,11 +797,13 @@ class UC_ScaledBiasTextEncodeLtxv2SystemPrompt(io.ComfyNode):
                 io.Clip.Input("clip"),
                 io.String.Input("prompt", multiline=True, dynamic_prompts=True),
                 io.String.Input("system_prompt", multiline=True, dynamic_prompts=True, default=""),
-                io.Combo.Input(
+                io.Int.Input(
                     "vae_resolution",
-                    options=["Ultra (512)", "Turbo (768)", "Fast (1024)", "Balanced (1280)", "Detailed (1536)", "Original"],
-                    default="Fast (1024)",
-                    tooltip="Resolution of the reference latent encoded by the VAE (structural path).",
+                    default=1024,
+                    min=0,
+                    max=16384,
+                    step=32,
+                    tooltip="Resolution of the reference latent encoded by the VAE (0 = original resolution). Aligned to vae_dimension_multiple.",
                 ),
                 io.Combo.Input(
                     "ref_latent_mode",
@@ -818,7 +821,7 @@ class UC_ScaledBiasTextEncodeLtxv2SystemPrompt(io.ComfyNode):
         )
 
     @classmethod
-    def execute(cls, clip, prompt, system_prompt="", vae_resolution="Fast (1024)", ref_latent_mode="off", vae=None, image=None, vae_dimension_multiple=8) -> io.NodeOutput:
+    def execute(cls, clip, prompt, system_prompt="", vae_resolution=1024, ref_latent_mode="off", vae=None, image=None, vae_dimension_multiple=8) -> io.NodeOutput:
         # Build template with string concat (ComfyUI pattern)
         if image is not None:
             llama_template = (
@@ -839,15 +842,8 @@ class UC_ScaledBiasTextEncodeLtxv2SystemPrompt(io.ComfyNode):
 
         ref_latents = []
         if vae is not None and ref_latent_mode != "off" and image is not None:
-            VAE_RESOLUTIONS = {
-                "Ultra (512)": 512,
-                "Turbo (768)": 768,
-                "Fast (1024)": 1024,
-                "Balanced (1280)": 1280,
-                "Detailed (1536)": 1536
-            }
             samples = image.movedim(-1, 1)
-            target_size = None if vae_resolution == "Original" else VAE_RESOLUTIONS[vae_resolution]
+            target_size = None if int(vae_resolution) <= 0 else int(vae_resolution)
             s_vae = prepare_vae_reference_image(samples, target_size, vae_dimension_multiple)
             ref_latents.append(vae.encode(s_vae.movedim(1, -1)[:, :, :, :3]))
 
@@ -1106,11 +1102,13 @@ class TextEncodeSystemEditPlus(io.ComfyNode):
                     default="Fast (384)",
                     tooltip="Resolution of the image passed to the VLM (semantic path). 'Fast' = 384x384, 'Balanced' = 512x512, 'Detailed' = 768x768, 'Large' = 1024x1024, 'X-Large' = 1280x1280, 'Original' uses native resolution.",
                 ),
-                io.Combo.Input(
+                io.Int.Input(
                     "vae_resolution",
-                    options=["Ultra (512)", "Turbo (768)", "Fast (1024)", "Balanced (1280)", "Detailed (1536)", "Original"],
-                    default="Fast (1024)",
-                    tooltip="Resolution of the reference latent encoded by the VAE (structural path). 'Fast' = 1024x1024, 'Balanced' = 1280x1280, 'Detailed' = 1536x1536, 'Original' uses native resolution.",
+                    default=1024,
+                    min=0,
+                    max=16384,
+                    step=32,
+                    tooltip="Resolution of the reference latent encoded by the VAE (0 = original resolution). Aligned to vae_dimension_multiple.",
                 ),
                 io.Combo.Input(
                     "ref_latent_mode",
@@ -1130,7 +1128,7 @@ class TextEncodeSystemEditPlus(io.ComfyNode):
         )
 
     @classmethod
-    def execute(cls, clip, prompt, system_prompt, vlm_resolution, vae_resolution, ref_latent_mode="off", vae=None, image1=None, image2=None, image3=None, vae_dimension_multiple=8) -> io.NodeOutput:
+    def execute(cls, clip, prompt, system_prompt, vlm_resolution, vae_resolution=1024, ref_latent_mode="off", vae=None, image1=None, image2=None, image3=None, vae_dimension_multiple=8) -> io.NodeOutput:
         ref_latents = []
         images = [image1, image2, image3]
         images_vl = []
@@ -1143,14 +1141,6 @@ class TextEncodeSystemEditPlus(io.ComfyNode):
             "Large (1024)": 1024,
             "X-Large (1280)": 1280,
             "XX-Large (1536)": 1536
-        }
-
-        VAE_RESOLUTIONS = {
-            "Ultra (512)": 512,
-            "Turbo (768)": 768,
-            "Fast (1024)": 1024,
-            "Balanced (1280)": 1280,
-            "Detailed (1536)": 1536
         }
 
         for i, image in enumerate(images):
@@ -1173,7 +1163,7 @@ class TextEncodeSystemEditPlus(io.ComfyNode):
                 # 2. Structural Path Scaling (VAE)
                 if vae is not None and ref_latent_mode != "off":
                     if "multi" in ref_latent_mode or len(ref_latents) == 0:
-                        target_size = None if vae_resolution == "Original" else VAE_RESOLUTIONS[vae_resolution]
+                        target_size = None if int(vae_resolution) <= 0 else int(vae_resolution)
                         s_vae = prepare_vae_reference_image(samples, target_size, vae_dimension_multiple)
                         ref_latents.append(vae.encode(s_vae.movedim(1, -1)[:, :, :, :3]))
 
@@ -1223,11 +1213,13 @@ class TextEncodeSystemEditPlusAdvanced(io.ComfyNode):
                     default="Fast (384)",
                     tooltip="Resolution of the image passed to the VLM (semantic path). 'Fast' = 384x384, 'Balanced' = 512x512, 'Detailed' = 768x768, 'Large' = 1024x1024, 'X-Large' = 1280x1280, 'XX-Large' = 1536x1536, 'Original' uses native resolution.",
                 ),
-                io.Combo.Input(
+                io.Int.Input(
                     "vae_resolution",
-                    options=["Ultra (512)", "Turbo (768)", "Fast (1024)", "Balanced (1280)", "Detailed (1536)", "Original"],
-                    default="Fast (1024)",
-                    tooltip="Resolution of the reference latent encoded by the VAE (structural path).",
+                    default=1024,
+                    min=0,
+                    max=16384,
+                    step=32,
+                    tooltip="Resolution of the reference latent encoded by the VAE (0 = original resolution). Aligned to vae_dimension_multiple.",
                 ),
                 io.Combo.Input(
                     "ref_latent_mode",
@@ -1245,7 +1237,7 @@ class TextEncodeSystemEditPlusAdvanced(io.ComfyNode):
         )
 
     @classmethod
-    def execute(cls, clip, prompt, system_prompt, vlm_resolution, image_inputs: io.Autogrow.Type, vae_resolution="Fast (1024)", ref_latent_mode="off", vae=None, vae_dimension_multiple=8) -> io.NodeOutput:
+    def execute(cls, clip, prompt, system_prompt, vlm_resolution, image_inputs: io.Autogrow.Type, vae_resolution=1024, ref_latent_mode="off", vae=None, vae_dimension_multiple=8) -> io.NodeOutput:
         # Collect, extract, and parse all autogrow keys (including batched images)
         raw_images, flat_images, is_zero_indexed = extract_and_flatten_images(image_inputs)
 
@@ -1344,13 +1336,7 @@ class TextEncodeSystemEditPlusAdvanced(io.ComfyNode):
 
         ref_latents = []
         if vae is not None and ref_latent_mode != "off":
-            VAE_RESOLUTIONS = {
-                "Ultra (512)": 512,
-                "Turbo (768)": 768,
-                "Fast (1024)": 1024,
-                "Balanced (1280)": 1280,
-                "Detailed (1536)": 1536
-            }
+            target_size = None if int(vae_resolution) <= 0 else int(vae_resolution)
             # Process in sorted order of raw_images keys
             for num in sorted(raw_images.keys()):
                 if "single" in ref_latent_mode and len(ref_latents) > 0:
@@ -1358,7 +1344,6 @@ class TextEncodeSystemEditPlusAdvanced(io.ComfyNode):
                 image = raw_images[num]
                 if image is not None:
                     samples = image.movedim(-1, 1)
-                    target_size = None if vae_resolution == "Original" else VAE_RESOLUTIONS[vae_resolution]
                     s_vae = prepare_vae_reference_image(samples, target_size, vae_dimension_multiple)
                     ref_latents.append(vae.encode(s_vae.movedim(1, -1)[:, :, :, :3]))
 
@@ -1398,11 +1383,13 @@ class TextEncodeKrea2SystemEditPlusAdvanced(io.ComfyNode):
                     default="Fast (384)",
                     tooltip="Resolution of the image passed to the VLM (semantic path). 'Fast' = 384x384, 'Balanced' = 512x512, 'Detailed' = 768x768, 'Large' = 1024x1024, 'X-Large' = 1280x1280, 'XX-Large' = 1536x1536, 'Original' uses native resolution.",
                 ),
-                io.Combo.Input(
+                io.Int.Input(
                     "vae_resolution",
-                    options=["Ultra (512)", "Turbo (768)", "Fast (1024)", "Balanced (1280)", "Detailed (1536)", "Original"],
-                    default="Fast (1024)",
-                    tooltip="Resolution of the reference latent encoded by the VAE (structural path).",
+                    default=1024,
+                    min=0,
+                    max=16384,
+                    step=32,
+                    tooltip="Resolution of the reference latent encoded by the VAE (0 = original resolution). Aligned to vae_dimension_multiple.",
                 ),
                 io.Combo.Input(
                     "ref_latent_mode",
@@ -1412,7 +1399,7 @@ class TextEncodeKrea2SystemEditPlusAdvanced(io.ComfyNode):
                 ),
                 io.Vae.Input("vae", optional=True),
                 io.Int.Input("vae_dimension_multiple", default=8, min=4, max=256, step=4, advanced=True, tooltip="Pixel multiple used to align reference images before VAE encoding."),
-                io.Autogrow.Input("image_inputs", template=autogrow_template),
+                io.Autogrow.Input("image_inputs", template=autogrow_template, tooltip="Images are flattened in ascending socket order; every image in a connected batch becomes the next sequential image input."),
             ],
             outputs=[
                 io.Conditioning.Output(),
@@ -1420,7 +1407,7 @@ class TextEncodeKrea2SystemEditPlusAdvanced(io.ComfyNode):
         )
 
     @classmethod
-    def execute(cls, clip, prompt, system_prompt, vlm_resolution, image_inputs: io.Autogrow.Type, vae_resolution="Fast (1024)", ref_latent_mode="off", vae=None, vae_dimension_multiple=8) -> io.NodeOutput:
+    def execute(cls, clip, prompt, system_prompt, vlm_resolution, image_inputs: io.Autogrow.Type, vae_resolution=1024, ref_latent_mode="off", vae=None, vae_dimension_multiple=8) -> io.NodeOutput:
         # Collect, extract, and parse all autogrow keys (including batched images)
         raw_images, flat_images, is_zero_indexed = extract_and_flatten_images(image_inputs)
 
@@ -1519,13 +1506,7 @@ class TextEncodeKrea2SystemEditPlusAdvanced(io.ComfyNode):
 
         ref_latents = []
         if vae is not None and ref_latent_mode != "off":
-            VAE_RESOLUTIONS = {
-                "Ultra (512)": 512,
-                "Turbo (768)": 768,
-                "Fast (1024)": 1024,
-                "Balanced (1280)": 1280,
-                "Detailed (1536)": 1536
-            }
+            target_size = None if int(vae_resolution) <= 0 else int(vae_resolution)
             # Process in sorted order of raw_images keys
             for num in sorted(raw_images.keys()):
                 if "single" in ref_latent_mode and len(ref_latents) > 0:
@@ -1533,7 +1514,6 @@ class TextEncodeKrea2SystemEditPlusAdvanced(io.ComfyNode):
                 image = raw_images[num]
                 if image is not None:
                     samples = image.movedim(-1, 1)
-                    target_size = None if vae_resolution == "Original" else VAE_RESOLUTIONS[vae_resolution]
                     s_vae = prepare_vae_reference_image(samples, target_size, vae_dimension_multiple)
                     ref_latents.append(vae.encode(s_vae.movedim(1, -1)[:, :, :, :3]))
 
@@ -1572,11 +1552,13 @@ class TextEncodeEditPlusAdvanced(io.ComfyNode):
                     default="Fast (384)",
                     tooltip="Resolution of the image passed to the VLM (semantic path). 'Fast' = 384x384, 'Balanced' = 512x512, 'Detailed' = 768x768, 'Large' = 1024x1024, 'X-Large' = 1280x1280, 'XX-Large' = 1536x1536, 'Original' uses native resolution.",
                 ),
-                io.Combo.Input(
+                io.Int.Input(
                     "vae_resolution",
-                    options=["Ultra (512)", "Turbo (768)", "Fast (1024)", "Balanced (1280)", "Detailed (1536)", "Original"],
-                    default="Fast (1024)",
-                    tooltip="Resolution of the reference latent encoded by the VAE (structural path).",
+                    default=1024,
+                    min=0,
+                    max=16384,
+                    step=32,
+                    tooltip="Resolution of the reference latent encoded by the VAE (0 = original resolution). Aligned to vae_dimension_multiple.",
                 ),
                 io.Combo.Input(
                     "ref_latent_mode",
@@ -1594,7 +1576,7 @@ class TextEncodeEditPlusAdvanced(io.ComfyNode):
         )
 
     @classmethod
-    def execute(cls, clip, prompt, vlm_resolution, image_inputs: io.Autogrow.Type, vae_resolution="Fast (1024)", ref_latent_mode="off", vae=None, vae_dimension_multiple=8) -> io.NodeOutput:
+    def execute(cls, clip, prompt, vlm_resolution, image_inputs: io.Autogrow.Type, vae_resolution=1024, ref_latent_mode="off", vae=None, vae_dimension_multiple=8) -> io.NodeOutput:
         # Collect, extract, and parse all autogrow keys (including batched images)
         raw_images, flat_images, is_zero_indexed = extract_and_flatten_images(image_inputs)
 
@@ -1677,13 +1659,7 @@ class TextEncodeEditPlusAdvanced(io.ComfyNode):
 
         ref_latents = []
         if vae is not None and ref_latent_mode != "off":
-            VAE_RESOLUTIONS = {
-                "Ultra (512)": 512,
-                "Turbo (768)": 768,
-                "Fast (1024)": 1024,
-                "Balanced (1280)": 1280,
-                "Detailed (1536)": 1536
-            }
+            target_size = None if int(vae_resolution) <= 0 else int(vae_resolution)
             # Process in sorted order of raw_images keys
             for num in sorted(raw_images.keys()):
                 if "single" in ref_latent_mode and len(ref_latents) > 0:
@@ -1691,7 +1667,6 @@ class TextEncodeEditPlusAdvanced(io.ComfyNode):
                 image = raw_images[num]
                 if image is not None:
                     samples = image.movedim(-1, 1)
-                    target_size = None if vae_resolution == "Original" else VAE_RESOLUTIONS[vae_resolution]
                     s_vae = prepare_vae_reference_image(samples, target_size, vae_dimension_multiple)
                     ref_latents.append(vae.encode(s_vae.movedim(1, -1)[:, :, :, :3]))
 
@@ -1722,11 +1697,13 @@ class TextEncodeGemmaSystemEditPlusAdvanced(io.ComfyNode):
                     default="Fast (384)",
                     tooltip="Resolution of the image passed to the VLM (semantic path). 'Fast' = 384x384, 'Balanced' = 512x512, 'Detailed' = 768x768, 'Large' = 1024x1024, 'X-Large' = 1280x1280, 'XX-Large' = 1536x1536, 'Original' uses native resolution.",
                 ),
-                io.Combo.Input(
+                io.Int.Input(
                     "vae_resolution",
-                    options=["Ultra (512)", "Turbo (768)", "Fast (1024)", "Balanced (1280)", "Detailed (1536)", "Original"],
-                    default="Fast (1024)",
-                    tooltip="Resolution of the reference latent encoded by the VAE (structural path).",
+                    default=1024,
+                    min=0,
+                    max=16384,
+                    step=32,
+                    tooltip="Resolution of the reference latent encoded by the VAE (0 = original resolution). Aligned to vae_dimension_multiple.",
                 ),
                 io.Combo.Input(
                     "ref_latent_mode",
@@ -1744,7 +1721,7 @@ class TextEncodeGemmaSystemEditPlusAdvanced(io.ComfyNode):
         )
 
     @classmethod
-    def execute(cls, clip, prompt, system_prompt, vlm_resolution, image_inputs: io.Autogrow.Type, vae_resolution="Fast (1024)", ref_latent_mode="off", vae=None, vae_dimension_multiple=8) -> io.NodeOutput:
+    def execute(cls, clip, prompt, system_prompt, vlm_resolution, image_inputs: io.Autogrow.Type, vae_resolution=1024, ref_latent_mode="off", vae=None, vae_dimension_multiple=8) -> io.NodeOutput:
         # Collect, extract, and parse all autogrow keys (including batched images)
         raw_images, flat_images, is_zero_indexed = extract_and_flatten_images(image_inputs)
 
@@ -1838,20 +1815,13 @@ class TextEncodeGemmaSystemEditPlusAdvanced(io.ComfyNode):
 
         ref_latents = []
         if vae is not None and ref_latent_mode != "off":
-            VAE_RESOLUTIONS = {
-                "Ultra (512)": 512,
-                "Turbo (768)": 768,
-                "Fast (1024)": 1024,
-                "Balanced (1280)": 1280,
-                "Detailed (1536)": 1536
-            }
+            target_size = None if int(vae_resolution) <= 0 else int(vae_resolution)
             # Process in order of images_vl_raw
             for i, image in enumerate(images_vl_raw):
                 if "single" in ref_latent_mode and len(ref_latents) > 0:
                     break
                 if image is not None:
                     samples = image.movedim(-1, 1)
-                    target_size = None if vae_resolution == "Original" else VAE_RESOLUTIONS[vae_resolution]
                     s_vae = prepare_vae_reference_image(samples, target_size, vae_dimension_multiple)
                     ref_latents.append(vae.encode(s_vae.movedim(1, -1)[:, :, :, :3]))
 
@@ -1870,11 +1840,13 @@ class UC_TextEncodeLtxv2SystemPrompt(io.ComfyNode):
                 io.Clip.Input("clip"),
                 io.String.Input("prompt", multiline=True, dynamic_prompts=True),
                 io.String.Input("system_prompt", multiline=True, dynamic_prompts=True, default=""),
-                io.Combo.Input(
+                io.Int.Input(
                     "vae_resolution",
-                    options=["Ultra (512)", "Turbo (768)", "Fast (1024)", "Balanced (1280)", "Detailed (1536)", "Original"],
-                    default="Fast (1024)",
-                    tooltip="Resolution of the reference latent encoded by the VAE (structural path).",
+                    default=1024,
+                    min=0,
+                    max=16384,
+                    step=32,
+                    tooltip="Resolution of the reference latent encoded by the VAE (0 = original resolution). Aligned to vae_dimension_multiple.",
                 ),
                 io.Combo.Input(
                     "ref_latent_mode",
@@ -1892,7 +1864,7 @@ class UC_TextEncodeLtxv2SystemPrompt(io.ComfyNode):
         )
 
     @classmethod
-    def execute(cls, clip, prompt, system_prompt="", vae_resolution="Fast (1024)", ref_latent_mode="off", vae=None, image=None, vae_dimension_multiple=8) -> io.NodeOutput:
+    def execute(cls, clip, prompt, system_prompt="", vae_resolution=1024, ref_latent_mode="off", vae=None, image=None, vae_dimension_multiple=8) -> io.NodeOutput:
         # Build template with string concat (ComfyUI pattern)
         if image is not None:
             llama_template = (
@@ -1917,15 +1889,8 @@ class UC_TextEncodeLtxv2SystemPrompt(io.ComfyNode):
 
         ref_latents = []
         if vae is not None and ref_latent_mode != "off" and image is not None:
-            VAE_RESOLUTIONS = {
-                "Ultra (512)": 512,
-                "Turbo (768)": 768,
-                "Fast (1024)": 1024,
-                "Balanced (1280)": 1280,
-                "Detailed (1536)": 1536
-            }
             samples = image.movedim(-1, 1)
-            target_size = None if vae_resolution == "Original" else VAE_RESOLUTIONS[vae_resolution]
+            target_size = None if int(vae_resolution) <= 0 else int(vae_resolution)
             s_vae = prepare_vae_reference_image(samples, target_size, vae_dimension_multiple)
             ref_latents.append(vae.encode(s_vae.movedim(1, -1)[:, :, :, :3]))
 
@@ -2173,11 +2138,13 @@ class UC_AdvancedVisualConditioningEncode(io.ComfyNode):
                     default="zero-pad",
                     tooltip="Alignment method for images with different aspect ratios/resolutions. Active ONLY if visual_fusion_config is disconnected or set to 'off'.",
                 ),
-                io.Combo.Input(
+                io.Int.Input(
                     "vae_resolution",
-                    options=["Ultra (512)", "Turbo (768)", "Fast (1024)", "Balanced (1280)", "Detailed (1536)", "Original"],
-                    default="Fast (1024)",
-                    tooltip="Resolution of the reference latent encoded by the VAE (structural path).",
+                    default=1024,
+                    min=0,
+                    max=16384,
+                    step=32,
+                    tooltip="Resolution of the reference latent encoded by the VAE (0 = original resolution). Aligned to vae_dimension_multiple.",
                 ),
                 io.Combo.Input(
                     "ref_latent_mode",
@@ -2197,18 +2164,19 @@ class UC_AdvancedVisualConditioningEncode(io.ComfyNode):
                     tooltip="Scales attention allocated to visual tokens encoded for reference image(s) via context_attention_bias (e.g. MOSS-Image): 0 ignores them, 1 is unchanged, above 1 emphasizes them.",
                 ),
                 io.Int.Input("vae_dimension_multiple", default=8, min=4, max=256, step=4, advanced=True, tooltip="Pixel multiple used to align reference images before VAE encoding."),
-                io.Boolean.Input("semantic_anchor", default=False, tooltip="Prefixes each encoded visual slot with its numbered <Picture N>: semantic anchor."),
-                io.Autogrow.Input("image_inputs", template=autogrow_template, tooltip="Multimodal images. Maps active inputs sequentially to variables (a, b, c, ...)."),
                 VisualFusionImages.Input(
                     "fusion_images",
                     display_name="Fusion Images",
                     optional=True,
                     tooltip="Optional Visual Fusion Images container (from UC_VisualFusionImages) for visual component fusion. When connected, visual component fusion operates on these images while image_inputs supplies the native reference images.",
                 ),
+                io.Boolean.Input("semantic_anchor", default=False, tooltip="Prefixes each encoded visual slot with its numbered <Picture N>: semantic anchor."),
+                io.Autogrow.Input("image_inputs", template=autogrow_template, tooltip="Multimodal images. Maps active inputs sequentially to variables (a, b, c, ...)."),
                 io.Combo.Input("fusion_method", options=["conds_fusion", "token_fusion"], default=cls.DEFAULT_FUSION_METHOD, optional=True, tooltip="Fuse visual conditioning after encoding, or visual features and DeepStack before joint encoding. Off/no-image behavior remains unchanged."),
             ],
             outputs=[
-                io.Conditioning.Output(),
+                io.Conditioning.Output("conditioning", display_name="conditioning"),
+                io.Latent.Output("latent", display_name="latent", tooltip="VAE reference latent encoded from input images (None if VAE or images disconnected)."),
             ],
         )
 
@@ -2224,7 +2192,7 @@ class UC_AdvancedVisualConditioningEncode(io.ComfyNode):
         visual_fusion_config: dict = None,
         formula: str = "",
         padding_method: str = "zero-pad",
-        vae_resolution="Fast (1024)",
+        vae_resolution=1024,
         ref_latent_mode="off",
         vae=None,
         multiplier: float = 1.0,
@@ -2232,7 +2200,6 @@ class UC_AdvancedVisualConditioningEncode(io.ComfyNode):
         vae_dimension_multiple=8,
         semantic_anchor: bool = False,
         fusion_method=None,
-        **kwargs,
     ) -> io.NodeOutput:
         method = cls.DEFAULT_FUSION_METHOD if fusion_method is None else fusion_method
         if method not in ("conds_fusion", "token_fusion"):
@@ -2255,7 +2222,6 @@ class UC_AdvancedVisualConditioningEncode(io.ComfyNode):
             image_strength=image_strength,
             vae_dimension_multiple=vae_dimension_multiple,
             semantic_anchor=semantic_anchor,
-            **kwargs,
         )
 
     @classmethod
@@ -2270,7 +2236,7 @@ class UC_AdvancedVisualConditioningEncode(io.ComfyNode):
         visual_fusion_config: dict = None,
         formula: str = "",
         padding_method: str = "zero-pad",
-        vae_resolution="Fast (1024)",
+        vae_resolution=1024,
         ref_latent_mode="off",
         vae=None,
         multiplier: float = 1.0,
@@ -2345,7 +2311,7 @@ class UC_AdvancedVisualConditioningEncode(io.ComfyNode):
                 encode_embedding_classical_scaled_bias(clip, full_prompt, skip_template=True),
                 multiplier,
             )
-            return io.NodeOutput(conditioning)
+            return io.NodeOutput(conditioning, None)
 
         # Map active images sequentially to letter variables (a, b, c, ...) and encode each pass
         sequence_tensors = {}
@@ -2354,6 +2320,7 @@ class UC_AdvancedVisualConditioningEncode(io.ComfyNode):
         visual_grids = {}
         tokens_dict = {}
         reference_cond_dict = None
+        ref_latents = []
 
         if visual_fusion_config is None:
             visual_fusion_config = {"visual_fusion_method": "off"}
@@ -2365,10 +2332,7 @@ class UC_AdvancedVisualConditioningEncode(io.ComfyNode):
 
         qwen_vae_images = None
         if qwen_image21:
-            qwen_res = 0 if vae_resolution == "Original" else {
-                "Ultra (512)": 512, "Turbo (768)": 768, "Fast (1024)": 1024,
-                "Balanced (1280)": 1280, "Detailed (1536)": 1536
-            }.get(vae_resolution, 1024)
+            qwen_res = max(0, int(vae_resolution))
             qwen_keep_vision = (vae is None or ref_latent_mode == "off")
             qwen_pairs = [prepare_qwen_image21_image(image, qwen_res) for image in active_images]
             processed_active_images = [p[0] for p in qwen_pairs]
@@ -2432,6 +2396,7 @@ class UC_AdvancedVisualConditioningEncode(io.ComfyNode):
                         if "single" in ref_latent_mode and len(ref_latents_qwen) > 0:
                             break
                         ref_latents_qwen.append(vae.encode(s_vae))
+                    ref_latents = ref_latents_qwen
                     inline_cond = apply_parallel_ref_latents(clip, inline_cond, ref_latents_qwen, ref_latent_mode)
             except (TypeError, ValueError) as exc:
                 logging.warning(
@@ -2624,34 +2589,27 @@ class UC_AdvancedVisualConditioningEncode(io.ComfyNode):
 
         conditioning = [[C_blended, final_cond_dict]]
 
-        ref_latents = []
         if vae is not None and ref_latent_mode != "off" and not (inline_mode and qwen_image21):
+            ref_latents = []
             if qwen_image21 and qwen_vae_images:
                 for s_vae in qwen_vae_images:
                     if "single" in ref_latent_mode and len(ref_latents) > 0:
                         break
                     ref_latents.append(vae.encode(s_vae))
             else:
-                VAE_RESOLUTIONS = {
-                    "Ultra (512)": 512,
-                    "Turbo (768)": 768,
-                    "Fast (1024)": 1024,
-                    "Balanced (1280)": 1280,
-                    "Detailed (1536)": 1536
-                }
+                target_size = None if int(vae_resolution) <= 0 else int(vae_resolution)
                 # Process sequentially from active_images
                 for i, image in enumerate(active_images):
                     if "single" in ref_latent_mode and len(ref_latents) > 0:
                         break
                     if image is not None:
                         samples = image.movedim(-1, 1)
-                        target_size = None if vae_resolution == "Original" else VAE_RESOLUTIONS[vae_resolution]
                         s_vae = prepare_vae_reference_image(samples, target_size, vae_dimension_multiple)
                         ref_latents.append(vae.encode(s_vae.movedim(1, -1)[:, :, :, :3]))
 
-        if ref_latents:
+        if ref_latents and not (inline_mode and qwen_image21):
             conditioning = apply_parallel_ref_latents(clip, conditioning, ref_latents, ref_latent_mode)
-        return io.NodeOutput(conditioning)
+        return io.NodeOutput(conditioning, resolve_reference_latent_output(ref_latents))
 
 
     @classmethod
@@ -2665,7 +2623,7 @@ class UC_AdvancedVisualConditioningEncode(io.ComfyNode):
         visual_fusion_config=None,
         formula="",
         padding_method="zero-pad",
-        vae_resolution="Fast (1024)",
+        vae_resolution=1024,
         ref_latent_mode="off",
         vae=None,
         multiplier=1.0,
@@ -2748,28 +2706,22 @@ class UC_AdvancedVisualConditioningEncode(io.ComfyNode):
                     c_meta["context_attention_bias"] = ctx_bias
         ref_latents = []
         if vae is not None and ref_latent_mode != "off":
-            resolutions = {
-                "Ultra (512)": 512,
-                "Turbo (768)": 768,
-                "Fast (1024)": 1024,
-                "Balanced (1280)": 1280,
-                "Detailed (1536)": 1536,
-            }
+            target_res = max(0, int(vae_resolution))
+            target = None if target_res <= 0 else target_res
             ref_sources = active_images or active_fusion
             for image in ref_sources:
                 if "single" in ref_latent_mode and ref_latents:
                     break
                 if is_qwen_image21_text_encoder(clip):
-                    target_res = 0 if vae_resolution == "Original" else resolutions.get(vae_resolution, 1024)
                     _, s_vae = prepare_qwen_image21_image(image, target_res)
                     ref_latents.append(vae.encode(s_vae))
                 else:
                     samples = image.movedim(-1, 1)
-                    target = None if vae_resolution == "Original" else resolutions[vae_resolution]
                     prepared = prepare_vae_reference_image(samples, target, vae_dimension_multiple)
                     ref_latents.append(vae.encode(prepared.movedim(1, -1)[:, :, :, :3]))
         return io.NodeOutput(
-            apply_parallel_ref_latents(clip, conditioning, ref_latents, ref_latent_mode)
+            apply_parallel_ref_latents(clip, conditioning, ref_latents, ref_latent_mode),
+            resolve_reference_latent_output(ref_latents),
         )
 
 
@@ -2821,11 +2773,13 @@ class TextEncodeEditScaledAdv(io.ComfyNode):
                     default="zero-pad",
                     tooltip="Alignment method for images with different aspect ratios/resolutions. Active ONLY if visual_fusion_config is disconnected or set to 'off'.",
                 ),
-                io.Combo.Input(
+                io.Int.Input(
                     "vae_resolution",
-                    options=["Ultra (512)", "Turbo (768)", "Fast (1024)", "Balanced (1280)", "Detailed (1536)", "Original"],
-                    default="Fast (1024)",
-                    tooltip="Resolution of the reference latent encoded by the VAE (structural path).",
+                    default=1024,
+                    min=0,
+                    max=16384,
+                    step=32,
+                    tooltip="Resolution of the reference latent encoded by the VAE (0 = original resolution). Aligned to vae_dimension_multiple.",
                 ),
                 io.Combo.Input(
                     "ref_latent_mode",
@@ -2844,7 +2798,7 @@ class TextEncodeEditScaledAdv(io.ComfyNode):
         )
 
     @classmethod
-    def execute(cls, clip, prompt, vlm_resolution, image_inputs: io.Autogrow.Type, visual_fusion_config: dict = None, formula: str = "", padding_method: str = "zero-pad", vae_resolution="Fast (1024)", ref_latent_mode="off", vae=None, multiplier: float = 1.0, vae_dimension_multiple=8) -> io.NodeOutput:
+    def execute(cls, clip, prompt, vlm_resolution, image_inputs: io.Autogrow.Type, visual_fusion_config: dict = None, formula: str = "", padding_method: str = "zero-pad", vae_resolution=1024, ref_latent_mode="off", vae=None, multiplier: float = 1.0, vae_dimension_multiple=8) -> io.NodeOutput:
         # Collect, extract, and parse all active (non-null) connected images sequentially (including batched images)
         _, active_images, _ = extract_and_flatten_images(image_inputs)
 
@@ -2963,20 +2917,13 @@ class TextEncodeEditScaledAdv(io.ComfyNode):
 
         ref_latents = []
         if vae is not None and ref_latent_mode != "off":
-            VAE_RESOLUTIONS = {
-                "Ultra (512)": 512,
-                "Turbo (768)": 768,
-                "Fast (1024)": 1024,
-                "Balanced (1280)": 1280,
-                "Detailed (1536)": 1536
-            }
+            target_size = None if int(vae_resolution) <= 0 else int(vae_resolution)
             # Process sequentially from active_images
             for i, image in enumerate(active_images):
                 if "single" in ref_latent_mode and len(ref_latents) > 0:
                     break
                 if image is not None:
                     samples = image.movedim(-1, 1)
-                    target_size = None if vae_resolution == "Original" else VAE_RESOLUTIONS[vae_resolution]
                     s_vae = prepare_vae_reference_image(samples, target_size, vae_dimension_multiple)
                     ref_latents.append(vae.encode(s_vae.movedim(1, -1)[:, :, :, :3]))
 
@@ -3386,11 +3333,13 @@ class UC_Krea2TokenAttentionWeight(io.ComfyNode):
                     default="zero-pad",
                     tooltip="Alignment method for images with different aspect ratios/resolutions. Active ONLY if visual_fusion_config is disconnected or set to 'off'.",
                 ),
-                io.Combo.Input(
+                io.Int.Input(
                     "vae_resolution",
-                    options=["Ultra (512)", "Turbo (768)", "Fast (1024)", "Balanced (1280)", "Detailed (1536)", "Original"],
-                    default="Fast (1024)",
-                    tooltip="Resolution of the reference latent encoded by the VAE (structural path).",
+                    default=1024,
+                    min=0,
+                    max=16384,
+                    step=32,
+                    tooltip="Resolution of the reference latent encoded by the VAE (0 = original resolution). Aligned to vae_dimension_multiple.",
                 ),
                 io.Combo.Input(
                     "ref_latent_mode",
@@ -3412,7 +3361,7 @@ class UC_Krea2TokenAttentionWeight(io.ComfyNode):
         )
 
     @classmethod
-    def execute(cls, model, clip, prompt, system_prompt, attention_weights, image_inputs: io.Autogrow.Type, vlm_resolution: int, visual_fusion_config: dict = None, formula: str = "", padding_method: str = "zero-pad", vae_resolution="Fast (1024)", ref_latent_mode="off", vae=None, multiplier: float = 1.0, strength: float = 1.0, vae_dimension_multiple=8, fusion_method=None) -> io.NodeOutput:
+    def execute(cls, model, clip, prompt, system_prompt, attention_weights, image_inputs: io.Autogrow.Type, vlm_resolution: int, visual_fusion_config: dict = None, formula: str = "", padding_method: str = "zero-pad", vae_resolution=1024, ref_latent_mode="off", vae=None, multiplier: float = 1.0, strength: float = 1.0, vae_dimension_multiple=8, fusion_method=None) -> io.NodeOutput:
         method = cls.DEFAULT_FUSION_METHOD if fusion_method is None else fusion_method
         if method not in ("conds_fusion", "token_fusion"):
             raise ValueError(f"Unsupported visual fusion method: {method}")
@@ -3437,7 +3386,7 @@ class UC_Krea2TokenAttentionWeight(io.ComfyNode):
         )
 
     @classmethod
-    def _execute_conds_fusion(cls, model, clip, prompt, system_prompt, attention_weights, image_inputs: io.Autogrow.Type, vlm_resolution: int, visual_fusion_config: dict = None, formula: str = "", padding_method: str = "zero-pad", vae_resolution="Fast (1024)", ref_latent_mode="off", vae=None, multiplier: float = 1.0, strength: float = 1.0, vae_dimension_multiple=8) -> io.NodeOutput:
+    def _execute_conds_fusion(cls, model, clip, prompt, system_prompt, attention_weights, image_inputs: io.Autogrow.Type, vlm_resolution: int, visual_fusion_config: dict = None, formula: str = "", padding_method: str = "zero-pad", vae_resolution=1024, ref_latent_mode="off", vae=None, multiplier: float = 1.0, strength: float = 1.0, vae_dimension_multiple=8) -> io.NodeOutput:
         # Collect, extract, and parse all active (non-null) connected images sequentially (including batched images)
         _, active_images, _ = extract_and_flatten_images(image_inputs)
 
@@ -3673,20 +3622,13 @@ class UC_Krea2TokenAttentionWeight(io.ComfyNode):
 
         ref_latents = []
         if vae is not None and ref_latent_mode != "off":
-            VAE_RESOLUTIONS = {
-                "Ultra (512)": 512,
-                "Turbo (768)": 768,
-                "Fast (1024)": 1024,
-                "Balanced (1280)": 1280,
-                "Detailed (1536)": 1536
-            }
+            target_size = None if int(vae_resolution) <= 0 else int(vae_resolution)
             # Process sequentially from active_images
             for i, image in enumerate(active_images):
                 if "single" in ref_latent_mode and len(ref_latents) > 0:
                     break
                 if image is not None:
                     samples = image.movedim(-1, 1)
-                    target_size = None if vae_resolution == "Original" else VAE_RESOLUTIONS[vae_resolution]
                     s_vae = prepare_vae_reference_image(samples, target_size, vae_dimension_multiple)
                     ref_latents.append(vae.encode(s_vae.movedim(1, -1)[:, :, :, :3]))
 
@@ -3699,7 +3641,7 @@ class UC_Krea2TokenAttentionWeight(io.ComfyNode):
     def _execute_token_fusion(
         cls, model, clip, prompt, system_prompt, attention_weights, image_inputs,
         vlm_resolution, visual_fusion_config=None, formula="",
-        padding_method="zero-pad", vae_resolution="Fast (1024)",
+        padding_method="zero-pad", vae_resolution=1024,
         ref_latent_mode="off", vae=None, multiplier=1.0, strength=1.0,
         vae_dimension_multiple=8,
     ):
@@ -3763,15 +3705,11 @@ class UC_Krea2TokenAttentionWeight(io.ComfyNode):
                     model_clone.add_object_patch(f"diffusion_model.blocks.{index}.attn.forward", patched)
         ref_latents = []
         if vae is not None and ref_latent_mode != "off":
-            resolutions = {
-                "Ultra (512)": 512, "Turbo (768)": 768, "Fast (1024)": 1024,
-                "Balanced (1280)": 1280, "Detailed (1536)": 1536,
-            }
+            target = None if int(vae_resolution) <= 0 else int(vae_resolution)
             for image in active_images:
                 if "single" in ref_latent_mode and ref_latents:
                     break
                 samples = image.movedim(-1, 1)
-                target = None if vae_resolution == "Original" else resolutions[vae_resolution]
                 prepared = prepare_vae_reference_image(samples, target, vae_dimension_multiple)
                 ref_latents.append(vae.encode(prepared.movedim(1, -1)[:, :, :, :3]))
         conditioning = apply_parallel_ref_latents(
@@ -4332,10 +4270,13 @@ class UC_AdvancedVisConEncoder(io.ComfyNode):
                     display_name="Visual Consensus Configuration",
                     tooltip=cls.CONFIG_TOOLTIP,
                 ),
-                io.Combo.Input(
+                io.Int.Input(
                     "vae_resolution",
-                    options=["Ultra (512)", "Turbo (768)", "Fast (1024)", "Balanced (1280)", "Detailed (1536)", "Original"],
-                    default="Fast (1024)",
+                    default=1024,
+                    min=0,
+                    max=16384,
+                    step=32,
+                    tooltip="Resolution of the reference latent encoded by the VAE (0 = original resolution). Aligned to vae_dimension_multiple.",
                 ),
                 io.Combo.Input(
                     "ref_latent_mode",
@@ -4375,7 +4316,7 @@ class UC_AdvancedVisConEncoder(io.ComfyNode):
         vlm_resolution,
         visual_consensus_config,
         image_inputs: io.Autogrow.Type,
-        vae_resolution="Fast (1024)",
+        vae_resolution=1024,
         ref_latent_mode="off",
         vae=None,
         multiplier=1.0,
@@ -4496,7 +4437,7 @@ class UC_AdvancedVisualConditioningEncodeTokenFusion(UC_AdvancedVisualConditioni
     @classmethod
     def execute(
         cls, clip, prompt, vlm_resolution, image_inputs=None, visual_fusion_config=None,
-        formula="", padding_method="zero-pad", vae_resolution="Fast (1024)",
+        formula="", padding_method="zero-pad", vae_resolution=1024,
         ref_latent_mode="off", vae=None, multiplier=1.0, image_strength=1.0,
         vae_dimension_multiple=8, semantic_anchor=False, system_prompt="",
         fusion_method=None, fusion_images=None, **kwargs,
