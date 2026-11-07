@@ -666,8 +666,8 @@ def normalize_visual_fusion_method(method, default="conds_fusion"):
 
 
 def is_list_batch_call(args_dict: dict) -> bool:
-    for k in ("clip", "prompt", "width", "height", "length", "vlm_resolution", "fusion_method", "video_latent_mode"):
-        if k in args_dict and isinstance(args_dict[k], list):
+    for k in ("clip", "prompt", "width", "height", "length", "vlm_resolution", "fusion_method", "video_latent_mode", "audio_vae", "vae"):
+        if k in args_dict and isinstance(args_dict[k], (list, tuple)):
             return True
     return False
 
@@ -677,11 +677,11 @@ def get_list_batch_size(args_dict: dict) -> int:
     for k, v in args_dict.items():
         if k == "cls":
             continue
-        if isinstance(v, list) and len(v) > 0:
+        if isinstance(v, (list, tuple)) and len(v) > 0:
             batch_size = max(batch_size, len(v))
         elif isinstance(v, dict):
             for sub_k, sub_v in v.items():
-                if isinstance(sub_v, list) and len(sub_v) > 0:
+                if isinstance(sub_v, (list, tuple)) and len(sub_v) > 0:
                     batch_size = max(batch_size, len(sub_v))
     return batch_size
 
@@ -691,12 +691,12 @@ def slice_item_inputs(args_dict: dict, index: int) -> dict:
     for k, v in args_dict.items():
         if k == "cls":
             continue
-        if isinstance(v, list):
+        if isinstance(v, (list, tuple)):
             sliced[k] = None if len(v) == 0 else v[min(index, len(v) - 1)]
         elif isinstance(v, dict):
             sliced_dict = {}
             for sub_k, sub_v in v.items():
-                if isinstance(sub_v, list):
+                if isinstance(sub_v, (list, tuple)):
                     sliced_dict[sub_k] = None if len(sub_v) == 0 else sub_v[min(index, len(sub_v) - 1)]
                 else:
                     sliced_dict[sub_k] = sub_v
@@ -777,6 +777,8 @@ def _validate_minimax_h3_media_config(media_config, output_frame_count):
 def _encode_minimax_h3_audio_reference(audio, audio_vae, cache=None):
     if audio is None:
         return None
+    while isinstance(audio_vae, (tuple, list)) and len(audio_vae) > 0:
+        audio_vae = audio_vae[0]
     if audio_vae is None:
         raise ValueError("MiniMax H3 requires audio_vae when audio is provided.")
     if not isinstance(audio, Mapping) or not torch.is_tensor(audio.get("waveform")):
@@ -1088,7 +1090,23 @@ def prepare_minimax_h3_reference_video(
     frames = samples.movedim(1, -1)
     if not encode_reference:
         return frames, None
-    latent = vae.encode(frames) if cache is None else cache.encode_vae(vae, frames, media="video")
+    try:
+        latent = vae.encode(frames) if cache is None else cache.encode_vae(vae, frames, media="video")
+    except torch.OutOfMemoryError:
+        # Reduced temporal chunking fallback:
+        # Split frames temporally into valid H3 sub-clips, encode chunks sequentially to bound peak memory,
+        # then concatenate latents along the temporal axis (dim=2 / -3) like LatentConcat
+        if frame_count > 22:
+            k = (frame_count - 5) // 17
+            k1 = max(1, k // 2)
+            split_idx = 5 + 17 * k1
+            c1 = frames[:split_idx]
+            c2 = frames[split_idx - 5:]
+            lat1 = vae.encode(c1) if cache is None else cache.encode_vae(vae, c1, media="video")
+            lat2 = vae.encode(c2) if cache is None else cache.encode_vae(vae, c2, media="video")
+            latent = torch.cat([lat1, lat2[:, :, 2:]], dim=2)
+        else:
+            raise
     if not torch.is_tensor(latent) or latent.ndim < 5:
         raise ValueError("MiniMax H3 video VAE returned an invalid latent.")
     return frames, {
@@ -4035,57 +4053,34 @@ def _encode_minimax_h3_section(clip, tokens, visual_path, cache, *, section_kind
     )
 
 
+def _minimax_h3_stage1_vae(item: dict, cache) -> dict:
+    clip = item.get("clip")
+    vae = item.get("vae")
+    while isinstance(clip, (tuple, list)) and len(clip) > 0:
+        clip = clip[0]
+    while isinstance(vae, (tuple, list)) and len(vae) > 0:
+        vae = vae[0]
+    width = item.get("width")
+    height = item.get("height")
+    length = item.get("length")
+    first_frame = item.get("first_frame")
+    last_frame = item.get("last_frame")
+    reference_images = item.get("reference_images")
+    fusion_images = item.get("fusion_images")
+    visual_fusion_config = item.get("visual_fusion_config")
+    multiplier = item.get("multiplier", 1.0)
+    ref_image_size = item.get("ref_image_size", "match")
+    vlm_resolution = item.get("vlm_resolution", 384)
+    vlm_video_resolution = item.get("vlm_video_resolution", 384)
+    media_config = item.get("media_config")
+    video = item.get("video")
+    continuation_media = item.get("continuation_media")
+    audio = item.get("audio")
+    token_fusion = item.get("token_fusion", False)
+    temporal_fusion = item.get("temporal_fusion", False)
+    temporal_token_fusion = item.get("temporal_token_fusion", False)
+    text_blend_config = item.get("text_blend_config")
 
-
-
-
-def execute_advanced_minimax_h3_image_to_video(
-    clip,
-    vae,
-    prompt,
-    width,
-    height,
-    length,
-    first_frame=None,
-    last_frame=None,
-    reference_images=None,
-    fusion_images=None,
-    visual_fusion_config=None,
-    multiplier=1.0,
-    ref_image_size="match",
-    vlm_resolution=384,
-    vlm_video_resolution=384,
-    media_config=None,
-    video=None,
-    continuation_media=None,
-    audio=None,
-    audio_vae=None,
-    token_fusion=False,
-    temporal_fusion=False,
-    temporal_token_fusion=False,
-    text_blend_config=None,
-    cache=None,
-    enable_caching="all",
-):
-    """Build coordinated Qwen conditioning, H3 image controls, and AV latent."""
-    if not is_minimax_h3_text_encoder(clip):
-        raise ValueError(
-            "Advanced MiniMax H3 Image to Video requires the qwen3vl_32b text encoder."
-        )
-    if cache is None:
-        with H3EncoderCache(enable_caching) as invocation:
-            return execute_advanced_minimax_h3_image_to_video(
-                clip, vae, prompt, width, height, length,
-                first_frame=first_frame, last_frame=last_frame, reference_images=reference_images,
-                fusion_images=fusion_images, visual_fusion_config=visual_fusion_config,
-                multiplier=multiplier, ref_image_size=ref_image_size,
-                vlm_resolution=vlm_resolution, vlm_video_resolution=vlm_video_resolution,
-                media_config=media_config, video=video, continuation_media=continuation_media,
-                audio=audio, audio_vae=audio_vae,
-                token_fusion=token_fusion, temporal_fusion=temporal_fusion,
-                temporal_token_fusion=temporal_token_fusion, text_blend_config=text_blend_config,
-                cache=invocation, enable_caching=enable_caching,
-            )
     _, flat_references, _ = extract_and_flatten_images(reference_images)
     _, flat_fusion_images, _ = extract_and_flatten_images(fusion_images)
     fusion_socket_batches = extract_image_socket_batches(fusion_images)
@@ -4163,6 +4158,7 @@ def execute_advanced_minimax_h3_image_to_video(
     video_latent_keyframes = 4
     video_reference_resolution = 256
     video_latent_fps = 2.0
+    refine_steps = 100
     if media_config is not None:
         (
             picture_timestamps,
@@ -4248,7 +4244,6 @@ def execute_advanced_minimax_h3_image_to_video(
     if continuation_frames is not None and vae is None:
         raise ValueError("MiniMax H3 Clip Continuation requires a video VAE.")
 
-    # --- Stage 1: Video & Keyframe VAE Encoding (All VAE ops completed upfront) ---
     prepared_first = (
         prepare_minimax_h3_frame(first_frame, width, height, "disabled")
         if first_frame is not None and frame_vae_enabled
@@ -4326,7 +4321,87 @@ def execute_advanced_minimax_h3_image_to_video(
         keyframes.extend(positioned_video_keyframes)
         keyframes.sort(key=lambda keyframe: keyframe["resolved_frame_index"])
 
-    # --- Stage 2: Audio VAE Encoding ---
+    base_vlm_images = []
+    if first_frame is not None:
+        base_vlm_images.append(prepare_vlm_image(first_frame, vlm_resolution))
+    if last_frame is not None:
+        base_vlm_images.append(prepare_vlm_image(last_frame, vlm_resolution))
+    base_vlm_images.extend(
+        prepare_vlm_image(image, vlm_resolution) for image in flat_references
+    )
+    continuation_picture = (
+        prepare_vlm_image(continuation_frames[:1], vlm_resolution)
+        if continuation_frames is not None
+        else None
+    )
+    fusion_vlm_images = [
+        prepare_vlm_image(image, vlm_resolution) for image in flat_fusion_images
+    ]
+    if native_reference_mode and visual_method == "off":
+        fusion_vlm_images = []
+
+    visual_encoder_path = config.get("visual_encoder_path", "grid-deepstack")
+    actual_prompt = item.get("prompt") or ""
+    if not (token_fusion and fusion_active):
+        actual_prompt = strip_contextual_weight_syntax(actual_prompt)
+    if continuation_frames is not None:
+        actual_prompt = minimax_h3_continuation_anchor_prefix(
+            0,
+            len(base_vlm_images) + len(fusion_vlm_images) + 1,
+        ) + actual_prompt
+
+    prompt_entries = _minimax_h3_text_entries(clip, actual_prompt)
+    prompt_spans = [_conditioning_token_span(entry) for entry in prompt_entries]
+    if any(span is None for span in prompt_spans):
+        raise ValueError("MiniMax H3 prompt contains an unsupported embedding span.")
+    prompt_length = sum(prompt_spans)
+
+    return {
+        "clip": clip,
+        "keyframes": keyframes,
+        "references": references,
+        "video_frames": video_frames,
+        "base_vlm_images": base_vlm_images,
+        "fusion_vlm_images": fusion_vlm_images,
+        "continuation_picture": continuation_picture,
+        "continuation_frames": continuation_frames,
+        "continuation_has_latent": continuation_has_latent,
+        "latent": latent,
+        "frame_count": frame_count,
+        "seg_ov": seg_ov,
+        "seg_pad": seg_pad,
+        "config": config,
+        "visual_method": visual_method,
+        "fusion_active": fusion_active,
+        "visual_encoder_path": visual_encoder_path,
+        "actual_prompt": actual_prompt,
+        "prompt_length": prompt_length,
+        "keyframe_mode": keyframe_mode,
+        "native_reference_mode": native_reference_mode,
+        "fusion_socket_batches": fusion_socket_batches,
+        "multiplier": multiplier,
+        "video_fps": video_fps,
+        "vlm_video_resolution": vlm_video_resolution,
+        "media_config": media_config,
+        "temporal_fusion": temporal_fusion,
+        "temporal_token_fusion": temporal_token_fusion,
+        "text_blend_config": text_blend_config,
+        "token_fusion": token_fusion,
+        "audio_reference": None,
+        "picture_timestamps": picture_timestamps,
+        "media_timestamp_format": media_timestamp_format,
+        "picture_structure": picture_structure,
+        "default_single_visual": default_single_visual,
+    }
+
+
+def _minimax_h3_stage2_audio_vae(item: dict, stage1_res: dict, cache):
+    audio = item.get("audio")
+    continuation_media = item.get("continuation_media")
+    audio_vae = item.get("audio_vae")
+    continuation_frames = stage1_res["continuation_frames"]
+    continuation_has_latent = stage1_res["continuation_has_latent"]
+
     active_audio = audio
     if active_audio is not None and continuation_media is not None:
         merge_mode = continuation_media.get("video_merge_mode", "replace")
@@ -4344,7 +4419,9 @@ def execute_advanced_minimax_h3_image_to_video(
                 active_audio = {"waveform": wave[..., tail_samples:], "sample_rate": sample_rate}
             else:
                 active_audio = None
+
     audio_reference = _encode_minimax_h3_audio_reference(active_audio, audio_vae, cache=cache)
+    stage1_res["audio_reference"] = audio_reference
     continuation_audio_reference = (
         _encode_minimax_h3_audio_reference(
             continuation_media.get("audio") if continuation_media is not None else None,
@@ -4355,53 +4432,58 @@ def execute_advanced_minimax_h3_image_to_video(
         else None
     )
     if audio_reference is not None:
-        references.append(audio_reference)
+        stage1_res["references"].append(audio_reference)
     if continuation_audio_reference is not None:
         span_frames = continuation_frames.shape[0] if continuation_frames is not None else int(continuation_media.get("tail_frames", 22))
         end_coord = round((5.0 / 3.0) * float(span_frames))
         end_frame = end_coord / (5.0 / 3.0)
         rt = int(continuation_audio_reference["audio_latent"].shape[-1])
-        keyframes.append({
+        stage1_res["keyframes"].append({
             "resolved_frame_index": end_frame - rt / (5.0 / 3.0),
             "audio_latent": continuation_audio_reference["audio_latent"],
         })
-        keyframes.sort(key=lambda keyframe: keyframe["resolved_frame_index"])
+        stage1_res["keyframes"].sort(key=lambda keyframe: keyframe["resolved_frame_index"])
 
-    base_vlm_images = []
-    if first_frame is not None:
-        base_vlm_images.append(prepare_vlm_image(first_frame, vlm_resolution))
-    if last_frame is not None:
-        base_vlm_images.append(prepare_vlm_image(last_frame, vlm_resolution))
-    base_vlm_images.extend(
-        prepare_vlm_image(image, vlm_resolution) for image in flat_references
+
+def _minimax_h3_stage3_clip(item: dict, stage1_res: dict, cache):
+    clip = stage1_res["clip"]
+    config = stage1_res["config"]
+    visual_encoder_path = stage1_res["visual_encoder_path"]
+    actual_prompt = stage1_res["actual_prompt"]
+    prompt_length = stage1_res["prompt_length"]
+    video_frames = stage1_res["video_frames"]
+    base_vlm_images = stage1_res["base_vlm_images"]
+    fusion_vlm_images = stage1_res["fusion_vlm_images"]
+    continuation_frames = stage1_res["continuation_frames"]
+    continuation_picture = stage1_res["continuation_picture"]
+    continuation_media = item.get("continuation_media")
+    video_fps = stage1_res["video_fps"]
+    vlm_video_resolution = stage1_res["vlm_video_resolution"]
+    media_config = stage1_res["media_config"]
+    temporal_fusion = stage1_res["temporal_fusion"]
+    temporal_token_fusion = stage1_res["temporal_token_fusion"]
+    text_blend_config = stage1_res["text_blend_config"]
+    token_fusion = stage1_res["token_fusion"]
+    fusion_active = stage1_res["fusion_active"]
+    keyframe_mode = stage1_res["keyframe_mode"]
+    native_reference_mode = stage1_res["native_reference_mode"]
+    fusion_socket_batches = stage1_res["fusion_socket_batches"]
+    audio_reference = stage1_res.get("audio_reference")
+    multiplier = stage1_res["multiplier"]
+    picture_timestamps = stage1_res["picture_timestamps"]
+    media_timestamp_format = stage1_res["media_timestamp_format"]
+    picture_structure = stage1_res["picture_structure"]
+    default_single_visual = stage1_res["default_single_visual"]
+
+    continuation_temporal = (
+        continuation_frames is not None and video_frames is not None
+        and continuation_media.get("video_merge_mode", "replace") == "temporal fusion"
     )
-    continuation_picture = (
-        prepare_vlm_image(continuation_frames[:1], vlm_resolution)
-        if continuation_frames is not None
-        else None
+    continuation_fusion_video = (
+        prepare_minimax_h3_continuation_fusion_video(continuation_frames, video_frames, video_fps)
+        if continuation_temporal else None
     )
-    config = dict(visual_fusion_config or {})
-    visual_method = config.get("visual_fusion_method", "off")
-    video_export_tokens = None
-    video_export_offset = 0
-    fusion_vlm_images = [
-        prepare_vlm_image(image, vlm_resolution) for image in flat_fusion_images
-    ]
-    if native_reference_mode and visual_method == "off":
-        fusion_vlm_images = []
-    fusion_active = visual_method != "off" and bool(fusion_vlm_images)
-    visual_encoder_path = config.get("visual_encoder_path", "grid-deepstack")
-    actual_prompt = prompt if token_fusion and fusion_active else strip_contextual_weight_syntax(prompt)
-    if continuation_frames is not None:
-        actual_prompt = minimax_h3_continuation_anchor_prefix(
-            0,
-            len(base_vlm_images) + len(fusion_vlm_images) + 1,
-        ) + actual_prompt
-    prompt_entries = _minimax_h3_text_entries(clip, actual_prompt)
-    prompt_spans = [_conditioning_token_span(entry) for entry in prompt_entries]
-    if any(span is None for span in prompt_spans):
-        raise ValueError("MiniMax H3 prompt contains an unsupported embedding span.")
-    prompt_length = sum(prompt_spans)
+
     def tokenize_presentation(text, images):
         continuation_temporal_frames = continuation_fusion_video[0] if continuation_fusion_video is not None else None
         continuation_video_frames = None
@@ -4491,14 +4573,6 @@ def execute_advanced_minimax_h3_image_to_video(
             )
         return clip.tokenize(text, images=images)
 
-    continuation_temporal = (
-        continuation_frames is not None and video_frames is not None
-        and continuation_media.get("video_merge_mode", "replace") == "temporal fusion"
-    )
-    continuation_fusion_video = (
-        prepare_minimax_h3_continuation_fusion_video(continuation_frames, video_frames, video_fps)
-        if continuation_temporal else None
-    )
     temporal_encode = None
     if (temporal_fusion or continuation_temporal) and video_frames is not None:
         temporal_config = media_config or {}
@@ -4513,7 +4587,7 @@ def execute_advanced_minimax_h3_image_to_video(
             "power_alpha": 2.0, "diversity_beta": 0.0, "rescale_norm": True, "global_scale": 1.0,
         }
         settings = resolve_consensus_blend_settings(default_consensus if text_blend_config is None else text_blend_config)
-        enabled = settings["blend_preset"] != "off" if method == "consensus" else visual_method != "off"
+        enabled = settings["blend_preset"] != "off" if method == "consensus" else stage1_res["visual_method"] != "off"
         if continuation_temporal or (density > 1 and enabled):
             indices = minimax_h3_video_sample_indices(video_frames.shape[0], video_fps) if media_config is not None else list(range(0, video_frames.shape[0], 12))
             frame_pairs = continuation_fusion_video[3] if continuation_temporal else minimax_h3_temporal_frame_pairs(video_frames.shape[0], indices, int(density))
@@ -4550,7 +4624,6 @@ def execute_advanced_minimax_h3_image_to_video(
                     cache=cache,
                 )
 
-
     def encode_picture_slots(tokens, slots):
         def encode(lane_tokens):
             return encode_token_fused_visual_slots(
@@ -4558,15 +4631,11 @@ def execute_advanced_minimax_h3_image_to_video(
             )
         return temporal_encode(tokens, encode) if continuation_temporal else encode(tokens)
 
+    video_export_tokens = None
+    video_export_offset = 0
+
     if fusion_active and (keyframe_mode or native_reference_mode):
         if keyframe_mode:
-            if any(
-                socket_number < 1 or socket_number > len(base_vlm_images)
-                for socket_number, _ in fusion_socket_batches
-            ):
-                raise ValueError(
-                    "MiniMax H3 frame fusion has a fusion image without a matching picture slot."
-                )
             fusion_slot_batches = [
                 (socket_number - 1, socket_images)
                 for socket_number, socket_images in fusion_socket_batches
@@ -4590,22 +4659,23 @@ def execute_advanced_minimax_h3_image_to_video(
 
         tokenize_callback = lambda text: tokenize_presentation(text, base_vlm_images)
         if token_fusion:
-            canonical_tokens = tokenize_callback(prompt)
+            canonical_tokens = tokenize_callback(actual_prompt)
             slot_sources = []
             for visual_index, socket_images in fusion_slot_batches:
                 alternatives = []
                 for fusion_image in socket_images:
                     branch_images = list(base_vlm_images)
                     branch_images[visual_index] = fusion_image
-                    alternatives.append(tokenize_presentation(prompt, branch_images))
+                    alternatives.append(tokenize_presentation(actual_prompt, branch_images))
                 slot_sources.append((visual_index, alternatives))
             conditioning = encode_picture_slots(canonical_tokens, slot_sources)
             video_export_tokens = canonical_tokens
             video_export_offset = len(slot_sources)
         else:
+            raw_prompt = item.get("prompt") or ""
             conditioning = encode_embedding_classical_scaled_bias(
                 clip,
-                prompt,
+                raw_prompt,
                 tokenize_callback=tokenize_callback,
                 visual_encoder_path=visual_encoder_path,
                 encode_callback=temporal_encode if continuation_temporal else None,
@@ -4615,9 +4685,8 @@ def execute_advanced_minimax_h3_image_to_video(
                 raise ValueError(
                     "MiniMax H3 visual conditioning requires one schedule entry."
                 )
-
             base_tensor, base_metadata = conditioning[0]
-            base_tokens = tokenize_callback(prompt)
+            base_tokens = tokenize_callback(actual_prompt)
             fused_tensor = base_tensor.clone()
             for visual_index, socket_images in fusion_slot_batches:
                 branches = []
@@ -4627,7 +4696,7 @@ def execute_advanced_minimax_h3_image_to_video(
                     branch_images[visual_index] = fusion_image
                     branch_callback = lambda text, images=branch_images: tokenize_presentation(text, images)
                     branch_conditioning = encode_embedding_classical_scaled_bias(
-                        clip, prompt, tokenize_callback=branch_callback,
+                        clip, raw_prompt, tokenize_callback=branch_callback,
                         visual_encoder_path=visual_encoder_path,
                         encode_callback=temporal_encode if continuation_temporal else None,
                         cache=cache,
@@ -4635,7 +4704,7 @@ def execute_advanced_minimax_h3_image_to_video(
                     if len(branch_conditioning) != 1:
                         raise ValueError("MiniMax H3 visual fusion requires one conditioning schedule entry.")
                     branch_tensor, branch_metadata = branch_conditioning[0]
-                    branch_sources.append((fusion_image, branch_tensor, branch_metadata, branch_callback(prompt)))
+                    branch_sources.append((fusion_image, branch_tensor, branch_metadata, branch_callback(actual_prompt)))
                 for image, tensor, metadata, tokens in branch_sources:
                     visual_range = find_visual_token_range(
                         tokens, tensor,
@@ -4657,35 +4726,36 @@ def execute_advanced_minimax_h3_image_to_video(
                 fused_tensor[:, base_range[0]:base_range[1], :] = slot_tensor[:, base_range[0]:base_range[1], :]
             conditioning = [[fused_tensor, base_metadata]]
         if video_frames is not None and video_export_tokens is None:
-            video_export_tokens = tokenize_callback(prompt)
+            video_export_tokens = tokenize_callback(actual_prompt)
             video_export_offset = len(fusion_slot_batches)
     elif fusion_active:
         if token_fusion:
             canonical_images = [*base_vlm_images, fusion_vlm_images[0]]
-            canonical_tokens = tokenize_presentation(prompt, canonical_images)
+            canonical_tokens = tokenize_presentation(actual_prompt, canonical_images)
             visual_index = len(canonical_images) - 1
             alternatives = [
-                tokenize_presentation(prompt, [*base_vlm_images, image])
+                tokenize_presentation(actual_prompt, [*base_vlm_images, image])
                 for image in fusion_vlm_images[1:]
             ]
             conditioning = encode_picture_slots(canonical_tokens, [(visual_index, alternatives)])
             video_export_tokens = canonical_tokens
             video_export_offset = 1
         else:
+            raw_prompt = item.get("prompt") or ""
             branches = []
             for index, image in enumerate(fusion_vlm_images):
                 branch_images = [*base_vlm_images, image]
                 tokenize_callback = lambda text, images=branch_images: tokenize_presentation(text, images)
-                conditioning = encode_embedding_classical_scaled_bias(
-                    clip, prompt, tokenize_callback=tokenize_callback,
+                cond = encode_embedding_classical_scaled_bias(
+                    clip, raw_prompt, tokenize_callback=tokenize_callback,
                     visual_encoder_path=visual_encoder_path,
                     encode_callback=temporal_encode if continuation_temporal else None,
                     cache=cache,
                 )
-                if len(conditioning) != 1:
+                if len(cond) != 1:
                     raise ValueError("MiniMax H3 visual fusion requires one conditioning schedule entry.")
-                tensor, metadata = conditioning[0]
-                tokens = tokenize_callback(prompt)
+                tensor, metadata = cond[0]
+                tokens = tokenize_callback(actual_prompt)
                 visual_range = find_visual_token_range(
                     tokens, tensor,
                     legacy_krea_spatial=visual_encoder_path == "legacy-flat",
@@ -4703,7 +4773,7 @@ def execute_advanced_minimax_h3_image_to_video(
             conditioning = _spatially_fuse_visual_consensus_sources(branches, config, clip, allow_export=True, cache=cache)
         if video_frames is not None and video_export_tokens is None:
             video_export_tokens = tokenize_presentation(
-                prompt, [*base_vlm_images, fusion_vlm_images[0]]
+                actual_prompt, [*base_vlm_images, fusion_vlm_images[0]]
             )
             video_export_offset = 1
     else:
@@ -4711,9 +4781,10 @@ def execute_advanced_minimax_h3_image_to_video(
         tokenize_callback = lambda text: tokenize_presentation(
             text, presentation_images
         )
+        raw_prompt = item.get("prompt") or ""
         conditioning = encode_embedding_classical_scaled_bias(
             clip,
-            prompt,
+            raw_prompt,
             tokenize_callback=tokenize_callback,
             visual_encoder_path="grid-deepstack",
             encode_callback=temporal_encode,
@@ -4724,7 +4795,7 @@ def execute_advanced_minimax_h3_image_to_video(
                 "MiniMax H3 visual conditioning requires one schedule entry."
             )
         if config.get("save_blended_embeds", False) and presentation_images:
-            tokens = tokenize_callback(prompt)
+            tokens = tokenize_callback(actual_prompt)
             save_source_visual_embeddings(
                 clip,
                 tokens,
@@ -4735,7 +4806,7 @@ def execute_advanced_minimax_h3_image_to_video(
                 cache=cache,
             )
         if config.get("save_blended_embeds", False) and video_frames is not None:
-            tokens = tokenize_callback(prompt)
+            tokens = tokenize_callback(actual_prompt)
             save_source_visual_embeddings(
                 clip,
                 tokens,
@@ -4794,6 +4865,22 @@ def execute_advanced_minimax_h3_image_to_video(
             scaled.append([tensor * multiplier, metadata])
         conditioning = scaled
 
+    return conditioning
+
+
+def _package_minimax_h3_entry_stage4(item: dict, stage1_res: dict, conditioning, cache=None):
+    keyframes = stage1_res["keyframes"]
+    references = stage1_res["references"]
+    frame_count = stage1_res["frame_count"]
+    continuation_frames = stage1_res["continuation_frames"]
+    continuation_has_latent = stage1_res["continuation_has_latent"]
+    continuation_media = item.get("continuation_media")
+    seg_ov = stage1_res["seg_ov"]
+    seg_pad = stage1_res["seg_pad"]
+    latent = stage1_res["latent"]
+    vae = item.get("vae")
+    audio_vae = item.get("audio_vae")
+
     metadata = {}
     if keyframes:
         metadata["minimax_keyframes"] = keyframes
@@ -4820,7 +4907,120 @@ def execute_advanced_minimax_h3_image_to_video(
             audio_vae=audio_vae,
             cache=cache,
         )
-    return conditioning, latent
+
+    cond_meta = (
+        conditioning[0][1]
+        if conditioning and len(conditioning[0]) > 1 and isinstance(conditioning[0][1], dict)
+        else {}
+    )
+    trim_frames = int(
+        cond_meta.get(
+            "minimax_trim_frames",
+            cond_meta.get("uc_overlap_frames", latent.get("uc_overlap_frames", 0) if isinstance(latent, dict) else 0),
+        )
+    )
+    return conditioning, latent, trim_frames
+
+
+def execute_batch_minimax_h3_image_to_video(items: list[dict], enable_caching="all") -> tuple[list, list, list]:
+    """Execute MiniMax H3 encoding across a list of entries in 4 strictly type-ordered stages.
+
+    Stages:
+      1. All VAE encoding for entries 0..N-1 (VAE remains loaded once)
+      2. All Audio VAE encoding for entries 0..N-1 (Audio VAE remains loaded once)
+      3. All CLIP VLM encoding for entries 0..N-1 (CLIP remains loaded once)
+      4. Assembly & Packaging in exact original order [0..N-1]
+    """
+    if not items:
+        return [], [], []
+    for item in items:
+        clip = item.get("clip")
+        while isinstance(clip, (tuple, list)) and len(clip) > 0:
+            clip = clip[0]
+        if not is_minimax_h3_text_encoder(clip):
+            raise ValueError("Advanced MiniMax H3 Image to Video requires the qwen3vl_32b text encoder.")
+
+    with H3EncoderCache(enable_caching) as cache:
+        # STAGE 1: VAE across all entries sequentially (VAE loaded in VRAM once!)
+        stage1_results = [_minimax_h3_stage1_vae(item, cache) for item in items]
+
+        # STAGE 2: Audio VAE across all entries sequentially (Audio VAE loaded in VRAM once!)
+        for i, item in enumerate(items):
+            _minimax_h3_stage2_audio_vae(item, stage1_results[i], cache)
+
+        # STAGE 3: CLIP across all entries sequentially (CLIP loaded in VRAM once!)
+        stage3_results = [_minimax_h3_stage3_clip(item, stage1_results[i], cache) for i, item in enumerate(items)]
+
+        # STAGE 4: Assemble & package outputs in original list order [0 .. N-1]
+        all_conds = []
+        all_latents = []
+        all_trim_frames = []
+        for i, item in enumerate(items):
+            cond, lat, trim = _package_minimax_h3_entry_stage4(item, stage1_results[i], stage3_results[i], cache=cache)
+            all_conds.append(cond)
+            all_latents.append(lat)
+            all_trim_frames.append(trim)
+
+        return all_conds, all_latents, all_trim_frames
+
+
+
+
+
+
+def execute_advanced_minimax_h3_image_to_video(
+    clip,
+    vae,
+    prompt,
+    width,
+    height,
+    length,
+    first_frame=None,
+    last_frame=None,
+    reference_images=None,
+    fusion_images=None,
+    visual_fusion_config=None,
+    multiplier=1.0,
+    ref_image_size="match",
+    vlm_resolution=384,
+    vlm_video_resolution=384,
+    media_config=None,
+    video=None,
+    continuation_media=None,
+    audio=None,
+    audio_vae=None,
+    token_fusion=False,
+    temporal_fusion=False,
+    temporal_token_fusion=False,
+    text_blend_config=None,
+    cache=None,
+    enable_caching="all",
+):
+    """Build coordinated Qwen conditioning, H3 image controls, and AV latent."""
+    item = {
+        "clip": clip, "vae": vae, "prompt": prompt, "width": width, "height": height, "length": length,
+        "first_frame": first_frame, "last_frame": last_frame, "reference_images": reference_images,
+        "fusion_images": fusion_images, "visual_fusion_config": visual_fusion_config,
+        "multiplier": multiplier, "ref_image_size": ref_image_size,
+        "vlm_resolution": vlm_resolution, "vlm_video_resolution": vlm_video_resolution,
+        "media_config": media_config, "video": video, "continuation_media": continuation_media,
+        "audio": audio, "audio_vae": audio_vae, "token_fusion": token_fusion,
+        "temporal_fusion": temporal_fusion, "temporal_token_fusion": temporal_token_fusion,
+        "text_blend_config": text_blend_config,
+    }
+    if not is_minimax_h3_text_encoder(clip):
+        raise ValueError(
+            "Advanced MiniMax H3 Image to Video requires the qwen3vl_32b text encoder."
+        )
+    if cache is not None:
+        stage1 = _minimax_h3_stage1_vae(item, cache)
+        _minimax_h3_stage2_audio_vae(item, stage1, cache)
+        cond = _minimax_h3_stage3_clip(item, stage1, cache)
+        conditioning, latent, _ = _package_minimax_h3_entry_stage4(item, stage1, cond, cache=cache)
+        return conditioning, latent
+
+    all_conds, all_latents, _ = execute_batch_minimax_h3_image_to_video([item], enable_caching=enable_caching)
+    return all_conds[0], all_latents[0]
 
 
 def execute_advanced_visual_consensus(

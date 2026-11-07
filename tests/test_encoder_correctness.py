@@ -677,6 +677,11 @@ def test_minimax_h3_list_batch_execution_and_disabled_fusion(monkeypatch):
         return [[torch.zeros(1, 4, 16), {}]], {"samples": torch.zeros(1, 16, 4, 4)}
 
     monkeypatch.setattr(encoder_nodes, "execute_advanced_minimax_h3_image_to_video", mock_execute)
+    def mock_batch(items, **kwargs):
+        for it in items:
+            mock_execute(**it)
+        return [[[torch.zeros(1, 4, 16), {}]] for _ in items], [{"samples": torch.zeros(1, 16, 4, 4)} for _ in items], [0 for _ in items]
+    monkeypatch.setattr(encoder_nodes, "execute_batch_minimax_h3_image_to_video", mock_batch)
 
     # 1. Test "off" and "disabled" normalize to token_fusion=False
     UC_AdvancedMiniMaxH3ImageToVideo.execute(object(), prompt="single", fusion_method="off")
@@ -709,6 +714,11 @@ def test_continuation_encoder_list_batch_execution(monkeypatch):
         return [[torch.zeros(1, 4, 16), {"minimax_trim_frames": 22}]], {"samples": torch.zeros(1, 16, 4, 4)}
 
     monkeypatch.setattr(encoder_nodes, "execute_advanced_minimax_h3_image_to_video", mock_execute)
+    def mock_batch(items, **kwargs):
+        for it in items:
+            mock_execute(**it)
+        return [[[torch.zeros(1, 4, 16), {}]] for _ in items], [{"samples": torch.zeros(1, 16, 4, 4)} for _ in items], [22 for _ in items]
+    monkeypatch.setattr(encoder_nodes, "execute_batch_minimax_h3_image_to_video", mock_batch)
 
     out = encoder_nodes.UC_MiniMaxH3ClipContinuationEncoder.execute(
         clip=[object()],
@@ -1293,6 +1303,10 @@ def test_clip_continuation_audio_requests_audio_vae_lazily():
     }
     assert node.check_lazy_status(continuation_media=media, audio_vae=None) == ["audio_vae"]
     assert node.check_lazy_status(continuation_media=media, audio_vae=object()) == []
+    # Test with is_input_list=True list-wrapped inputs
+    assert node.check_lazy_status(continuation_media=[media], audio_vae=[None]) == ["audio_vae"]
+    assert node.check_lazy_status(continuation_media=[media], audio_vae=[object()]) == []
+    assert node.check_lazy_status(audio=[{"waveform": torch.ones(1, 2, 8), "sample_rate": 32000}], audio_vae=[None]) == ["audio_vae"]
 
 
 def test_minimax_h3_audio_reference_matches_core_contract(monkeypatch):

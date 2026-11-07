@@ -423,23 +423,11 @@ def execute_advanced_minimax_h3_reference_media_image_to_video(
                     "latent_h": final_latent.shape[3],
                     "latent_w": final_latent.shape[4],
                 }
-            a_ref = None
-            if soundtrack is not None and audio_vae is not None:
-                a_ref = _encode_minimax_h3_audio_reference(soundtrack, audio_vae, cache=cache)
-            if v_ref is not None and a_ref is not None:
-                # Core ref2va contract: a video's soundtrack shares the video block's time origin
-                v_ref = {
-                    **v_ref,
-                    "kind": "video_audio",
-                    "ref_audio_t": a_ref["ref_audio_t"],
-                    "audio_latent": a_ref["audio_latent"],
-                }
-                a_ref = None
-            elif v_ref is not None:
+            if v_ref is not None:
                 v_ref["kind"] = "video"
                 v_ref["ref_audio_t"] = 0
                 v_ref["audio_latent"] = None
-            prepared_reference_videos.append((v_frames, soundtrack, v_ref, a_ref))
+            prepared_reference_videos.append((v_frames, soundtrack, v_ref, None))
 
     flat_images = []
     if reference_images is not None:
@@ -512,20 +500,36 @@ def execute_advanced_minimax_h3_reference_media_image_to_video(
                 "latent_w": tw // 16,
                 "latent": latent_img,
             })
+    # --- Stage 2: Audio VAE Encoding ---
+    updated_reference_videos = []
+    for v_frames, soundtrack, v_ref, _ in prepared_reference_videos:
+        a_ref = None
+        if soundtrack is not None and audio_vae is not None:
+            a_ref = _encode_minimax_h3_audio_reference(soundtrack, audio_vae, cache=cache)
+        if v_ref is not None and a_ref is not None:
+            v_ref = {
+                **v_ref,
+                "kind": "video_audio",
+                "ref_audio_t": a_ref["ref_audio_t"],
+                "audio_latent": a_ref["audio_latent"],
+            }
+            a_ref = None
+        updated_reference_videos.append((v_frames, soundtrack, v_ref, a_ref))
+    prepared_reference_videos = updated_reference_videos
+
     for _, _, v_ref, _ in prepared_reference_videos:
         if v_ref is not None:
             references.append(v_ref)
+    for _, _, _, a_ref in prepared_reference_videos:
+        if a_ref is not None:
+            references.append(a_ref)
 
-    # --- Stage 2: Audio VAE Encoding ---
     for aud in parsed_audios:
         a_ref = None
         if aud is not None and audio_vae is not None:
             a_ref = _encode_minimax_h3_audio_reference(aud, audio_vae, cache=cache)
         if aud is not None:
             prepared_reference_audios.append((aud, a_ref))
-    for _, _, _, a_ref in prepared_reference_videos:
-        if a_ref is not None:
-            references.append(a_ref)
     for _, a_ref in prepared_reference_audios:
         if a_ref is not None:
             references.append(a_ref)

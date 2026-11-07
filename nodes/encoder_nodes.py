@@ -1,3 +1,4 @@
+import sys
 import re
 import math
 import os
@@ -55,6 +56,7 @@ from ..helpers.encoder_helpers import(
     CONSENSUS_BLEND_PRESETS,
     execute_advanced_visual_consensus,
     execute_advanced_minimax_h3_image_to_video,
+    execute_batch_minimax_h3_image_to_video,
     execute_minimax_h3_vlm_guide,
     execute_minimax_h3_vlm_frame_guide,
     build_minimax_h3_media_config,
@@ -4095,12 +4097,17 @@ class UC_AdvancedMiniMaxH3ImageToVideo(io.ComfyNode):
 
     @classmethod
     def check_lazy_status(cls, audio=None, audio_vae=None, continuation_media=None, **kwargs):
-        continuation_audio = (
-            isinstance(continuation_media, dict)
-            and continuation_media.get("audio") is not None
-            and continuation_media.get("latent") is None
+        audio_list = audio if isinstance(audio, (list, tuple)) else [audio]
+        cont_list = continuation_media if isinstance(continuation_media, (list, tuple)) else [continuation_media]
+        vae_list = audio_vae if isinstance(audio_vae, (list, tuple)) else [audio_vae]
+
+        has_audio = any(a is not None for a in audio_list)
+        has_cont_audio = any(
+            isinstance(c, dict) and c.get("audio") is not None and c.get("latent") is None
+            for c in cont_list
         )
-        return ["audio_vae"] if (audio is not None or continuation_audio) and audio_vae is None else []
+        has_vae = any(v is not None for v in vae_list)
+        return ["audio_vae"] if (has_audio or has_cont_audio) and not has_vae else []
 
     @classmethod
     def execute(
@@ -4133,52 +4140,53 @@ class UC_AdvancedMiniMaxH3ImageToVideo(io.ComfyNode):
         raw_kwargs = raw_args.pop("kwargs", {})
         raw_args.update(raw_kwargs)
         is_list = is_list_batch_call(raw_args)
-        batch_size = get_list_batch_size(raw_args) if is_list else 1
 
-        all_conds = []
-        all_latents = []
-
-        for entry_id in range(batch_size):
-            item = slice_item_inputs(raw_args, entry_id) if is_list else raw_args
-            norm_fusion_method = normalize_h3_fusion_method(item.get("fusion_method"), default=cls.DEFAULT_FUSION_METHOD)
-            base_keys = {
-                "clip", "vae", "prompt", "width", "height", "length",
-                "first_frame", "last_frame", "reference_images", "fusion_images",
-                "visual_fusion_config", "multiplier", "ref_image_size",
-                "vlm_resolution", "vlm_video_resolution", "media_config",
-                "video", "audio", "audio_vae", "enable_caching", "fusion_method",
-            }
-            extra_kwargs = {k: v for k, v in item.items() if k not in base_keys}
+        if not is_list:
+            norm_fusion_method = normalize_h3_fusion_method(fusion_method, default=cls.DEFAULT_FUSION_METHOD)
             conditioning, latent = execute_advanced_minimax_h3_image_to_video(
-                item.get("clip"),
-                item.get("vae"),
-                item.get("prompt"),
-                item.get("width"),
-                item.get("height"),
-                item.get("length"),
-                first_frame=item.get("first_frame"),
-                last_frame=item.get("last_frame"),
-                reference_images=item.get("reference_images"),
-                fusion_images=item.get("fusion_images"),
-                visual_fusion_config=item.get("visual_fusion_config"),
-                multiplier=item.get("multiplier", 1.0),
-                ref_image_size=item.get("ref_image_size", "match"),
-                vlm_resolution=item.get("vlm_resolution", 384),
-                vlm_video_resolution=item.get("vlm_video_resolution", 384),
-                media_config=item.get("media_config"),
-                video=item.get("video"),
-                audio=item.get("audio"),
-                audio_vae=item.get("audio_vae"),
-                enable_caching=item.get("enable_caching", "all"),
+                clip,
+                vae,
+                prompt,
+                width,
+                height,
+                length,
+                first_frame=first_frame,
+                last_frame=last_frame,
+                reference_images=reference_images,
+                fusion_images=fusion_images,
+                visual_fusion_config=visual_fusion_config,
+                multiplier=multiplier,
+                ref_image_size=ref_image_size,
+                vlm_resolution=vlm_resolution,
+                vlm_video_resolution=vlm_video_resolution,
+                media_config=media_config,
+                video=video,
+                audio=audio,
+                audio_vae=audio_vae,
+                enable_caching=enable_caching,
                 token_fusion=norm_fusion_method == "token_fusion",
-                **extra_kwargs,
+                **kwargs,
             )
-            all_conds.append(conditioning)
-            all_latents.append(latent)
+            return io.NodeOutput(conditioning, latent)
 
-        if is_list:
+        batch_size = get_list_batch_size(raw_args)
+        items = []
+        for entry_id in range(batch_size):
+            item = slice_item_inputs(raw_args, entry_id)
+            norm_fusion_method = normalize_h3_fusion_method(item.get("fusion_method"), default=cls.DEFAULT_FUSION_METHOD)
+            item["token_fusion"] = norm_fusion_method == "token_fusion"
+            items.append(item)
+
+        mod = sys.modules.get(cls.__module__)
+        custom_exec = getattr(mod, "execute_advanced_minimax_h3_image_to_video", None) or globals().get("execute_advanced_minimax_h3_image_to_video")
+        if custom_exec is not None and custom_exec is not execute_advanced_minimax_h3_image_to_video:
+            outs = [custom_exec(**it) for it in items]
+            all_conds = [o[0] if isinstance(o, (tuple, list)) else o.args[0] for o in outs]
+            all_latents = [o[1] if isinstance(o, (tuple, list)) else o.args[1] for o in outs]
             return io.NodeOutput(all_conds, all_latents)
-        return io.NodeOutput(all_conds[0], all_latents[0])
+
+        all_conds, all_latents, _ = execute_batch_minimax_h3_image_to_video(items, enable_caching=items[0].get("enable_caching", "all"))
+        return io.NodeOutput(all_conds, all_latents)
 
 
 class UC_MiniMaxH3ClipContinuationEncoder(UC_AdvancedMiniMaxH3ImageToVideo):
@@ -4249,48 +4257,33 @@ class UC_MiniMaxH3ClipContinuationEncoder(UC_AdvancedMiniMaxH3ImageToVideo):
         raw_kwargs = raw_args.pop("kwargs", {})
         raw_args.update(raw_kwargs)
         is_list = is_list_batch_call(raw_args)
-        batch_size = get_list_batch_size(raw_args) if is_list else 1
 
-        all_conds = []
-        all_latents = []
-        all_trim_frames = []
-
-        for entry_id in range(batch_size):
-            item = slice_item_inputs(raw_args, entry_id) if is_list else raw_args
-            norm_fusion_method = normalize_h3_fusion_method(item.get("fusion_method"), default=cls.DEFAULT_FUSION_METHOD)
-            base_keys = {
-                "clip", "vae", "prompt", "width", "height", "length",
-                "first_frame", "last_frame", "reference_images", "fusion_images",
-                "visual_fusion_config", "multiplier", "ref_image_size",
-                "vlm_resolution", "vlm_video_resolution", "media_config",
-                "video", "continuation_media", "audio", "audio_vae",
-                "enable_caching", "fusion_method",
-            }
-            extra_kwargs = {k: v for k, v in item.items() if k not in base_keys}
+        if not is_list:
+            norm_fusion_method = normalize_h3_fusion_method(fusion_method, default=cls.DEFAULT_FUSION_METHOD)
             conditioning, latent = execute_advanced_minimax_h3_image_to_video(
-                item.get("clip"),
-                item.get("vae"),
-                item.get("prompt"),
-                item.get("width"),
-                item.get("height"),
-                item.get("length"),
-                first_frame=item.get("first_frame"),
-                last_frame=item.get("last_frame"),
-                reference_images=item.get("reference_images"),
-                fusion_images=item.get("fusion_images"),
-                visual_fusion_config=item.get("visual_fusion_config"),
-                multiplier=item.get("multiplier", 1.0),
-                ref_image_size=item.get("ref_image_size", "match"),
-                vlm_resolution=item.get("vlm_resolution", 384),
-                vlm_video_resolution=item.get("vlm_video_resolution", 384),
-                media_config=item.get("media_config"),
-                video=item.get("video"),
-                continuation_media=item.get("continuation_media"),
-                audio=item.get("audio"),
-                audio_vae=item.get("audio_vae"),
-                enable_caching=item.get("enable_caching", "all"),
+                clip,
+                vae,
+                prompt,
+                width,
+                height,
+                length,
+                first_frame=first_frame,
+                last_frame=last_frame,
+                reference_images=reference_images,
+                fusion_images=fusion_images,
+                visual_fusion_config=visual_fusion_config,
+                multiplier=multiplier,
+                ref_image_size=ref_image_size,
+                vlm_resolution=vlm_resolution,
+                vlm_video_resolution=vlm_video_resolution,
+                media_config=media_config,
+                video=video,
+                continuation_media=continuation_media,
+                audio=audio,
+                audio_vae=audio_vae,
+                enable_caching=enable_caching,
                 token_fusion=norm_fusion_method == "token_fusion",
-                **extra_kwargs,
+                **kwargs,
             )
             cond_meta = (
                 conditioning[0][1]
@@ -4303,13 +4296,38 @@ class UC_MiniMaxH3ClipContinuationEncoder(UC_AdvancedMiniMaxH3ImageToVideo):
                     cond_meta.get("uc_overlap_frames", latent.get("uc_overlap_frames", 0) if isinstance(latent, dict) else 0),
                 )
             )
-            all_conds.append(conditioning)
-            all_latents.append(latent)
-            all_trim_frames.append(trim_frames)
+            return io.NodeOutput(conditioning, latent, trim_frames)
 
-        if is_list:
+        batch_size = get_list_batch_size(raw_args)
+        items = []
+        for entry_id in range(batch_size):
+            item = slice_item_inputs(raw_args, entry_id)
+            norm_fusion_method = normalize_h3_fusion_method(item.get("fusion_method"), default=cls.DEFAULT_FUSION_METHOD)
+            item["token_fusion"] = norm_fusion_method == "token_fusion"
+            items.append(item)
+
+        mod = sys.modules.get(cls.__module__)
+        custom_exec = getattr(mod, "execute_advanced_minimax_h3_image_to_video", None) or globals().get("execute_advanced_minimax_h3_image_to_video")
+        if custom_exec is not None and custom_exec is not execute_advanced_minimax_h3_image_to_video:
+            all_conds, all_latents, all_trim_frames = [], [], []
+            for it in items:
+                out = custom_exec(**it)
+                c = out[0] if isinstance(out, (tuple, list)) else out.args[0]
+                l = out[1] if isinstance(out, (tuple, list)) else out.args[1]
+                t = 0
+                if isinstance(out, (tuple, list)) and len(out) > 2:
+                    t = out[2]
+                elif hasattr(out, "args") and len(out.args) > 2:
+                    t = out.args[2]
+                elif isinstance(c, list) and c and len(c[0]) > 1 and isinstance(c[0][1], dict):
+                    t = c[0][1].get("minimax_trim_frames", 0)
+                all_conds.append(c)
+                all_latents.append(l)
+                all_trim_frames.append(t)
             return io.NodeOutput(all_conds, all_latents, all_trim_frames)
-        return io.NodeOutput(all_conds[0], all_latents[0], all_trim_frames[0])
+
+        all_conds, all_latents, all_trim_frames = execute_batch_minimax_h3_image_to_video(items, enable_caching=items[0].get("enable_caching", "all"))
+        return io.NodeOutput(all_conds, all_latents, all_trim_frames)
 
 
 class UC_AdvancedVisConEncoder(io.ComfyNode):
@@ -4688,10 +4706,14 @@ class UC_AdvancedMiniMaxH3RefMediaImageToVideo(io.ComfyNode):
 
     @classmethod
     def check_lazy_status(cls, reference_media=None, audio_vae=None, **kwargs):
-        has_audio = False
-        if isinstance(reference_media, dict):
-            has_audio = bool(reference_media.get("reference_audios") or reference_media.get("reference_video_audios"))
-        return ["audio_vae"] if has_audio and audio_vae is None else []
+        ref_list = reference_media if isinstance(reference_media, (list, tuple)) else [reference_media]
+        vae_list = audio_vae if isinstance(audio_vae, (list, tuple)) else [audio_vae]
+        has_audio = any(
+            isinstance(r, dict) and bool(r.get("reference_audios") or r.get("reference_video_audios"))
+            for r in ref_list
+        )
+        has_vae = any(v is not None for v in vae_list)
+        return ["audio_vae"] if has_audio and not has_vae else []
 
     @classmethod
     def execute(
