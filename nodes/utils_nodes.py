@@ -34,7 +34,6 @@ from ..helpers.model_helpers import (
 )
 
 _MAX_SEED = 0xFFFFFFFFFFFFFFFF
-SeedClusterType = io.Custom("UC_SEED_CLUSTER")
 MiniMaxH3ClipContinuationMedia = io.Custom("MINIMAX_H3_CLIP_CONTINUATION_MEDIA")
 MiniMaxH3PromptBuilderState = io.Custom("UC_MINIMAX_H3_PROMPT_BUILDER")
 MiniMaxH3BasePromptBuilderState = io.Custom("UC_MINIMAX_H3_BASE_PROMPT_BUILDER")
@@ -564,6 +563,8 @@ class UC_SeedCluster(io.ComfyNode):
             node_id="UC_SeedCluster",
             display_name="SeedCluster",
             category="utils/primitive",
+            description="Generates an incremented list of seeds starting from a main seed.",
+            search_aliases=["seed list", "seed cluster", "generate seeds", "incremented seeds", "random seeds"],
             inputs=[
                 io.Int.Input(
                     "seed",
@@ -581,24 +582,35 @@ class UC_SeedCluster(io.ComfyNode):
                     step=1,
                     tooltip="Amount added between consecutive seeds; values wrap within ComfyUI's seed range.",
                 ),
+                io.Int.Input(
+                    "count",
+                    default=8,
+                    min=1,
+                    max=999999,
+                    step=1,
+                    tooltip="Number of seeds to generate in the cluster list.",
+                ),
             ],
             outputs=[
-                io.Int.Output("seed", display_name="seed"),
-                SeedClusterType.Output(
-                    "seed_cluster",
-                    display_name="Cluster",
+                io.Int.Output(
+                    "seeds",
+                    display_name="seeds",
+                    is_output_list=True,
+                    tooltip="List of incremented seeds generated starting from the main seed.",
                 ),
             ],
         )
 
     @classmethod
-    def execute(cls, seed: int, increment: int) -> io.NodeOutput:
+    def execute(cls, seed: int, increment: int, count: int = 8) -> io.NodeOutput:
         seed = int(seed) % (_MAX_SEED + 1)
+        total = max(1, int(count))
+        step = int(increment)
         cluster = [
-            (seed + index * int(increment)) % (_MAX_SEED + 1)
-            for index in range(8)
+            (seed + index * step) % (_MAX_SEED + 1)
+            for index in range(total)
         ]
-        return io.NodeOutput(seed, cluster)
+        return io.NodeOutput(cluster)
 
 
 class UC_FromSeedCluster(io.ComfyNode):
@@ -608,8 +620,10 @@ class UC_FromSeedCluster(io.ComfyNode):
             node_id="UC_FromSeedCluster",
             display_name="FromSeedCluster",
             category="utils/primitive",
+            is_deprecated=True,
+            description="Deprecated: use From List (UC_FromList) to extract items from a seed list.",
             inputs=[
-                SeedClusterType.Input(
+                io.AnyType.Input(
                     "seed_cluster",
                     display_name="Cluster",
                     tooltip="Seed list produced by SeedCluster.",
@@ -622,8 +636,17 @@ class UC_FromSeedCluster(io.ComfyNode):
         )
 
     @classmethod
-    def execute(cls, seed_cluster: list[int]) -> io.NodeOutput:
-        cluster = [int(seed) % (_MAX_SEED + 1) for seed in seed_cluster[:8]]
+    def execute(cls, seed_cluster) -> io.NodeOutput:
+        if isinstance(seed_cluster, (list, tuple)):
+            flat = []
+            for item in seed_cluster:
+                if isinstance(item, (list, tuple)):
+                    flat.extend(item)
+                else:
+                    flat.append(item)
+        else:
+            flat = [seed_cluster]
+        cluster = [int(seed) % (_MAX_SEED + 1) for seed in flat[:8]]
         if not cluster:
             raise ValueError("FromSeedCluster requires at least one seed.")
         cluster.extend([cluster[-1]] * (8 - len(cluster)))

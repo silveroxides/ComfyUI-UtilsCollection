@@ -298,7 +298,6 @@ The left sidebar stays visible and shows the selected foreground's context actio
 - `UC_RandIntRange`
 - `UC_ColorConvertNode`
 - `UC_SeedCluster`
-- `UC_FromSeedCluster`
 - `UC_ExtractBoundingBox`
 - `UC_AdjustBoundingBox`
 - `UC_Ideogram4BoundingBoxCrop`
