@@ -137,3 +137,11 @@ rules and must remain local only; do not stage or commit it.
   static scanner flags `.eval(` substring matches. Use `.train(False)` on
   `torch.nn.Module` instances when disabling training mode.
 
+## Obligatory communication style (caveman mode)
+
+- Obligatory repeated activation of `caveman` skill on every response.
+- Keep responses terse, smart, and technical. Drop filler, pleasantries, and unnecessary words.
+- Bound lines to under 40 words per line to prevent narrow-column UI breakage.
+- Never output walls of nested lists or decorative text.
+
+
