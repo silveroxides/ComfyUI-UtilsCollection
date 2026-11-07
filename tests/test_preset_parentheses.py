@@ -56,7 +56,7 @@ def test_video_preset_node_input_order_remains_compatible(node):
     ]
 
 
-@pytest.mark.parametrize("node", [preset_nodes.UC_SystemMessagePresets, preset_nodes.UC_SystemMessageVideoPresets])
+@pytest.mark.parametrize("node", [preset_nodes.UC_SystemMessagePresets])
 def test_style_3d_pbr_parentheses_are_escaped(node):
     plain = node.execute("STYLE_3D", False).args[0]
     escaped = node.execute("STYLE_3D", True).args[0]

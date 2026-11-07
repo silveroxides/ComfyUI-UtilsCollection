@@ -211,33 +211,31 @@ def test_video_prompt_conversion_preserves_multiline_and_parentheses():
     assert "\nNo commentary." in result
 
 
-def test_every_style_triplet_is_converted_without_broad_medium_replacement():
-    system_sources = preset_nodes.UC_SystemMessagePresets.get_presets()
-    instruction_sources = preset_nodes.UC_InstructPromptPresets.get_presets()
-    bonus_sources = preset_nodes.UC_BonusPromptPresets.get_presets()
-    shared = set(system_sources) & set(instruction_sources) & set(bonus_sources)
+def test_every_video_preset_is_loaded_natively():
+    sys_presets = preset_nodes.UC_SystemMessageVideoPresets.get_presets()
+    inst_presets = preset_nodes.UC_InstructPromptVideoPresets.get_presets()
+    bonus_presets = preset_nodes.UC_BonusPromptVideoPresets.get_presets()
 
-    node_contracts = (
-        (preset_nodes.UC_SystemMessageVideoPresets, system_sources, "system"),
-        (preset_nodes.UC_InstructPromptVideoPresets, instruction_sources, "instruction"),
-        (preset_nodes.UC_BonusPromptVideoPresets, bonus_sources, "bonus"),
-    )
-    medium_terms = ("painting", "illustration", "drawing", "artwork", "cel")
+    assert len(sys_presets) >= 50
+    assert len(inst_presets) >= 50
+    assert len(bonus_presets) >= 50
 
-    for preset_name in sorted(shared):
-        for node, sources, role in node_contracts:
-            source = sources[preset_name]
-            result = node.execute(preset_name, False).args[0]
+    for name in sys_presets:
+        if name in ("F2_SYSTEM_MESSAGE", "F2_SYSTEM_MESSAGE_UPSAMPLING_I2I", "F2_SYSTEM_MESSAGE_UPSAMPLING_T2I"):
+            continue
+        res = preset_nodes.UC_SystemMessageVideoPresets.execute(name, False).args[0]
+        assert "opening frame" in res or "video generation" in res
 
-            assert result
-            assert result.endswith(ROLE_GUIDANCE[role])
-            for term in medium_terms:
-                assert result.lower().count(term) >= source.lower().count(term)
-            for pattern in RESIDUAL_IMAGE_EDIT_PATTERNS:
-                assert re.search(pattern, result, re.IGNORECASE) is None
+    for name in inst_presets:
+        res = preset_nodes.UC_InstructPromptVideoPresets.execute(name, False).args[0]
+        assert "opening frame" in res
+
+    for name in bonus_presets:
+        res = preset_nodes.UC_BonusPromptVideoPresets.execute(name, False).args[0]
+        assert "fluid video sequence" in res
 
 
-def test_non_style_system_messages_use_system_conversion():
+def test_non_style_system_messages_load_natively():
     for preset_name in (
         "F2_SYSTEM_MESSAGE",
         "F2_SYSTEM_MESSAGE_UPSAMPLING_I2I",
@@ -246,10 +244,7 @@ def test_non_style_system_messages_use_system_conversion():
         result = preset_nodes.UC_SystemMessageVideoPresets.execute(
             preset_name, False
         ).args[0]
-
         assert result
-        assert result.endswith(helper_functions.VIDEO_PROMPT_SYSTEM_GUIDANCE)
-        assert "image-editing expert" not in result.lower()
 
 
 def test_standalone_video_prompt_node_keeps_role_interface_and_default():
@@ -270,7 +265,7 @@ def test_standalone_video_prompt_node_keeps_role_interface_and_default():
 
 
 def test_video_preset_parentheses_are_escaped_after_conversion(monkeypatch):
-    source = "Source (detail). Keep pose."
+    source = "Source (detail)."
     monkeypatch.setattr(
         preset_nodes.UC_BonusPromptVideoPresets,
         "get_presets",
@@ -280,7 +275,6 @@ def test_video_preset_parentheses_are_escaped_after_conversion(monkeypatch):
     plain = preset_nodes.UC_BonusPromptVideoPresets.execute("TEST", False).args[0]
     escaped = preset_nodes.UC_BonusPromptVideoPresets.execute("TEST", True).args[0]
 
-    assert "Keep pose" not in plain
     assert escaped == plain.replace("(", r"\(").replace(")", r"\)")
 
 

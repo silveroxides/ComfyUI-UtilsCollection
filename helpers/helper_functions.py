@@ -790,11 +790,11 @@ _VIDEO_PROMPT_COMMON_REPLACEMENTS = (
     ),
     (
         r"(?i)\bmodify\s+the\s+style\s+to\s+look\s+like\s+([^\r\n.]+)",
-        r"Render the moving video with motion and physics authentic to \1",
+        r"render the moving video with motion and physics authentic to \1",
     ),
     (
         r"(?i)\bmodify\s+the\s+style\s+to\s+look\s+real\b",
-        "Render the moving video with realistic motion, physics, and appearance",
+        "render the moving video with realistic motion, physics, and appearance",
     ),
     (
         r"(?i)\bfocuses\s+on\s+edits\s+to\s+look\s+like\s+([^\r\n.]+)",

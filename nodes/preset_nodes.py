@@ -2,7 +2,7 @@ import sys
 import re
 
 from comfy_api.latest import ComfyExtension, io
-from .. import presets_collection
+from .. import presets_collection, presets_video_collection
 from ..helpers.helper_functions import to_video_prompt
 
 
@@ -176,7 +176,20 @@ class UC_LegacyPromptPresets(io.ComfyNode):
 class UC_SystemMessageVideoPresets(io.ComfyNode):
     @classmethod
     def get_presets(cls):
-        return UC_SystemMessagePresets.get_presets()
+        presets = {}
+        for name in dir(presets_video_collection):
+            if name.startswith("SYSTEM_MESSAGE"):
+                val = getattr(presets_video_collection, name)
+                if isinstance(val, str):
+                    if name == "SYSTEM_MESSAGE":
+                        presets["F2_SYSTEM_MESSAGE"] = val
+                    elif name == "SYSTEM_MESSAGE_UPSAMPLING_I2I":
+                        presets["F2_SYSTEM_MESSAGE_UPSAMPLING_I2I"] = val
+                    elif name == "SYSTEM_MESSAGE_UPSAMPLING_T2I":
+                        presets["F2_SYSTEM_MESSAGE_UPSAMPLING_T2I"] = val
+                    elif name.startswith("SYSTEM_MESSAGE_STYLE_"):
+                        presets[name.replace("SYSTEM_MESSAGE_", "")] = val
+        return presets
 
     @classmethod
     def define_schema(cls):
@@ -203,17 +216,19 @@ class UC_SystemMessageVideoPresets(io.ComfyNode):
     def execute(cls, preset, escape_parentheses=False) -> io.NodeOutput:
         presets_dict = cls.get_presets()
         system_prompt = presets_dict.get(preset, "")
-        return io.NodeOutput(
-            escape_prompt_parentheses(
-                to_video_prompt(system_prompt, role="system"), escape_parentheses
-            )
-        )
+        return io.NodeOutput(escape_prompt_parentheses(system_prompt, escape_parentheses))
 
 
 class UC_InstructPromptVideoPresets(io.ComfyNode):
     @classmethod
     def get_presets(cls):
-        return UC_InstructPromptPresets.get_presets()
+        presets = {}
+        for name in dir(presets_video_collection):
+            if name.startswith("INSTRUCT_PROMPT_STYLE_"):
+                val = getattr(presets_video_collection, name)
+                if isinstance(val, str):
+                    presets[name.replace("INSTRUCT_PROMPT_", "")] = val
+        return presets
 
     @classmethod
     def define_schema(cls):
@@ -240,18 +255,19 @@ class UC_InstructPromptVideoPresets(io.ComfyNode):
     def execute(cls, preset, escape_parentheses=False) -> io.NodeOutput:
         presets_dict = cls.get_presets()
         instruct_prompt = presets_dict.get(preset, "")
-        return io.NodeOutput(
-            escape_prompt_parentheses(
-                to_video_prompt(instruct_prompt, role="instruction"),
-                escape_parentheses,
-            )
-        )
+        return io.NodeOutput(escape_prompt_parentheses(instruct_prompt, escape_parentheses))
 
 
 class UC_BonusPromptVideoPresets(io.ComfyNode):
     @classmethod
     def get_presets(cls):
-        return UC_BonusPromptPresets.get_presets()
+        presets = {}
+        for name in dir(presets_video_collection):
+            if name.startswith("BONUS_PROMPT_STYLE_"):
+                val = getattr(presets_video_collection, name)
+                if isinstance(val, str):
+                    presets[name.replace("BONUS_PROMPT_", "")] = val
+        return presets
 
     @classmethod
     def define_schema(cls):
@@ -278,11 +294,7 @@ class UC_BonusPromptVideoPresets(io.ComfyNode):
     def execute(cls, preset, escape_parentheses=False) -> io.NodeOutput:
         presets_dict = cls.get_presets()
         bonus_prompt = presets_dict.get(preset, "")
-        return io.NodeOutput(
-            escape_prompt_parentheses(
-                to_video_prompt(bonus_prompt, role="bonus"), escape_parentheses
-            )
-        )
+        return io.NodeOutput(escape_prompt_parentheses(bonus_prompt, escape_parentheses))
 
 
 class UC_EditTargetPresets(io.ComfyNode):
