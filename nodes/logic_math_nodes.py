@@ -13,43 +13,17 @@ def _math_template():
 
 
 def _math_autogrow(id: str, prefix: str):
-    return io.Autogrow.Input(
-        id,
-        template=io.Autogrow.TemplatePrefix(
-            io.MatchType.Input(prefix, template=_math_template()),
-            prefix=prefix,
-            min=2,
-            max=10,
-        ),
-    )
+    return io.Autogrow.Input(id, template=io.Autogrow.TemplatePrefix(io.MatchType.Input(prefix, template=_math_template()), prefix=prefix, min=2, max=10))
 
 
 def _boolean_autogrow():
-    return io.Autogrow.Input(
-        "inputs",
-        template=io.Autogrow.TemplatePrefix(
-            io.Boolean.Input("input"),
-            prefix="input",
-            min=2,
-            max=10,
-        ),
-    )
+    return io.Autogrow.Input("inputs", template=io.Autogrow.TemplatePrefix(io.Boolean.Input("input"), prefix="input", min=2, max=10))
 
 
 class UC_LogicIF(io.ComfyNode):
     @classmethod
     def define_schema(cls):
-        return io.Schema(
-            node_id="UC_LogicIF",
-            display_name="IF",
-            category=LOGIC_CATEGORY,
-            inputs=[
-                io.Boolean.Input("if_condition"),
-                io.AnyType.Input("when_true"),
-                io.AnyType.Input("when_false", optional=True),
-            ],
-            outputs=[io.AnyType.Output(display_name="result")],
-        )
+        return io.Schema(node_id="UC_LogicIF", display_name="IF", category=LOGIC_CATEGORY, inputs=[io.Boolean.Input("if_condition"), io.AnyType.Input("when_true"), io.AnyType.Input("when_false", optional=True)], outputs=[io.AnyType.Output(display_name="result")])
 
     @classmethod
     def execute(cls, if_condition: bool, when_true: Any, when_false: Any = None):
@@ -63,13 +37,7 @@ class _BooleanAutogrowNode(io.ComfyNode):
 
     @classmethod
     def define_schema(cls):
-        return io.Schema(
-            node_id=cls.node_id,
-            display_name=cls.display_name,
-            category=LOGIC_CATEGORY,
-            inputs=[_boolean_autogrow()],
-            outputs=[io.Boolean.Output()],
-        )
+        return io.Schema(node_id=cls.node_id, display_name=cls.display_name, category=LOGIC_CATEGORY, inputs=[_boolean_autogrow()], outputs=[io.Boolean.Output()])
 
     @classmethod
     def execute(cls, inputs: io.Autogrow.Type):
@@ -97,13 +65,7 @@ class UC_LogicXOR(_BooleanAutogrowNode):
 class UC_LogicNOT(io.ComfyNode):
     @classmethod
     def define_schema(cls):
-        return io.Schema(
-            node_id="UC_LogicNOT",
-            display_name="NOT",
-            category=LOGIC_CATEGORY,
-            inputs=[io.Boolean.Input("input")],
-            outputs=[io.Boolean.Output()],
-        )
+        return io.Schema(node_id="UC_LogicNOT", display_name="NOT", category=LOGIC_CATEGORY, inputs=[io.Boolean.Input("input")], outputs=[io.Boolean.Output()])
 
     @classmethod
     def execute(cls, input: bool):
@@ -118,13 +80,7 @@ class _VariadicMathNode(io.ComfyNode):
     @classmethod
     def define_schema(cls):
         template = _math_template()
-        return io.Schema(
-            node_id=cls.node_id,
-            display_name=cls.display_name,
-            category=MATH_CATEGORY,
-            inputs=[_math_autogrow("operands", "operand")],
-            outputs=[io.MatchType.Output(template=template)],
-        )
+        return io.Schema(node_id=cls.node_id, display_name=cls.display_name, category=MATH_CATEGORY, inputs=[_math_autogrow("operands", "operand")], outputs=[io.MatchType.Output(template=template)])
 
     @classmethod
     def execute(cls, operands: io.Autogrow.Type):
@@ -157,16 +113,7 @@ class UC_MathDivide(io.ComfyNode):
     @classmethod
     def define_schema(cls):
         template = _math_template()
-        return io.Schema(
-            node_id="UC_MathDivide",
-            display_name="Divide",
-            category=MATH_CATEGORY,
-            inputs=[
-                _math_autogrow("operands", "operand"),
-                io.Boolean.Input("handle_zero", default=True),
-            ],
-            outputs=[io.MatchType.Output(template=template)],
-        )
+        return io.Schema(node_id="UC_MathDivide", display_name="Divide", category=MATH_CATEGORY, inputs=[_math_autogrow("operands", "operand"), io.Boolean.Input("handle_zero", default=True)], outputs=[io.MatchType.Output(template=template)])
 
     @classmethod
     def validate_inputs(cls, operands: io.Autogrow.Type, handle_zero: bool):
@@ -191,16 +138,7 @@ class UC_MathPower(io.ComfyNode):
     @classmethod
     def define_schema(cls):
         template = _math_template()
-        return io.Schema(
-            node_id="UC_MathPower",
-            display_name="Power",
-            category=MATH_CATEGORY,
-            inputs=[
-                io.MatchType.Input("base", template=template),
-                io.MatchType.Input("exponent", template=template),
-            ],
-            outputs=[io.MatchType.Output(template=template)],
-        )
+        return io.Schema(node_id="UC_MathPower", display_name="Power", category=MATH_CATEGORY, inputs=[io.MatchType.Input("base", template=template), io.MatchType.Input("exponent", template=template)], outputs=[io.MatchType.Output(template=template)])
 
     @classmethod
     def execute(cls, base: Any, exponent: Any):
@@ -214,13 +152,7 @@ class _UnaryIntegerNode(io.ComfyNode):
 
     @classmethod
     def define_schema(cls):
-        return io.Schema(
-            node_id=cls.node_id,
-            display_name=cls.display_name,
-            category=MATH_CATEGORY,
-            inputs=[io.MatchType.Input("value", template=_math_template())],
-            outputs=[io.Int.Output(display_name="result")],
-        )
+        return io.Schema(node_id=cls.node_id, display_name=cls.display_name, category=MATH_CATEGORY, inputs=[io.MatchType.Input("value", template=_math_template())], outputs=[io.Int.Output(display_name="result")])
 
     @classmethod
     def execute(cls, value: Any):
@@ -243,16 +175,7 @@ class UC_MathRound(io.ComfyNode):
     @classmethod
     def define_schema(cls):
         template = _math_template()
-        return io.Schema(
-            node_id="UC_MathRound",
-            display_name="Round",
-            category=MATH_CATEGORY,
-            inputs=[
-                io.MatchType.Input("value", template=template),
-                io.Int.Input("decimals", default=0, min=0, max=10),
-            ],
-            outputs=[io.MatchType.Output(template=template)],
-        )
+        return io.Schema(node_id="UC_MathRound", display_name="Round", category=MATH_CATEGORY, inputs=[io.MatchType.Input("value", template=template), io.Int.Input("decimals", default=0, min=0, max=10)], outputs=[io.MatchType.Output(template=template)])
 
     @classmethod
     def execute(cls, value: Any, decimals: int):
@@ -263,16 +186,7 @@ class UC_MathModulo(io.ComfyNode):
     @classmethod
     def define_schema(cls):
         template = _math_template()
-        return io.Schema(
-            node_id="UC_MathModulo",
-            display_name="Modulo",
-            category=MATH_CATEGORY,
-            inputs=[
-                io.MatchType.Input("value_a", template=template),
-                io.MatchType.Input("value_b", template=template),
-            ],
-            outputs=[io.MatchType.Output(template=template)],
-        )
+        return io.Schema(node_id="UC_MathModulo", display_name="Modulo", category=MATH_CATEGORY, inputs=[io.MatchType.Input("value_a", template=template), io.MatchType.Input("value_b", template=template)], outputs=[io.MatchType.Output(template=template)])
 
     @classmethod
     def execute(cls, value_a: Any, value_b: Any):
@@ -283,13 +197,7 @@ class UC_MathAbs(io.ComfyNode):
     @classmethod
     def define_schema(cls):
         template = _math_template()
-        return io.Schema(
-            node_id="UC_MathAbs",
-            display_name="Absolute",
-            category=MATH_CATEGORY,
-            inputs=[io.MatchType.Input("value", template=template)],
-            outputs=[io.MatchType.Output(template=template)],
-        )
+        return io.Schema(node_id="UC_MathAbs", display_name="Absolute", category=MATH_CATEGORY, inputs=[io.MatchType.Input("value", template=template)], outputs=[io.MatchType.Output(template=template)])
 
     @classmethod
     def execute(cls, value: Any):
@@ -299,13 +207,7 @@ class UC_MathAbs(io.ComfyNode):
 class UC_MathSqrt(io.ComfyNode):
     @classmethod
     def define_schema(cls):
-        return io.Schema(
-            node_id="UC_MathSqrt",
-            display_name="Square Root",
-            category=MATH_CATEGORY,
-            inputs=[io.MatchType.Input("value", template=_math_template())],
-            outputs=[io.Float.Output(display_name="result")],
-        )
+        return io.Schema(node_id="UC_MathSqrt", display_name="Square Root", category=MATH_CATEGORY, inputs=[io.MatchType.Input("value", template=_math_template())], outputs=[io.Float.Output(display_name="result")])
 
     @classmethod
     def execute(cls, value: Any):
@@ -319,20 +221,7 @@ class _TrigonometryNode(io.ComfyNode):
 
     @classmethod
     def define_schema(cls):
-        return io.Schema(
-            node_id=cls.node_id,
-            display_name=cls.display_name,
-            category=f"{MATH_CATEGORY}/trigonometry",
-            inputs=[
-                io.MatchType.Input("angle", template=_math_template()),
-                io.Combo.Input(
-                    "unit",
-                    options=["Radians", "Degrees"],
-                    default="Radians",
-                ),
-            ],
-            outputs=[io.Float.Output(display_name="result")],
-        )
+        return io.Schema(node_id=cls.node_id, display_name=cls.display_name, category=f"{MATH_CATEGORY}/trigonometry", inputs=[io.MatchType.Input("angle", template=_math_template()), io.Combo.Input("unit", options=["Radians", "Degrees"], default="Radians")], outputs=[io.Float.Output(display_name="result")])
 
     @classmethod
     def execute(cls, angle: Any, unit: str):
@@ -367,13 +256,7 @@ class _MinMaxNode(io.ComfyNode):
     @classmethod
     def define_schema(cls):
         template = _math_template()
-        return io.Schema(
-            node_id=cls.node_id,
-            display_name=cls.display_name,
-            category=MATH_CATEGORY,
-            inputs=[_math_autogrow("values", "value")],
-            outputs=[io.MatchType.Output(template=template)],
-        )
+        return io.Schema(node_id=cls.node_id, display_name=cls.display_name, category=MATH_CATEGORY, inputs=[_math_autogrow("values", "value")], outputs=[io.MatchType.Output(template=template)])
 
     @classmethod
     def execute(cls, values: io.Autogrow.Type):
@@ -396,17 +279,7 @@ class UC_MathClamp(io.ComfyNode):
     @classmethod
     def define_schema(cls):
         template = _math_template()
-        return io.Schema(
-            node_id="UC_MathClamp",
-            display_name="Clamp",
-            category=MATH_CATEGORY,
-            inputs=[
-                io.MatchType.Input("value", template=template),
-                io.MatchType.Input("min_value", template=template),
-                io.MatchType.Input("max_value", template=template),
-            ],
-            outputs=[io.MatchType.Output(template=template)],
-        )
+        return io.Schema(node_id="UC_MathClamp", display_name="Clamp", category=MATH_CATEGORY, inputs=[io.MatchType.Input("value", template=template), io.MatchType.Input("min_value", template=template), io.MatchType.Input("max_value", template=template)], outputs=[io.MatchType.Output(template=template)])
 
     @classmethod
     def execute(cls, value: Any, min_value: Any, max_value: Any):
@@ -416,18 +289,7 @@ class UC_MathClamp(io.ComfyNode):
 class UC_MathNumberConvert(io.ComfyNode):
     @classmethod
     def define_schema(cls):
-        return io.Schema(
-            node_id="UC_MathNumberConvert",
-            display_name="Number Convert",
-            category=MATH_CATEGORY,
-            inputs=[
-                io.MatchType.Input("number_value", template=_math_template()),
-            ],
-            outputs=[
-                io.Int.Output("result_int", display_name="result_int"),
-                io.Float.Output("result_float", display_name="result_float"),
-            ],
-        )
+        return io.Schema(node_id="UC_MathNumberConvert", display_name="Number Convert", category=MATH_CATEGORY, inputs=[io.MatchType.Input("number_value", template=_math_template())], outputs=[io.Int.Output("result_int", display_name="result_int"), io.Float.Output("result_float", display_name="result_float")])
 
     @classmethod
     def execute(cls, number_value: Any):
@@ -438,20 +300,7 @@ class UC_StringToNumber(io.ComfyNode):
     @classmethod
     def define_schema(cls):
         template = _math_template()
-        return io.Schema(
-            node_id="UC_StringToNumber",
-            display_name="String To Number",
-            category=MATH_CATEGORY,
-            inputs=[
-                io.String.Input("string", multiline=False),
-                io.MatchType.Input(
-                    "default_value",
-                    template=template,
-                    optional=True,
-                ),
-            ],
-            outputs=[io.MatchType.Output(template=template, display_name="result")],
-        )
+        return io.Schema(node_id="UC_StringToNumber", display_name="String To Number", category=MATH_CATEGORY, inputs=[io.String.Input("string", multiline=False), io.MatchType.Input("default_value", template=template, optional=True)], outputs=[io.MatchType.Output(template=template, display_name="result")])
 
     @classmethod
     def execute(cls, string: str, default_value: Any = 0):
@@ -464,15 +313,7 @@ class UC_StringToNumber(io.ComfyNode):
 class UC_NumberToString(io.ComfyNode):
     @classmethod
     def define_schema(cls):
-        return io.Schema(
-            node_id="UC_NumberToString",
-            display_name="Number To String",
-            category=MATH_CATEGORY,
-            inputs=[
-                io.MatchType.Input("number", template=_math_template()),
-            ],
-            outputs=[io.String.Output(display_name="result")],
-        )
+        return io.Schema(node_id="UC_NumberToString", display_name="Number To String", category=MATH_CATEGORY, inputs=[io.MatchType.Input("number", template=_math_template())], outputs=[io.String.Output(display_name="result")])
 
     @classmethod
     def execute(cls, number: Any):
@@ -496,15 +337,7 @@ class UC_MathCompare(io.ComfyNode):
             node_id="UC_MathCompare",
             display_name="Compare",
             category=MATH_CATEGORY,
-            inputs=[
-                io.MatchType.Input("value_a", template=template),
-                io.MatchType.Input("value_b", template=template),
-                io.Combo.Input(
-                    "comparison",
-                    options=list(cls.OPERATIONS),
-                    default="Equal",
-                ),
-            ],
+            inputs=[io.MatchType.Input("value_a", template=template), io.MatchType.Input("value_b", template=template), io.Combo.Input("comparison", options=list(cls.OPERATIONS), default="Equal")],
             outputs=[io.Boolean.Output(display_name="result")],
         )
 
@@ -515,30 +348,11 @@ class UC_MathCompare(io.ComfyNode):
 
 
 class UC_MathOperation(io.ComfyNode):
-    OPERATIONS = {
-        "Add": lambda left, right: left + right,
-        "Subtract": lambda left, right: left - right,
-        "Multiply": lambda left, right: left * right,
-        "Divide": lambda left, right: left / right,
-    }
+    OPERATIONS = {"Add": lambda left, right: left + right, "Subtract": lambda left, right: left - right, "Multiply": lambda left, right: left * right, "Divide": lambda left, right: left / right}
 
     @classmethod
     def define_schema(cls):
-        return io.Schema(
-            node_id="UC_MathOperation",
-            display_name="Math Operation (Example)",
-            category=MATH_CATEGORY,
-            inputs=[
-                io.AnyType.Input("value_a"),
-                io.AnyType.Input("value_b"),
-                io.Combo.Input(
-                    "operation",
-                    options=list(cls.OPERATIONS),
-                    default="Add",
-                ),
-            ],
-            outputs=[io.AnyType.Output(display_name="result")],
-        )
+        return io.Schema(node_id="UC_MathOperation", display_name="Math Operation (Example)", category=MATH_CATEGORY, inputs=[io.AnyType.Input("value_a"), io.AnyType.Input("value_b"), io.Combo.Input("operation", options=list(cls.OPERATIONS), default="Add")], outputs=[io.AnyType.Output(display_name="result")])
 
     @classmethod
     def execute(cls, value_a: Any, value_b: Any, operation: str):
@@ -550,17 +364,7 @@ class UC_MathAspectRatio(io.ComfyNode):
     @classmethod
     def define_schema(cls):
         return io.Schema(
-            node_id="UC_MathAspectRatio",
-            display_name="Aspect Ratio",
-            category=MATH_CATEGORY,
-            inputs=[
-                io.Int.Input("width", default=1920, min=1),
-                io.Int.Input("height", default=1080, min=1),
-            ],
-            outputs=[
-                io.Int.Output("ratio_width", display_name="ratio_width"),
-                io.Int.Output("ratio_height", display_name="ratio_height"),
-            ],
+            node_id="UC_MathAspectRatio", display_name="Aspect Ratio", category=MATH_CATEGORY, inputs=[io.Int.Input("width", default=1920, min=1), io.Int.Input("height", default=1080, min=1)], outputs=[io.Int.Output("ratio_width", display_name="ratio_width"), io.Int.Output("ratio_height", display_name="ratio_height")]
         )
 
     @classmethod

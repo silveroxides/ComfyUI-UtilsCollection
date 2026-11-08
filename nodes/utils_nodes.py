@@ -11,12 +11,7 @@ from comfy_execution.graph import ExecutionBlocker
 from comfy_api.latest import InputImpl, Types, io
 from comfy_extras.nodes_logic import SwitchNode, SoftSwitchNode
 from ..helpers.helper_functions import to_video_prompt
-from ..helpers.text_helpers import (
-    compile_h3_prompt,
-    default_h3_prompt_state,
-    compile_h3_base_prompt,
-    default_h3_base_prompt_state,
-)
+from ..helpers.text_helpers import compile_h3_prompt, default_h3_prompt_state, compile_h3_base_prompt, default_h3_base_prompt_state
 from ..helpers.image_helpers import prepare_h3_reference_components, cached_h3_reference_components, video_source_hash, resolve_h3_reference_window, VIDEO_FRAME_TIMESTAMP_FORMATS
 from ..helpers.model_helpers import (
     get_minimax_h3_clip_continuation_fingerprint,
@@ -52,13 +47,28 @@ class UC_MiniMaxH3RefVid(io.ComfyNode):
             inputs=[
                 io.Video.Input("video", tooltip="Reference clip. Its original frame rate is used to preserve playback speed when preparing 24 fps frames."),
                 MiniMaxH3ClipContinuationMedia.Input("continuation_media", optional=True, tooltip="Optional output from MiniMax H3 Clip Continuation Load. When connected, continuation frames and audio replace or prepend the opening segment frames before reference preparation and Whisper transcription."),
-                io.Float.Input("megapixels", default=0.5, min=0.0, max=4.0, step=0.0125, tooltip="Target frame size. Set to 0.0 to keep original video resolution without scaling or cropping. Otherwise matches the video to the nearest standard aspect ratio from Video Resolution Selector, chooses its preferred resolution, and center-crops to fit."),
+                io.Float.Input(
+                    "megapixels",
+                    default=0.5,
+                    min=0.0,
+                    max=4.0,
+                    step=0.0125,
+                    tooltip="Target frame size. Set to 0.0 to keep original video resolution without scaling or cropping. Otherwise matches the video to the nearest standard aspect ratio from Video Resolution Selector, chooses its preferred resolution, and center-crops to fit.",
+                ),
                 io.Float.Input("duration_seconds", default=0.0, min=0.0, step=0.70833, tooltip="Maximum reference duration after the start offset. 0.0 uses the remaining clip. Positive values step by 17 frames (~0.708s) on the MiniMax H3 5+17k grid at 24 fps."),
                 io.Float.Input("start_at_timestamp", default=0.0, min=0.0, step=0.1, tooltip="Seconds to skip at the start, for both video and audio. 0 skips nothing; positive values use the same H3 frame-count rounding as duration. Preview frame numbers are zero-based and the end frame is inclusive."),
                 io.Custom("WHISPER_MODEL").Input("whisper_model", optional=True, tooltip="Optional native Whisper Loader output. Transcribes the selected audio in its original language; disconnected skips transcription."),
                 io.Combo.Input("timestamp_format", options=list(VIDEO_FRAME_TIMESTAMP_FORMATS), default="00.000s", optional=True, tooltip="Timestamp formatting for transcribed audio, matching the timeline nodes."),
                 io.Boolean.Input("enable_whisper", default=True, optional=True, tooltip="When false, skips Whisper transcription and returns an empty transcript. Video and audio outputs are unchanged."),
-                io.Int.Input("segment_count", display_name="Divide into segments (0 = manual)", default=0, min=0, step=1, optional=True, tooltip="0 uses duration/start controls. A positive count divides the source into sequential H3-sized segments (5 + 17k frames). Non-final segments contain continuous source video and audio with zero padding, and each following segment starts on the exact next frame. Only the final segment may add padding."),
+                io.Int.Input(
+                    "segment_count",
+                    display_name="Divide into segments (0 = manual)",
+                    default=0,
+                    min=0,
+                    step=1,
+                    optional=True,
+                    tooltip="0 uses duration/start controls. A positive count divides the source into sequential H3-sized segments (5 + 17k frames). Non-final segments contain continuous source video and audio with zero padding, and each following segment starts on the exact next frame. Only the final segment may add padding.",
+                ),
                 io.Int.Input("segment_index", display_name="Segment index (zero-based)", default=0, min=0, step=1, optional=True, tooltip="Select 0 for the first segment, 1 for the second, through segment_count minus 1. Used only when segment_count is positive."),
             ],
             outputs=[
@@ -68,7 +78,10 @@ class UC_MiniMaxH3RefVid(io.ComfyNode):
                 io.Int.Output("height", tooltip="Matching generation height in pixels."),
                 io.Int.Output("length", tooltip="Matching generation length in frames at 24 fps, including the H3 length adjustment."),
                 io.Video.Output("video", tooltip="24 fps video built from the exact frames and audio returned by this node, including the selected resolution, crop, and duration."),
-                io.String.Output("transcribed_audio", tooltip="Word-timed phrases split before uppercase words and after commas or sentence punctuation. A lone uppercase word with a comma stays with following speech until another boundary. Countable English phrases target 4–6 dictionary syllables; unknown or ambiguous counts keep text boundaries only. Phrases averaging over one second of aligned duration per word are omitted as suspected hallucinations, including genuinely slow speech. Gaps between words do not count toward that duration. Retained words appear once. Times start at the selected clip's beginning. Empty when Whisper is disconnected or no speech/audio is available, or all phrases are filtered."),
+                io.String.Output(
+                    "transcribed_audio",
+                    tooltip="Word-timed phrases split before uppercase words and after commas or sentence punctuation. A lone uppercase word with a comma stays with following speech until another boundary. Countable English phrases target 4–6 dictionary syllables; unknown or ambiguous counts keep text boundaries only. Phrases averaging over one second of aligned duration per word are omitted as suspected hallucinations, including genuinely slow speech. Gaps between words do not count toward that duration. Retained words appear once. Times start at the selected clip's beginning. Empty when Whisper is disconnected or no speech/audio is available, or all phrases are filtered.",
+                ),
                 io.Float.Output("duration", tooltip="Matching generation duration in seconds at 24 fps (length / 24.0)."),
             ],
         )
@@ -94,40 +107,25 @@ class UC_MiniMaxH3RefVid(io.ComfyNode):
         if type(video) is InputImpl.VideoFromFile:
             try:
                 source_seconds = float(video.get_duration())
-                start_frame, frame_count, segment_end, prepended_t = resolve_h3_reference_window(
-                    source_seconds, duration_seconds, start_at_timestamp, segment_count, segment_index, continuation_media
-                )
+                start_frame, frame_count, segment_end, prepended_t = resolve_h3_reference_window(source_seconds, duration_seconds, start_at_timestamp, segment_count, segment_index, continuation_media)
                 total_frames = max(1, round(source_seconds * 24))
                 end_frame = segment_end if segment_end is not None else min(total_frames, start_frame + frame_count)
-                needs_prep_audio = (
-                    prepended_t > 0
-                    and (continuation_media is None or continuation_media.get("audio") is None)
-                )
+                needs_prep_audio = prepended_t > 0 and (continuation_media is None or continuation_media.get("audio") is None)
                 decode_start = max(0, start_frame - prepended_t) if needs_prep_audio else start_frame
                 start_sec = decode_start / 24.0
                 dur_sec = max(1, end_frame - decode_start) / 24.0
                 windowed_video = InputImpl.VideoFromFile(video.get_stream_source(), start_time=start_sec, duration=dur_sec)
                 components = cached_h3_reference_components(windowed_video, megapixels, cache_long_window=True)
                 frames, audio, width, height, length, _, preview = prepare_h3_reference_components(
-                    components, megapixels, duration_seconds=duration_seconds, start_at_timestamp=start_at_timestamp,
-                    spatially_prepared=True, segment_count=segment_count, segment_index=segment_index,
-                    continuation_media=continuation_media,
-                    full_source_seconds=source_seconds,
-                    window_start_frame=decode_start,
+                    components, megapixels, duration_seconds=duration_seconds, start_at_timestamp=start_at_timestamp, spatially_prepared=True, segment_count=segment_count, segment_index=segment_index, continuation_media=continuation_media, full_source_seconds=source_seconds, window_start_frame=decode_start
                 )
             except Exception:
                 components = None
         if components is None:
             components = cached_h3_reference_components(video, megapixels)
-            frames, audio, width, height, length, _, preview = prepare_h3_reference_components(
-                components, megapixels, duration_seconds, start_at_timestamp, spatially_prepared=True,
-                segment_count=segment_count, segment_index=segment_index,
-                continuation_media=continuation_media,
-            )
+            frames, audio, width, height, length, _, preview = prepare_h3_reference_components(components, megapixels, duration_seconds, start_at_timestamp, spatially_prepared=True, segment_count=segment_count, segment_index=segment_index, continuation_media=continuation_media)
         transcribed_audio = transcribe_reference_audio(whisper_model, components.audio, audio, timestamp_format, length) if enable_whisper else ""
-        prepared_video = InputImpl.VideoFromComponents(
-            Types.VideoComponents(images=frames, audio=audio, frame_rate=Fraction(24)),
-        )
+        prepared_video = InputImpl.VideoFromComponents(Types.VideoComponents(images=frames, audio=audio, frame_rate=Fraction(24)))
         src_fps = float(getattr(components, "frame_rate", 24.0) or 24.0)
         src_sec = float(preview.get("source_seconds", 0.0))
         start_f = int(preview.get("start_frame", 0))
@@ -137,10 +135,7 @@ class UC_MiniMaxH3RefVid(io.ComfyNode):
         has_src_audio = components.audio is not None and components.audio.get("waveform") is not None and components.audio["waveform"].numel() > 0
         audio_info = f"32kHz ({audio['waveform'].shape[-1]} samples)" if has_src_audio else "silence-filled"
         whisper_info = f", transcript_chars={len(transcribed_audio)}" if enable_whisper and whisper_model is not None else ""
-        logging.info(
-            "[UC_MiniMaxH3RefVid] Source %.2fs (%.2f fps)%s -> prepared %d frame(s)%s at %dx%d (24 fps, %.2fs, start_frame=%d) | audio=%s%s",
-            src_sec, src_fps, seg_info, length, pad_info, width, height, length / 24.0, start_f, audio_info, whisper_info,
-        )
+        logging.info("[UC_MiniMaxH3RefVid] Source %.2fs (%.2f fps)%s -> prepared %d frame(s)%s at %dx%d (24 fps, %.2fs, start_frame=%d) | audio=%s%s", src_sec, src_fps, seg_info, length, pad_info, width, height, length / 24.0, start_f, audio_info, whisper_info)
         duration = float(length) / 24.0
         return io.NodeOutput(frames, audio, width, height, length, prepared_video, transcribed_audio, duration, ui={"h3_reference_range": [preview]})
 
@@ -173,9 +168,7 @@ class UC_MiniMaxH3ClipContinuationSave(io.ComfyNode):
             target_index = get_latest_minimax_h3_clip_continuation_index(filename_prefix) + 1
         else:
             target_index = int(clip_index)
-        path = save_minimax_h3_clip_continuation_media(
-            images, int(tail_frames), filename_prefix, target_index, audio=audio, padded_frames=int(padded_frames) if padded_frames is not None else 0, latent=latent,
-        )
+        path = save_minimax_h3_clip_continuation_media(images, int(tail_frames), filename_prefix, target_index, audio=audio, padded_frames=int(padded_frames) if padded_frames is not None else 0, latent=latent)
         return io.NodeOutput(path)
 
 
@@ -253,10 +246,7 @@ class UC_MiniMaxH3ClipContinuationUnpack(io.ComfyNode):
                 io.Int.Input("clip_index", default=0, min=0, max=99999, step=1, optional=True, tooltip="Which clip to load directly when continuation_media is disconnected. 0 returns nothing."),
                 io.Combo.Input("media_type", options=["video+audio", "video only", "audio only"], default="video+audio", optional=True, tooltip="Select which continuation components to output."),
             ],
-            outputs=[
-                io.Image.Output("images", tooltip="Continuation video frames."),
-                io.Audio.Output("audio", tooltip="Continuation audio track."),
-            ],
+            outputs=[io.Image.Output("images", tooltip="Continuation video frames."), io.Audio.Output("audio", tooltip="Continuation audio track.")],
         )
 
     @classmethod
@@ -311,22 +301,12 @@ class UC_MiniMaxH3ClipContinuationTrim(io.ComfyNode):
                 io.Float.Input("fps", default=24.0, min=1.0, max=240.0, step=0.001, optional=True, tooltip="Frame rate used to convert trimmed frames into exact audio duration (default 24 fps)."),
                 io.Boolean.Input("match_tail", default=True, optional=True, tooltip="Matches audio duration to frames/fps exactly by trimming any 8ms H3 audio grid overhang or padding a short tail with silence so timing never drifts across clips."),
             ],
-            outputs=[
-                io.Image.Output("images", tooltip="Trimmed video frames."),
-                io.Audio.Output("audio", tooltip="Trimmed and duration-matched audio track."),
-            ],
+            outputs=[io.Image.Output("images", tooltip="Trimmed video frames."), io.Audio.Output("audio", tooltip="Trimmed and duration-matched audio track.")],
         )
 
     @classmethod
     def execute(cls, images, audio=None, trim_leading_frames=0, trim_trailing_frames=0, fps=24.0, match_tail=True):
-        trimmed_images, trimmed_audio = trim_minimax_h3_clip_continuation(
-            images,
-            audio,
-            int(trim_leading_frames),
-            int(trim_trailing_frames),
-            fps=float(fps) if fps is not None else 24.0,
-            match_tail=bool(match_tail) if match_tail is not None else True,
-        )
+        trimmed_images, trimmed_audio = trim_minimax_h3_clip_continuation(images, audio, int(trim_leading_frames), int(trim_trailing_frames), fps=float(fps) if fps is not None else 24.0, match_tail=bool(match_tail) if match_tail is not None else True)
         return io.NodeOutput(trimmed_images, trimmed_audio)
 
 
@@ -341,35 +321,43 @@ class UC_MiniMaxH3ClipContinuationAccumulate(io.ComfyNode):
             inputs=[
                 io.Image.Input("images", tooltip="Frames from the clip you just made."),
                 io.Audio.Input("audio", optional=True, tooltip="Optional audio from the same clip."),
-                MiniMaxH3ClipContinuationMedia.Input("continuation_media", optional=True, tooltip="Connect the same Load output used by this clip's encoder. Saved pixels support temporal alignment without requiring exact equality or limiting either search window. Weak or ambiguous saved context is reported, not used as a rejection gate."),
-                io.Int.Input("target_batches", default=2, min=1, max=99999, step=1, tooltip="How many clips to collect before making one combined clip."),
-                io.Float.Input("overlap_threshold", display_name="Duplicate boundary threshold (%)", default=88.0, min=0.0, max=100.0, step=0.1, tooltip="Advanced: minimum aggregate visual similarity for a sequence of at least two frames. Individual frames may score lower. Silent, short, or unavailable audio does not reject a visual match.", advanced=True),
-                io.Int.Input("maximum_overlap_frames", display_name="Maximum duplicate frames to check", default=56, min=1, max=99999, step=1, tooltip="Search this many ending frames of the preceding output and beginning frames of the new clip. Saved-tail length does not reduce these windows. Large windows require more matching work."),
-                io.Float.Input("continuation_prune_range", display_name="Continuation prune range (%)", default=0.0, min=0.0, max=100.0, step=1.0, tooltip="Initial frames removed from both clip boundaries = saved continuation frames × this percentage ÷ 200. Alignment can remove additional frames."),
-                io.Float.Input("near_identical_tolerance", display_name="Near-identical match tolerance (%)", default=1.0, min=0.0, max=5.0, step=0.1, tooltip="Advanced: score margin for competitive alignments and saved-context ambiguity. Prefer longer sequences at one offset; unresolved competing offsets leave clips unchanged with a warning. The cut minimizes seam error, not a fixed midpoint.", advanced=True),
-                io.Boolean.Input(
-                    "first_batch_reset",
-                    default=False,
-                    label_on="Start new batch",
-                    label_off="Continue batch",
-                    tooltip="Enable for the first clip of a new combined batch, then disable for each clip that follows.",
+                MiniMaxH3ClipContinuationMedia.Input(
+                    "continuation_media", optional=True, tooltip="Connect the same Load output used by this clip's encoder. Saved pixels support temporal alignment without requiring exact equality or limiting either search window. Weak or ambiguous saved context is reported, not used as a rejection gate."
                 ),
-                io.Boolean.Input(
-                    "auto_accumulate",
-                    default=True,
-                    label_on="Add next clip automatically",
-                    label_off="Choose clip number",
-                    tooltip="On: add each clip as the next one in the batch. Off: choose the clip number below so you can retry it.",
+                io.Int.Input("target_batches", default=2, min=1, max=99999, step=1, tooltip="How many clips to collect before making one combined clip."),
+                io.Float.Input(
+                    "overlap_threshold",
+                    display_name="Duplicate boundary threshold (%)",
+                    default=88.0,
+                    min=0.0,
+                    max=100.0,
+                    step=0.1,
+                    tooltip="Advanced: minimum aggregate visual similarity for a sequence of at least two frames. Individual frames may score lower. Silent, short, or unavailable audio does not reject a visual match.",
+                    advanced=True,
                 ),
                 io.Int.Input(
-                    "current_entry",
-                    display_name="Clip number",
-                    default=1,
+                    "maximum_overlap_frames",
+                    display_name="Maximum duplicate frames to check",
+                    default=56,
                     min=1,
                     max=99999,
                     step=1,
-                    tooltip="Manual mode only. Number of the clip being added. Use the same number again to replace that clip when retrying it.",
+                    tooltip="Search this many ending frames of the preceding output and beginning frames of the new clip. Saved-tail length does not reduce these windows. Large windows require more matching work.",
                 ),
+                io.Float.Input("continuation_prune_range", display_name="Continuation prune range (%)", default=0.0, min=0.0, max=100.0, step=1.0, tooltip="Initial frames removed from both clip boundaries = saved continuation frames × this percentage ÷ 200. Alignment can remove additional frames."),
+                io.Float.Input(
+                    "near_identical_tolerance",
+                    display_name="Near-identical match tolerance (%)",
+                    default=1.0,
+                    min=0.0,
+                    max=5.0,
+                    step=0.1,
+                    tooltip="Advanced: score margin for competitive alignments and saved-context ambiguity. Prefer longer sequences at one offset; unresolved competing offsets leave clips unchanged with a warning. The cut minimizes seam error, not a fixed midpoint.",
+                    advanced=True,
+                ),
+                io.Boolean.Input("first_batch_reset", default=False, label_on="Start new batch", label_off="Continue batch", tooltip="Enable for the first clip of a new combined batch, then disable for each clip that follows."),
+                io.Boolean.Input("auto_accumulate", default=True, label_on="Add next clip automatically", label_off="Choose clip number", tooltip="On: add each clip as the next one in the batch. Off: choose the clip number below so you can retry it."),
+                io.Int.Input("current_entry", display_name="Clip number", default=1, min=1, max=99999, step=1, tooltip="Manual mode only. Number of the clip being added. Use the same number again to replace that clip when retrying it."),
             ],
             outputs=[io.Image.Output("images"), io.Audio.Output("audio")],
             hidden=[io.Hidden.unique_id],
@@ -391,16 +379,9 @@ class UC_MiniMaxH3ClipContinuationAccumulate(io.ComfyNode):
         if entry_index < 0 or entry_index > len(state["image_batches"]):
             raise ValueError("MiniMax H3 Clip Continuation manual entries must be sequential or replace an existing entry.")
         images = images.detach().cpu().clone()
-        if audio is not None and (
-            not isinstance(audio, Mapping)
-            or not torch.is_tensor(audio.get("waveform"))
-            or not isinstance(audio.get("sample_rate"), int)
-        ):
+        if audio is not None and (not isinstance(audio, Mapping) or not torch.is_tensor(audio.get("waveform")) or not isinstance(audio.get("sample_rate"), int)):
             raise ValueError("MiniMax H3 Clip Continuation accumulated audio must contain a waveform and sample rate.")
-        stored_audio = None if audio is None else {
-            "waveform": audio["waveform"].detach().cpu().clone(),
-            "sample_rate": audio.get("sample_rate"),
-        }
+        stored_audio = None if audio is None else {"waveform": audio["waveform"].detach().cpu().clone(), "sample_rate": audio.get("sample_rate")}
         if entry_index == len(state["image_batches"]):
             state["image_batches"].append(images)
             state["audio_batches"].append(stored_audio)
@@ -411,15 +392,8 @@ class UC_MiniMaxH3ClipContinuationAccumulate(io.ComfyNode):
             state["continuation_batches"][entry_index] = stored_media
         if len(state["image_batches"]) < target_batches:
             return io.NodeOutput(ExecutionBlocker(None), ExecutionBlocker(None))
-        image_batches, audio_batches = trim_minimax_h3_clip_continuation_batch(
-            state["image_batches"], state["audio_batches"], overlap_threshold, maximum_overlap_frames,
-            near_identical_tolerance,
-            continuation_batches=state["continuation_batches"],
-            continuation_prune_range=float(continuation_prune_range),
-        )
-        output = accumulate_minimax_h3_clip_continuations(
-            image_batches, audio_batches
-        )
+        image_batches, audio_batches = trim_minimax_h3_clip_continuation_batch(state["image_batches"], state["audio_batches"], overlap_threshold, maximum_overlap_frames, near_identical_tolerance, continuation_batches=state["continuation_batches"], continuation_prune_range=float(continuation_prune_range))
+        output = accumulate_minimax_h3_clip_continuations(image_batches, audio_batches)
         del _MINIMAX_H3_CLIP_ACCUMULATION[state_key]
         return io.NodeOutput(*output)
 
@@ -442,23 +416,11 @@ class UC_MiniMaxH3ClipContinuationAccumulateList(io.ComfyNode):
                 io.Float.Input("continuation_prune_range", display_name="Continuation prune range (%)", default=0.0, min=0.0, max=100.0, step=1.0, tooltip="Percentage of saved continuation frames to safely remove from the boundary before matching."),
                 io.Float.Input("near_identical_tolerance", display_name="Near-identical match tolerance (%)", default=1.0, min=0.0, max=5.0, step=0.1, tooltip="Match strictness when selecting the smoothest transition point.", advanced=True),
             ],
-            outputs=[
-                io.Image.Output("images", tooltip="The final stitched video frames without duplicate or jumpy transitions."),
-                io.Audio.Output("audio", tooltip="The matching continuous soundtrack."),
-            ],
+            outputs=[io.Image.Output("images", tooltip="The final stitched video frames without duplicate or jumpy transitions."), io.Audio.Output("audio", tooltip="The matching continuous soundtrack.")],
         )
 
     @classmethod
-    def execute(
-        cls,
-        images,
-        audio=None,
-        continuation_media=None,
-        overlap_threshold=88.0,
-        maximum_overlap_frames=56,
-        continuation_prune_range=0.0,
-        near_identical_tolerance=1.0,
-    ) -> io.NodeOutput:
+    def execute(cls, images, audio=None, continuation_media=None, overlap_threshold=88.0, maximum_overlap_frames=56, continuation_prune_range=0.0, near_identical_tolerance=1.0) -> io.NodeOutput:
         thresh = float(overlap_threshold[0] if isinstance(overlap_threshold, list) else overlap_threshold)
         max_f = int(maximum_overlap_frames[0] if isinstance(maximum_overlap_frames, list) else maximum_overlap_frames)
         prune_r = float(continuation_prune_range[0] if isinstance(continuation_prune_range, list) else continuation_prune_range)
@@ -477,15 +439,7 @@ class UC_MiniMaxH3ClipContinuationAccumulateList(io.ComfyNode):
 
         cont_batches = continuation_media if continuation_media is not None else None
 
-        trimmed_images, trimmed_audio = trim_minimax_h3_clip_continuation_batch(
-            image_batches,
-            audio_batches,
-            thresh,
-            max_f,
-            near_tol,
-            continuation_batches=cont_batches,
-            continuation_prune_range=prune_r,
-        )
+        trimmed_images, trimmed_audio = trim_minimax_h3_clip_continuation_batch(image_batches, audio_batches, thresh, max_f, near_tol, continuation_batches=cont_batches, continuation_prune_range=prune_r)
         output = accumulate_minimax_h3_clip_continuations(trimmed_images, trimmed_audio)
         return io.NodeOutput(*output)
 
@@ -499,12 +453,8 @@ class UC_ConcatenateAudioList(io.ComfyNode):
             category="audio",
             is_input_list=True,
             description="Stitches a list of audio clips together end-to-end into one continuous soundtrack.",
-            inputs=[
-                io.Audio.Input("audio", tooltip="Connect audio clips to join in sequence. Accepts a list of audio clips from a queue or loop."),
-            ],
-            outputs=[
-                io.Audio.Output(display_name="audio", tooltip="The single combined audio track."),
-            ],
+            inputs=[io.Audio.Input("audio", tooltip="Connect audio clips to join in sequence. Accepts a list of audio clips from a queue or loop.")],
+            outputs=[io.Audio.Output(display_name="audio", tooltip="The single combined audio track.")],
         )
 
     @classmethod
@@ -522,12 +472,8 @@ class UC_ListToAudioBatch(io.ComfyNode):
             category="audio",
             is_input_list=True,
             description="Combines a list of audio clips into a single batch for nodes that process audio in batches.",
-            inputs=[
-                io.Audio.Input("audio", tooltip="List of audio clips to stack into a batch."),
-            ],
-            outputs=[
-                io.Audio.Output(display_name="audio", tooltip="Batched audio clips padded to the same length."),
-            ],
+            inputs=[io.Audio.Input("audio", tooltip="List of audio clips to stack into a batch.")],
+            outputs=[io.Audio.Output(display_name="audio", tooltip="Batched audio clips padded to the same length.")],
         )
 
     @classmethod
@@ -544,12 +490,8 @@ class UC_AudioBatchToList(io.ComfyNode):
             display_name="Audio Batch to List",
             category="audio",
             description="Unpacks a batched audio track into a list of individual clips.",
-            inputs=[
-                io.Audio.Input("audio", tooltip="Batched audio to split."),
-            ],
-            outputs=[
-                io.Audio.Output(display_name="audio", is_output_list=True, tooltip="List of individual audio clips."),
-            ],
+            inputs=[io.Audio.Input("audio", tooltip="Batched audio to split.")],
+            outputs=[io.Audio.Output(display_name="audio", is_output_list=True, tooltip="List of individual audio clips.")],
         )
 
     @classmethod
@@ -568,39 +510,11 @@ class UC_SeedCluster(io.ComfyNode):
             description="Generates an incremented list of seeds starting from a main seed.",
             search_aliases=["seed list", "seed cluster", "generate seeds", "incremented seeds", "random seeds"],
             inputs=[
-                io.Int.Input(
-                    "seed",
-                    default=0,
-                    min=0,
-                    max=_MAX_SEED,
-                    control_after_generate=True,
-                    tooltip="Main seed using ComfyUI's generation-time seed control.",
-                ),
-                io.Int.Input(
-                    "increment",
-                    default=1,
-                    min=1,
-                    max=_MAX_SEED,
-                    step=1,
-                    tooltip="Amount added between consecutive seeds; values wrap within ComfyUI's seed range.",
-                ),
-                io.Int.Input(
-                    "count",
-                    default=8,
-                    min=1,
-                    max=999999,
-                    step=1,
-                    tooltip="Number of seeds to generate in the cluster list.",
-                ),
+                io.Int.Input("seed", default=0, min=0, max=_MAX_SEED, control_after_generate=True, tooltip="Main seed using ComfyUI's generation-time seed control."),
+                io.Int.Input("increment", default=1, min=1, max=_MAX_SEED, step=1, tooltip="Amount added between consecutive seeds; values wrap within ComfyUI's seed range."),
+                io.Int.Input("count", default=8, min=1, max=999999, step=1, tooltip="Number of seeds to generate in the cluster list."),
             ],
-            outputs=[
-                io.Int.Output(
-                    "seeds",
-                    display_name="seeds",
-                    is_output_list=True,
-                    tooltip="List of incremented seeds generated starting from the main seed.",
-                ),
-            ],
+            outputs=[io.Int.Output("seeds", display_name="seeds", is_output_list=True, tooltip="List of incremented seeds generated starting from the main seed.")],
         )
 
     @classmethod
@@ -608,10 +522,7 @@ class UC_SeedCluster(io.ComfyNode):
         seed = int(seed) % (_MAX_SEED + 1)
         total = max(1, int(count))
         step = int(increment)
-        cluster = [
-            (seed + index * step) % (_MAX_SEED + 1)
-            for index in range(total)
-        ]
+        cluster = [(seed + index * step) % (_MAX_SEED + 1) for index in range(total)]
         return io.NodeOutput(cluster)
 
 
@@ -624,17 +535,8 @@ class UC_FromSeedCluster(io.ComfyNode):
             category="utils/primitive",
             is_deprecated=True,
             description="Deprecated: use From List (UC_FromList) to extract items from a seed list.",
-            inputs=[
-                io.AnyType.Input(
-                    "seed_cluster",
-                    display_name="Cluster",
-                    tooltip="Seed list produced by SeedCluster.",
-                ),
-            ],
-            outputs=[
-                io.Int.Output(f"seed_{index}", display_name=f"Seed {index}")
-                for index in range(1, 9)
-            ],
+            inputs=[io.AnyType.Input("seed_cluster", display_name="Cluster", tooltip="Seed list produced by SeedCluster.")],
+            outputs=[io.Int.Output(f"seed_{index}", display_name=f"Seed {index}") for index in range(1, 9)],
         )
 
     @classmethod
@@ -671,23 +573,11 @@ class UC_FromList(io.ComfyNode):
                 io.Int.Input("start_index", default=0, min=0, step=1, tooltip="Zero-based index of the first item returned."),
                 io.Int.Input("number_of_entries", default=1, min=1, step=1, tooltip="Maximum consecutive items returned from the start index; stops at the end of the list."),
             ],
-            outputs=[
-                io.MatchType.Output(
-                    item_type,
-                    id="items",
-                    display_name="items",
-                    is_output_list=True,
-                ),
-            ],
+            outputs=[io.MatchType.Output(item_type, id="items", display_name="items", is_output_list=True)],
         )
 
     @classmethod
-    def execute(
-        cls,
-        items: list,
-        start_index: list[int],
-        number_of_entries: list[int],
-    ) -> io.NodeOutput:
+    def execute(cls, items: list, start_index: list[int], number_of_entries: list[int]) -> io.NodeOutput:
         start = int(start_index[0])
         count = int(number_of_entries[0])
         return io.NodeOutput(items[start : start + count])
@@ -702,18 +592,8 @@ class UC_CreateListOfSame(io.ComfyNode):
             category="utils/list",
             description="Creates a list containing the same input item repeated a specified number of times.",
             search_aliases=["Create List of Same", "Repeat Item", "List of Same", "Duplicate Item", "List Duplicator"],
-            inputs=[
-                io.AnyType.Input("item", tooltip="Input item of any type to repeat in the list."),
-                io.Int.Input("count", default=2, min=1, max=999999, step=1, tooltip="Number of times to repeat the item in the output list."),
-            ],
-            outputs=[
-                io.AnyType.Output(
-                    id="list",
-                    display_name="list",
-                    is_output_list=True,
-                    tooltip="List containing the repeated item.",
-                ),
-            ],
+            inputs=[io.AnyType.Input("item", tooltip="Input item of any type to repeat in the list."), io.Int.Input("count", default=2, min=1, max=999999, step=1, tooltip="Number of times to repeat the item in the output list.")],
+            outputs=[io.AnyType.Output(id="list", display_name="list", is_output_list=True, tooltip="List containing the repeated item.")],
         )
 
     @classmethod
@@ -729,14 +609,8 @@ class UC_SwitchInverseNode(SwitchNode):
             node_id="UC_SwitchInverseNode",
             display_name="Switch (Inverse)",
             category="logic",
-            inputs=[
-                io.Boolean.Input("switch"),
-                io.MatchType.Input("on_true", template=template, lazy=True),
-                io.MatchType.Input("on_false", template=template, lazy=True),
-            ],
-            outputs=[
-                io.MatchType.Output(template=template, display_name="output"),
-            ],
+            inputs=[io.Boolean.Input("switch"), io.MatchType.Input("on_true", template=template, lazy=True), io.MatchType.Input("on_false", template=template, lazy=True)],
+            outputs=[io.MatchType.Output(template=template, display_name="output")],
         )
 
 
@@ -748,15 +622,10 @@ class UC_SoftSwitchInverseNode(SoftSwitchNode):
             node_id="UC_SoftSwitchInverseNode",
             display_name="Soft Switch (Inverse)",
             category="logic",
-            inputs=[
-                io.Boolean.Input("switch"),
-                io.MatchType.Input("on_true", template=template, lazy=True, optional=True),
-                io.MatchType.Input("on_false", template=template, lazy=True, optional=True),
-            ],
-            outputs=[
-                io.MatchType.Output(template=template, display_name="output"),
-            ],
+            inputs=[io.Boolean.Input("switch"), io.MatchType.Input("on_true", template=template, lazy=True, optional=True), io.MatchType.Input("on_false", template=template, lazy=True, optional=True)],
+            outputs=[io.MatchType.Output(template=template, display_name="output")],
         )
+
 
 class UC_IntegerRangeRandom(io.ComfyNode):
     @classmethod
@@ -765,11 +634,7 @@ class UC_IntegerRangeRandom(io.ComfyNode):
             node_id="UC_IntegerRangeRandom",
             display_name="Random Integer in Range",
             category="utils/primitive",
-            inputs=[
-                io.Int.Input("minimum", min=-sys.maxsize, max=sys.maxsize),
-                io.Int.Input("maximum", min=-sys.maxsize, max=sys.maxsize),
-                io.Int.Input("seed", min=-sys.maxsize, max=sys.maxsize, control_after_generate=True),
-            ],
+            inputs=[io.Int.Input("minimum", min=-sys.maxsize, max=sys.maxsize), io.Int.Input("maximum", min=-sys.maxsize, max=sys.maxsize), io.Int.Input("seed", min=-sys.maxsize, max=sys.maxsize, control_after_generate=True)],
             outputs=[io.Int.Output(display_name="random_integer")],
         )
 
@@ -791,57 +656,17 @@ class UC_GetJsonValue(io.ComfyNode):
             display_name="Get JSON Value",
             category="utils/primitive",
             inputs=[
-                io.String.Input(
-                    "json_path",
-                    default="./input/values.json",
-                    multiline=False,
-                    tooltip="Path to a JSON file containing a top-level object of named values.",
-                ),
-                io.Combo.Input(
-                    "selection_mode",
-                    options=["key", "random", "index"],
-                    default="key",
-                    tooltip="Select a value by its key, a deterministic random choice, or its insertion-order index.",
-                ),
-                io.String.Input(
-                    "key",
-                    default="",
-                    multiline=False,
-                    tooltip="Top-level JSON key to use when selection mode is key.",
-                ),
-                io.Int.Input(
-                    "index",
-                    default=0,
-                    min=0,
-                    max=sys.maxsize,
-                    tooltip="Zero-based insertion-order index to use when selection mode is index.",
-                ),
-                io.Int.Input(
-                    "seed",
-                    default=0,
-                    min=0,
-                    max=0xFFFFFFFFFFFFFFFF,
-                    control_after_generate=True,
-                    tooltip="Seed used for deterministic random selection.",
-                ),
+                io.String.Input("json_path", default="./input/values.json", multiline=False, tooltip="Path to a JSON file containing a top-level object of named values."),
+                io.Combo.Input("selection_mode", options=["key", "random", "index"], default="key", tooltip="Select a value by its key, a deterministic random choice, or its insertion-order index."),
+                io.String.Input("key", default="", multiline=False, tooltip="Top-level JSON key to use when selection mode is key."),
+                io.Int.Input("index", default=0, min=0, max=sys.maxsize, tooltip="Zero-based insertion-order index to use when selection mode is index."),
+                io.Int.Input("seed", default=0, min=0, max=0xFFFFFFFFFFFFFFFF, control_after_generate=True, tooltip="Seed used for deterministic random selection."),
             ],
-            outputs=[
-                io.AnyType.Output(
-                    display_name="value",
-                    tooltip="The selected JSON value in its original JSON type.",
-                ),
-            ],
+            outputs=[io.AnyType.Output(display_name="value", tooltip="The selected JSON value in its original JSON type.")],
         )
 
     @classmethod
-    def execute(
-        cls,
-        json_path: str,
-        selection_mode: str,
-        key: str,
-        index: int,
-        seed: int,
-    ) -> io.NodeOutput:
+    def execute(cls, json_path: str, selection_mode: str, key: str, index: int, seed: int) -> io.NodeOutput:
         absolute_path = os.path.abspath(json_path)
         try:
             with open(absolute_path, "r", encoding="utf-8") as file:
@@ -867,9 +692,7 @@ class UC_GetJsonValue(io.ComfyNode):
         elif selection_mode == "index":
             value_list = list(values.values())
             if index >= len(value_list):
-                raise ValueError(
-                    f"JSON value index {index} is out of range for {len(value_list)} value(s)."
-                )
+                raise ValueError(f"JSON value index {index} is out of range for {len(value_list)} value(s).")
             value = value_list[index]
         else:
             raise ValueError(f"Unsupported JSON value selection mode: {selection_mode!r}")
@@ -885,9 +708,7 @@ class UC_MiniMaxH3DynamicPromptBuilder(io.ComfyNode):
             display_name="MiniMax H3 Dynamic Prompt Builder",
             category="advanced/text",
             description="Interactive button-driven prompt builder for MiniMax H3 adhering to Principle 4 structure.",
-            inputs=[MiniMaxH3PromptBuilderState.Input("prompt_state", extra_dict={
-                "socketless": True, "default": json.dumps(default_h3_prompt_state()), "state_version": 2,
-            })],
+            inputs=[MiniMaxH3PromptBuilderState.Input("prompt_state", extra_dict={"socketless": True, "default": json.dumps(default_h3_prompt_state()), "state_version": 2})],
             outputs=[io.String.Output("prompt")],
         )
 
@@ -904,9 +725,7 @@ class UC_MiniMaxH3BasePromptBuilder(io.ComfyNode):
             display_name="MiniMax H3 Base Prompt Builder",
             category="advanced/text",
             description="Interactive button-driven base prompt builder for MiniMax H3 (T2VA, I2VA, FL2VA, L2VA) adhering to Base Guide and Principle 4 structure.",
-            inputs=[MiniMaxH3BasePromptBuilderState.Input("prompt_state", extra_dict={
-                "socketless": True, "default": json.dumps(default_h3_base_prompt_state()), "state_version": 1,
-            })],
+            inputs=[MiniMaxH3BasePromptBuilderState.Input("prompt_state", extra_dict={"socketless": True, "default": json.dumps(default_h3_base_prompt_state()), "state_version": 1})],
             outputs=[io.String.Output("prompt")],
         )
 
@@ -922,27 +741,10 @@ class UC_ImageToVideoPrompt(io.ComfyNode):
             node_id="UC_ImageToVideoPrompt",
             display_name="Image Prompt to Video Prompt",
             category="advanced/text",
-            description=(
-                "Converts image-editing prompt language into role-aware video generation "
-                "instructions while preserving visual style, identity, and content requirements."
-            ),
+            description=("Converts image-editing prompt language into role-aware video generation instructions while preserving visual style, identity, and content requirements."),
             inputs=[
-                io.String.Input(
-                    "text",
-                    multiline=True,
-                    dynamic_prompts=True,
-                    default="",
-                    tooltip="Image-oriented prompt text to convert into video-oriented guidance.",
-                ),
-                io.Combo.Input(
-                    "prompt_role",
-                    options=["general", "system", "instruction", "bonus"],
-                    default="general",
-                    tooltip=(
-                        "Selects general, system, instruction, or bonus conversion behavior "
-                        "without changing the node interface."
-                    ),
-                ),
+                io.String.Input("text", multiline=True, dynamic_prompts=True, default="", tooltip="Image-oriented prompt text to convert into video-oriented guidance."),
+                io.Combo.Input("prompt_role", options=["general", "system", "instruction", "bonus"], default="general", tooltip=("Selects general, system, instruction, or bonus conversion behavior without changing the node interface.")),
             ],
             outputs=[io.String.Output("text", display_name="text")],
         )
@@ -964,24 +766,8 @@ class UC_TagNormalizeCombine(io.ComfyNode):
             node_id="UC_TagNormalizeCombine",
             display_name="Tag Normalize and Combine",
             category="advanced/text",
-            inputs=[
-                io.String.Input("tags_1", multiline=True, default=""),
-                io.String.Input("tags_2", multiline=True, default=""),
-                io.AnyType.Input(
-                    "scores_1",
-                    tooltip="Dictionary of scores for tags_1",
-                    optional=True,
-                ),
-                io.AnyType.Input(
-                    "scores_2",
-                    tooltip="Dictionary of scores for tags_2",
-                    optional=True,
-                ),
-            ],
-            outputs=[
-                io.String.Output(display_name="deduped_tags"),
-                io.AnyType.Output(display_name="normalized_scores"),
-            ],
+            inputs=[io.String.Input("tags_1", multiline=True, default=""), io.String.Input("tags_2", multiline=True, default=""), io.AnyType.Input("scores_1", tooltip="Dictionary of scores for tags_1", optional=True), io.AnyType.Input("scores_2", tooltip="Dictionary of scores for tags_2", optional=True)],
+            outputs=[io.String.Output(display_name="deduped_tags"), io.AnyType.Output(display_name="normalized_scores")],
         )
 
     @staticmethod
@@ -998,16 +784,12 @@ class UC_TagNormalizeCombine(io.ComfyNode):
 
         normalized = {}
         for k, v in scores.items():
-            norm = min_val + (float(v) - current_min) / (current_max - current_min) * (
-                max_val - min_val
-            )
+            norm = min_val + (float(v) - current_min) / (current_max - current_min) * (max_val - min_val)
             normalized[k] = norm
         return normalized
 
     @classmethod
-    def execute(
-        cls, tags_1: Union[str, list], tags_2: Union[str, list], scores_1: Union[str, dict] = None, scores_2: Union[str, dict] = None
-    ) -> io.NodeOutput:
+    def execute(cls, tags_1: Union[str, list], tags_2: Union[str, list], scores_1: Union[str, dict] = None, scores_2: Union[str, dict] = None) -> io.NodeOutput:
         # Parse tags
         def parse_tags(t_input):
             if isinstance(t_input, list):
@@ -1086,15 +868,7 @@ class UC_TagNormalizeCombine(io.ComfyNode):
 class UC_RandInt(io.ComfyNode):
     @classmethod
     def define_schema(cls) -> io.Schema:
-        return io.Schema(
-            node_id="UC_RandInt",
-            display_name="RandomInt",
-            category="utils/primitive",
-            inputs=[
-                io.Int.Input("value", min=-sys.maxsize, max=sys.maxsize, control_after_generate=True),
-            ],
-            outputs=[io.Int.Output()],
-        )
+        return io.Schema(node_id="UC_RandInt", display_name="RandomInt", category="utils/primitive", inputs=[io.Int.Input("value", min=-sys.maxsize, max=sys.maxsize, control_after_generate=True)], outputs=[io.Int.Output()])
 
     @classmethod
     def execute(cls, value: int) -> io.NodeOutput:
@@ -1104,15 +878,7 @@ class UC_RandInt(io.ComfyNode):
 class UC_StaticInt(io.ComfyNode):
     @classmethod
     def define_schema(cls) -> io.Schema:
-        return io.Schema(
-            node_id="UC_StaticInt",
-            display_name="StaticInt",
-            category="utils/primitive",
-            inputs=[
-                io.Int.Input("value", min=-sys.maxsize, max=sys.maxsize),
-            ],
-            outputs=[io.Int.Output()],
-        )
+        return io.Schema(node_id="UC_StaticInt", display_name="StaticInt", category="utils/primitive", inputs=[io.Int.Input("value", min=-sys.maxsize, max=sys.maxsize)], outputs=[io.Int.Output()])
 
     @classmethod
     def execute(cls, value: int) -> io.NodeOutput:
@@ -1122,21 +888,7 @@ class UC_StaticInt(io.ComfyNode):
 class UC_StaticFloat(io.ComfyNode):
     @classmethod
     def define_schema(cls) -> io.Schema:
-        return io.Schema(
-            node_id="UC_StaticFloat",
-            display_name="StaticFloat",
-            category="utils/primitive",
-            inputs=[
-                io.Float.Input(
-                    "value",
-                    default=1.0,
-                    min=-sys.float_info.max,
-                    max=sys.float_info.max,
-                    step=0.01,
-                ),
-            ],
-            outputs=[io.Float.Output()],
-        )
+        return io.Schema(node_id="UC_StaticFloat", display_name="StaticFloat", category="utils/primitive", inputs=[io.Float.Input("value", default=1.0, min=-sys.float_info.max, max=sys.float_info.max, step=0.01)], outputs=[io.Float.Output()])
 
     @classmethod
     def execute(cls, value: float) -> io.NodeOutput:
@@ -1150,11 +902,7 @@ class UC_RandIntRange(io.ComfyNode):
             node_id="UC_RandIntRange",
             display_name="RandomIntRange",
             category="utils/primitive",
-            inputs=[
-                io.Int.Input("min", default=0, min=-sys.maxsize, max=sys.maxsize),
-                io.Int.Input("max", default=100, min=-sys.maxsize, max=sys.maxsize),
-                io.Int.Input("seed", default=0, min=0, max=0xffffffffffffffff, control_after_generate=True),
-            ],
+            inputs=[io.Int.Input("min", default=0, min=-sys.maxsize, max=sys.maxsize), io.Int.Input("max", default=100, min=-sys.maxsize, max=sys.maxsize), io.Int.Input("seed", default=0, min=0, max=0xFFFFFFFFFFFFFFFF, control_after_generate=True)],
             outputs=[io.Int.Output()],
         )
 
@@ -1172,17 +920,23 @@ class UC_ColorConvertNode(io.ComfyNode):
             display_name="Color Convert",
             category="advanced/color",
             inputs=[
-                io.Combo.Input("from_mode", options=["auto", "Manual Hex #FFFFFF", "Int 0-16777215", "Comma separated 255,255,255"], default="auto", tooltip="Select how to interpret the color input. 'Auto' will use the color picker input unless one of the other fields is filled in, in which case it will use the filled-in field based on the other options. The other modes will take precedence over the color picker input when their respective fields are filled in."),
-                io.Color.Input("color_hex", default="#FFFFFF", display_name="This is not the Color Selector →", tooltip="Select a color using the color picker. This input is used when 'from_mode' is set to 'auto' and no other manual inputs are provided. The selected color will be converted to hex, int, and string formats for output."),
+                io.Combo.Input(
+                    "from_mode",
+                    options=["auto", "Manual Hex #FFFFFF", "Int 0-16777215", "Comma separated 255,255,255"],
+                    default="auto",
+                    tooltip="Select how to interpret the color input. 'Auto' will use the color picker input unless one of the other fields is filled in, in which case it will use the filled-in field based on the other options. The other modes will take precedence over the color picker input when their respective fields are filled in.",
+                ),
+                io.Color.Input(
+                    "color_hex",
+                    default="#FFFFFF",
+                    display_name="This is not the Color Selector →",
+                    tooltip="Select a color using the color picker. This input is used when 'from_mode' is set to 'auto' and no other manual inputs are provided. The selected color will be converted to hex, int, and string formats for output.",
+                ),
                 io.String.Input("manual_hex", multiline=False, optional=True, display_name="Manual Hex Input", tooltip="Enter a hex color code manually, e.g. #FF00FF. Takes precedence over the color picker input if 'from_mode' is set to 'Manual Hex #FFFFFF'."),
                 io.Int.Input("color_int", min=-1, max=16777215, default=-1, optional=True, display_name="Color Int Input", tooltip="Enter a color as an integer (0-16777215). Interpreted as 0xRRGGBB. Takes precedence over the color picker input if 'from_mode' is set to 'Int 0-16777215'."),
                 io.String.Input("comma_separated", multiline=False, optional=True, display_name="Comma Separated Input", tooltip="Enter a color as comma-separated RGB values (0-255), e.g. 255,0,255. Takes precedence over the color picker input if 'from_mode' is set to 'Comma separated 255,255,255'."),
             ],
-            outputs=[
-                io.String.Output(display_name="Hex"),
-                io.Int.Output(display_name="Int"),
-                io.String.Output(display_name="RGB"),
-            ]
+            outputs=[io.String.Output(display_name="Hex"), io.Int.Output(display_name="Int"), io.String.Output(display_name="RGB")],
         )
 
     @classmethod
@@ -1229,11 +983,7 @@ class UC_ColorConvertNode(io.ComfyNode):
 
     @classmethod
     def _rgb_to_outputs(cls, r, g, b):
-        return (
-            f"#{r:02X}{g:02X}{b:02X}",
-            (r << 16) | (g << 8) | b,
-            f"{r}, {g}, {b}",
-        )
+        return (f"#{r:02X}{g:02X}{b:02X}", (r << 16) | (g << 8) | b, f"{r}, {g}, {b}")
 
     @classmethod
     def execute(cls, from_mode, color_hex, manual_hex=None, color_int=None, comma_separated=None) -> io.NodeOutput:
@@ -1298,26 +1048,8 @@ class UC_ExtractBoundingBox(io.ComfyNode):
             node_id="UC_ExtractBoundingBox",
             display_name="Extract Bounding Box",
             category="utils/primitive",
-            inputs=[
-                io.AnyType.Input(
-                    "input_data",
-                    tooltip="Input data containing bounding boxes (JSON string, list, dict, or nested structure)"
-                ),
-                io.Int.Input(
-                    "index",
-                    default=0,
-                    min=0,
-                    max=sys.maxsize,
-                    tooltip="Index of the bounding box to extract"
-                ),
-            ],
-            outputs=[
-                io.Int.Output(display_name="x"),
-                io.Int.Output(display_name="y"),
-                io.Int.Output(display_name="width"),
-                io.Int.Output(display_name="height"),
-                io.BoundingBox.Output("bounding_box"),
-            ],
+            inputs=[io.AnyType.Input("input_data", tooltip="Input data containing bounding boxes (JSON string, list, dict, or nested structure)"), io.Int.Input("index", default=0, min=0, max=sys.maxsize, tooltip="Index of the bounding box to extract")],
+            outputs=[io.Int.Output(display_name="x"), io.Int.Output(display_name="y"), io.Int.Output(display_name="width"), io.Int.Output(display_name="height"), io.BoundingBox.Output("bounding_box")],
         )
 
     @classmethod
@@ -1364,13 +1096,7 @@ class UC_ExtractBoundingBox(io.ComfyNode):
     @classmethod
     def execute(cls, input_data: any, index: int) -> io.NodeOutput:
         x, y, width, height = cls.select_box(input_data, index)
-        return io.NodeOutput(
-            x,
-            y,
-            width,
-            height,
-            {"x": x, "y": y, "width": width, "height": height},
-        )
+        return io.NodeOutput(x, y, width, height, {"x": x, "y": y, "width": width, "height": height})
 
 
 class UC_ExtractMask(io.ComfyNode):
@@ -1380,19 +1106,7 @@ class UC_ExtractMask(io.ComfyNode):
             node_id="UC_ExtractMask",
             display_name="Extract Mask",
             category="utils/primitive",
-            inputs=[
-                io.Mask.Input(
-                    "masks",
-                    tooltip="Mask batch ordered by the producing node, such as compositor layer order.",
-                ),
-                io.Int.Input(
-                    "index",
-                    default=0,
-                    min=0,
-                    max=sys.maxsize,
-                    tooltip="Index of the mask to extract.",
-                ),
-            ],
+            inputs=[io.Mask.Input("masks", tooltip="Mask batch ordered by the producing node, such as compositor layer order."), io.Int.Input("index", default=0, min=0, max=sys.maxsize, tooltip="Index of the mask to extract.")],
             outputs=[io.Mask.Output("mask")],
         )
 
@@ -1401,10 +1115,8 @@ class UC_ExtractMask(io.ComfyNode):
         if not torch.is_tensor(masks) or masks.ndim != 3:
             raise ValueError("Extract Mask requires a [count, height, width] mask batch.")
         if index < 0 or index >= masks.shape[0]:
-            raise ValueError(
-                f"Index {index} is out of range. Found {masks.shape[0]} mask(s)."
-            )
-        return io.NodeOutput(masks[index:index + 1])
+            raise ValueError(f"Index {index} is out of range. Found {masks.shape[0]} mask(s).")
+        return io.NodeOutput(masks[index : index + 1])
 
 
 class UC_ExtractImage(io.ComfyNode):
@@ -1414,19 +1126,7 @@ class UC_ExtractImage(io.ComfyNode):
             node_id="UC_ExtractImage",
             display_name="Extract Image",
             category="utils/image",
-            inputs=[
-                io.Image.Input(
-                    "images",
-                    tooltip="Image list ordered by compositor layer order.",
-                ),
-                io.Int.Input(
-                    "index",
-                    default=0,
-                    min=0,
-                    max=sys.maxsize,
-                    tooltip="Index of the image to extract.",
-                ),
-            ],
+            inputs=[io.Image.Input("images", tooltip="Image list ordered by compositor layer order."), io.Int.Input("index", default=0, min=0, max=sys.maxsize, tooltip="Index of the image to extract.")],
             outputs=[io.Image.Output("image")],
             is_input_list=True,
         )
@@ -1438,14 +1138,10 @@ class UC_ExtractImage(io.ComfyNode):
             raise ValueError("Extract Image requires an image list.")
         index = index[0] if isinstance(index, list) and index else index
         if index < 0 or index >= len(collection):
-            raise ValueError(
-                f"Index {index} is out of range. Found {len(collection)} image(s)."
-            )
+            raise ValueError(f"Index {index} is out of range. Found {len(collection)} image(s).")
         image = collection[index]
         if not torch.is_tensor(image) or image.ndim != 4 or image.shape[0] != 1:
-            raise ValueError(
-                "Image list contains an invalid image; expected [1, height, width, channels]."
-            )
+            raise ValueError("Image list contains an invalid image; expected [1, height, width, channels].")
         return io.NodeOutput(image)
 
 
@@ -1456,16 +1152,8 @@ class UC_Ideogram4BoundingBoxCrop(io.ComfyNode):
             node_id="UC_Ideogram4BoundingBoxCrop",
             display_name="Ideogram 4 Bounding Box Crop",
             category="utils/image",
-            inputs=[
-                io.Image.Input("image"),
-                io.BoundingBox.Input("bboxes", force_input=True),
-                io.Int.Input("index", default=0, min=0, max=sys.maxsize),
-            ],
-            outputs=[
-                io.Image.Output("image"),
-                io.String.Output("ig4_bbox", display_name="IG4 Box"),
-                io.BoundingBox.Output("bounding_box", display_name="Box"),
-            ],
+            inputs=[io.Image.Input("image"), io.BoundingBox.Input("bboxes", force_input=True), io.Int.Input("index", default=0, min=0, max=sys.maxsize)],
+            outputs=[io.Image.Output("image"), io.String.Output("ig4_bbox", display_name="IG4 Box"), io.BoundingBox.Output("bounding_box", display_name="Box")],
         )
 
     @staticmethod
@@ -1476,16 +1164,8 @@ class UC_Ideogram4BoundingBoxCrop(io.ComfyNode):
         bottom = min(max(int(box["y"] + box["height"]), 0), height)
         if right <= left or bottom <= top:
             raise ValueError("The selected bounding box has no area inside the image.")
-        normalized = (
-            round(top / height * 1000),
-            round(left / width * 1000),
-            round(bottom / height * 1000),
-            round(right / width * 1000),
-        )
-        return (
-            {"x": left, "y": top, "width": right - left, "height": bottom - top},
-            f"[{','.join(str(value) for value in normalized)}]",
-        )
+        normalized = (round(top / height * 1000), round(left / width * 1000), round(bottom / height * 1000), round(right / width * 1000))
+        return ({"x": left, "y": top, "width": right - left, "height": bottom - top}, f"[{','.join(str(value) for value in normalized)}]")
 
     @classmethod
     def execute(cls, image, bboxes, index):
@@ -1493,21 +1173,10 @@ class UC_Ideogram4BoundingBoxCrop(io.ComfyNode):
             raise ValueError("Ideogram 4 Bounding Box Crop requires exactly one image.")
         x, y, width, height = UC_ExtractBoundingBox.select_box(bboxes, index)
         if width <= 0 or height <= 0:
-            raise ValueError(
-                f"Bounding box at index {index} must have positive width and height."
-            )
-        box, ig4_bbox = cls._ideogram_bbox(
-            {"x": x, "y": y, "width": width, "height": height},
-            image.shape[2],
-            image.shape[1],
-        )
+            raise ValueError(f"Bounding box at index {index} must have positive width and height.")
+        box, ig4_bbox = cls._ideogram_bbox({"x": x, "y": y, "width": width, "height": height}, image.shape[2], image.shape[1])
 
-        cropped = image[
-            :,
-            box["y"]:box["y"] + box["height"],
-            box["x"]:box["x"] + box["width"],
-            :,
-        ]
+        cropped = image[:, box["y"] : box["y"] + box["height"], box["x"] : box["x"] + box["width"], :]
         return io.NodeOutput(cropped, ig4_bbox, box)
 
 
@@ -1519,40 +1188,13 @@ class UC_AdjustBoundingBox(io.ComfyNode):
             display_name="Adjust Bounding Box",
             category="utils/primitive",
             inputs=[
-                io.AnyType.Input(
-                    "input_data",
-                    tooltip="Bounding-box data accepted by Extract Bounding Box: a native box, JSON string, list, dict, or nested structure.",
-                ),
-                io.Int.Input(
-                    "index",
-                    default=0,
-                    min=0,
-                    max=sys.maxsize,
-                    tooltip="Index of the bounding box to adjust.",
-                ),
-                io.Int.Input(
-                    "pixel_expansion",
-                    default=0,
-                    min=0,
-                    max=sys.maxsize,
-                    tooltip="Pixels added to each selected edge. Both adds this value on all four sides.",
-                ),
-                io.Combo.Input(
-                    "expansion_axis",
-                    options=["both", "horizontal", "vertical"],
-                    default="both",
-                    tooltip="Choose which axes receive the explicit pixel expansion.",
-                ),
-                io.Combo.Input(
-                    "size_multiple",
-                    options=["0", "8", "16", "32"],
-                    default="0",
-                    tooltip="Round width and height upward to this multiple while keeping the box centered. Zero disables alignment.",
-                ),
+                io.AnyType.Input("input_data", tooltip="Bounding-box data accepted by Extract Bounding Box: a native box, JSON string, list, dict, or nested structure."),
+                io.Int.Input("index", default=0, min=0, max=sys.maxsize, tooltip="Index of the bounding box to adjust."),
+                io.Int.Input("pixel_expansion", default=0, min=0, max=sys.maxsize, tooltip="Pixels added to each selected edge. Both adds this value on all four sides."),
+                io.Combo.Input("expansion_axis", options=["both", "horizontal", "vertical"], default="both", tooltip="Choose which axes receive the explicit pixel expansion."),
+                io.Combo.Input("size_multiple", options=["0", "8", "16", "32"], default="0", tooltip="Round width and height upward to this multiple while keeping the box centered. Zero disables alignment."),
             ],
-            outputs=[
-                io.BoundingBox.Output("bounding_box"),
-            ],
+            outputs=[io.BoundingBox.Output("bounding_box")],
         )
 
     @staticmethod
@@ -1599,6 +1241,7 @@ class UC_Krea2LayerProbe(io.ComfyNode):
     sequence-averaged raw activation tensors to build offline datasets for pinpoint weight-level
     ablation.
     """
+
     @classmethod
     def define_schema(cls) -> io.Schema:
         return io.Schema(
@@ -1607,26 +1250,11 @@ class UC_Krea2LayerProbe(io.ComfyNode):
             category="advanced/conditioning",
             inputs=[
                 io.Conditioning.Input("conditioning"),
-                io.String.Input(
-                    "prompt_label",
-                    default="safe_prompt",
-                    tooltip="A unique name/tag to log this prompt in the stats. Tag safe prompts with 'safe_...' and refused prompts with 'refused_...' to perform differential analysis."
-                ),
-                io.String.Input(
-                    "log_dir",
-                    default="krea2_stats",
-                    tooltip="The directory where JSONL statistical logs and optional raw tensor files (.pt) will be written."
-                ),
-                io.Boolean.Input(
-                    "save_activations",
-                    default=False,
-                    tooltip="If True, saves raw 12-layer sequence-averaged activation tensors as .pt files in the log directory for difference-vector computations."
-                ),
+                io.String.Input("prompt_label", default="safe_prompt", tooltip="A unique name/tag to log this prompt in the stats. Tag safe prompts with 'safe_...' and refused prompts with 'refused_...' to perform differential analysis."),
+                io.String.Input("log_dir", default="krea2_stats", tooltip="The directory where JSONL statistical logs and optional raw tensor files (.pt) will be written."),
+                io.Boolean.Input("save_activations", default=False, tooltip="If True, saves raw 12-layer sequence-averaged activation tensors as .pt files in the log directory for difference-vector computations."),
             ],
-            outputs=[
-                io.Conditioning.Output(display_name="conditioning"),
-                io.String.Output(display_name="statistics_summary"),
-            ],
+            outputs=[io.Conditioning.Output(display_name="conditioning"), io.String.Output(display_name="statistics_summary")],
         )
 
     @classmethod
@@ -1657,21 +1285,11 @@ class UC_Krea2LayerProbe(io.ComfyNode):
             min_val = torch.min(layer_act).item()
             l2_norm = torch.norm(layer_act, p=2, dim=-1).mean().item()
 
-            stats[f"layer_{i}"] = {
-                "mean": mean_val,
-                "std": std_val,
-                "max": max_val,
-                "min": min_val,
-                "l2_norm": l2_norm
-            }
+            stats[f"layer_{i}"] = {"mean": mean_val, "std": std_val, "max": max_val, "min": min_val, "l2_norm": l2_norm}
 
         # Write summary to log
         log_file = os.path.join(log_dir, "probe_log.jsonl")
-        log_entry = {
-            "prompt_label": prompt_label,
-            "seq_len": seq,
-            "stats": stats
-        }
+        log_entry = {"prompt_label": prompt_label, "seq_len": seq, "stats": stats}
 
         with open(log_file, "a") as f:
             f.write(json.dumps(log_entry) + "\n")
@@ -1701,6 +1319,7 @@ class UC_Krea2LayerAblator(io.ComfyNode):
     Using the analytical probing results to surgically ablate weights on the diff LoRA is
     the recommended production approach.
     """
+
     @classmethod
     def define_schema(cls) -> io.Schema:
         return io.Schema(
@@ -1709,28 +1328,11 @@ class UC_Krea2LayerAblator(io.ComfyNode):
             category="advanced/conditioning",
             inputs=[
                 io.Conditioning.Input("conditioning"),
-                io.String.Input(
-                    "vectors_path",
-                    default="krea2_stats/refusal_directions.pt",
-                    tooltip="Path to the .pt file containing pre-computed difference vectors for each of the 12 tapped layers."
-                ),
-                io.Float.Input(
-                    "ablation_strength",
-                    default=1.0,
-                    min=0.0,
-                    max=2.0,
-                    step=0.05,
-                    tooltip="Ablation scale. 1.0 performs pure orthogonal projection (subtraction of the refusal vector component)."
-                ),
-                io.String.Input(
-                    "layers_mask",
-                    default="0,0,0,0,0,0,0,1,1,1,1,0",
-                    tooltip="12 comma-separated binary integers (0 or 1) selecting which layers undergo orthogonal projection (e.g., '0,0,0,0,0,0,0,1,1,1,1,0' to target deep layers)."
-                ),
+                io.String.Input("vectors_path", default="krea2_stats/refusal_directions.pt", tooltip="Path to the .pt file containing pre-computed difference vectors for each of the 12 tapped layers."),
+                io.Float.Input("ablation_strength", default=1.0, min=0.0, max=2.0, step=0.05, tooltip="Ablation scale. 1.0 performs pure orthogonal projection (subtraction of the refusal vector component)."),
+                io.String.Input("layers_mask", default="0,0,0,0,0,0,0,1,1,1,1,0", tooltip="12 comma-separated binary integers (0 or 1) selecting which layers undergo orthogonal projection (e.g., '0,0,0,0,0,0,0,1,1,1,1,0' to target deep layers)."),
             ],
-            outputs=[
-                io.Conditioning.Output(),
-            ],
+            outputs=[io.Conditioning.Output()],
         )
 
     @classmethod
@@ -1786,6 +1388,7 @@ class UC_EncoderNodesGuide(io.ComfyNode):
     Detailed Markdown formatted documentation and guide for advanced, plus, and scaled-bias encoder nodes.
     Choose topics to view in any Markdown rendering node.
     """
+
     @classmethod
     def define_schema(cls) -> io.Schema:
         return io.Schema(
@@ -1795,24 +1398,12 @@ class UC_EncoderNodesGuide(io.ComfyNode):
             inputs=[
                 io.Combo.Input(
                     "topic",
-                    options=[
-                        "node_catalog",
-                        "prompt_templates_and_weighting",
-                        "image_inputs_and_placeholders",
-                        "resolution_and_reference_latents",
-                        "visual_fusion",
-                        "consensus_settings",
-                        "formulas_and_alignment",
-                        "embedding_export",
-                        "compatibility_nodes",
-                    ],
+                    options=["node_catalog", "prompt_templates_and_weighting", "image_inputs_and_placeholders", "resolution_and_reference_latents", "visual_fusion", "consensus_settings", "formulas_and_alignment", "embedding_export", "compatibility_nodes"],
                     default="node_catalog",
                     tooltip="Select the topic you would like to view documentation for.",
-                ),
+                )
             ],
-            outputs=[
-                io.String.Output(display_name="markdown"),
-            ],
+            outputs=[io.String.Output(display_name="markdown")],
         )
 
     @classmethod
@@ -2037,7 +1628,7 @@ class UC_CompositeNodesGuide(io.ComfyNode):
                     ],
                     default="node_catalog",
                     tooltip="Select the composite documentation topic.",
-                ),
+                )
             ],
             outputs=[io.String.Output(display_name="markdown")],
         )
@@ -2183,22 +1774,7 @@ class UC_HighResolutionTilingGuide(io.ComfyNode):
             node_id="UC_HighResolutionTilingGuide",
             display_name="High Resolution Tiling Guide",
             category="utils/documentation",
-            inputs=[
-                io.Combo.Input(
-                    "topic",
-                    options=[
-                        "workflow",
-                        "split_settings",
-                        "overlap_masks",
-                        "depth_structure_mask",
-                        "visual_conditioning",
-                        "sampling",
-                        "accumulation",
-                    ],
-                    default="workflow",
-                    tooltip="Select the high-resolution tiled workflow topic.",
-                ),
-            ],
+            inputs=[io.Combo.Input("topic", options=["workflow", "split_settings", "overlap_masks", "depth_structure_mask", "visual_conditioning", "sampling", "accumulation"], default="workflow", tooltip="Select the high-resolution tiled workflow topic.")],
             outputs=[io.String.Output(display_name="markdown")],
         )
 
@@ -2274,12 +1850,7 @@ class UC_MarkdownPreview(io.ComfyNode):
             display_name="Preview as Markdown",
             category="utils/documentation",
             description="Displays a connected value using the Core Markdown renderer.",
-            inputs=[
-                io.AnyType.Input(
-                    "source",
-                    tooltip="Text or another serializable value to render as Markdown.",
-                ),
-            ],
+            inputs=[io.AnyType.Input("source", tooltip="Text or another serializable value to render as Markdown.")],
             outputs=[io.String.Output("text", display_name="text")],
             is_output_node=True,
         )
@@ -2299,4 +1870,3 @@ class UC_MarkdownPreview(io.ComfyNode):
 
 
 CompositeNodesGuide = UC_CompositeNodesGuide
-

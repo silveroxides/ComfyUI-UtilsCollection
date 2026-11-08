@@ -1,11 +1,6 @@
 from comfy_api.latest import io
 from ..helpers.text_helpers import get_vlm_preset_response_schema
-from ..vlm_presets import (
-    additional_instructions_vlm,
-    system_instructions_vlm,
-    system_query_additional_vlm,
-    system_query_raw_vlm,
-)
+from ..vlm_presets import additional_instructions_vlm, system_instructions_vlm, system_query_additional_vlm, system_query_raw_vlm
 from ..vlm_legacy_presets import legacy_system_instructions_vlm
 from ..vlm_experimental_presets import system_instructions_vlm_experimental
 from ..vlm_motion_presets import motion_system_instructions_vlm
@@ -27,25 +22,10 @@ class UC_VLMSysInstrPresets(io.ComfyNode):
             node_id="UC_VLMSysInstrPresets",
             display_name="VLM System Instruction Presets",
             category="advanced/text",
-            inputs=[
-                io.Combo.Input(
-                    "preset",
-                    display_name="vlm_system_instruction_preset",
-                    options=options,
-                    default=default,
-                    tooltip="Select the system instruction preset. JSON layout presets also output a paired Gemini response_schema.",
-                ),
-            ],
+            inputs=[io.Combo.Input("preset", display_name="vlm_system_instruction_preset", options=options, default=default, tooltip="Select the system instruction preset. JSON layout presets also output a paired Gemini response_schema.")],
             outputs=[
-                io.String.Output(
-                    display_name="system_instruction",
-                    tooltip="Selected VLM system instruction text.",
-                ),
-                ResponseSchema.Output(
-                    "response_schema",
-                    display_name="response_schema",
-                    tooltip="Paired Gemini response schema for JSON presets (moss_image_json_instruction* and ideogram_4_json_instruction*). Connect to the Gemini node's Response format input.",
-                ),
+                io.String.Output(display_name="system_instruction", tooltip="Selected VLM system instruction text."),
+                ResponseSchema.Output("response_schema", display_name="response_schema", tooltip="Paired Gemini response schema for JSON presets (moss_image_json_instruction* and ideogram_4_json_instruction*). Connect to the Gemini node's Response format input."),
             ],
         )
 
@@ -70,17 +50,8 @@ class UC_VLMSysInstrPresetsExperimental(UC_VLMSysInstrPresets):
             node_id="UC_VLMSysInstrPresetsExperimental",
             display_name="VLM System Instruction Presets Experimental",
             category="advanced/text",
-            inputs=[
-                io.Combo.Input(
-                    "preset",
-                    display_name="vlm_system_instruction_preset_experimental",
-                    options=options,
-                    default=default,
-                ),
-            ],
-            outputs=[
-                io.String.Output(display_name="system_instruction"),
-            ],
+            inputs=[io.Combo.Input("preset", display_name="vlm_system_instruction_preset_experimental", options=options, default=default)],
+            outputs=[io.String.Output(display_name="system_instruction")],
         )
 
     @classmethod
@@ -100,20 +71,7 @@ class UC_VLMSysInstrLegacyPresets(UC_VLMSysInstrPresets):
         options = sorted(presets)
         default = options[0] if options else ""
         return io.Schema(
-            node_id="UC_VLMSysInstrLegacyPresets",
-            display_name="VLM System Instruction Legacy Presets",
-            category="advanced/text",
-            inputs=[
-                io.Combo.Input(
-                    "preset",
-                    display_name="vlm_system_instruction_legacy_preset",
-                    options=options,
-                    default=default,
-                ),
-            ],
-            outputs=[
-                io.String.Output(display_name="system_instruction"),
-            ],
+            node_id="UC_VLMSysInstrLegacyPresets", display_name="VLM System Instruction Legacy Presets", category="advanced/text", inputs=[io.Combo.Input("preset", display_name="vlm_system_instruction_legacy_preset", options=options, default=default)], outputs=[io.String.Output(display_name="system_instruction")]
         )
 
     @classmethod
@@ -133,20 +91,7 @@ class UC_VLMSysInstrMotionPresets(UC_VLMSysInstrPresets):
         options = sorted(presets)
         default = options[0] if options else ""
         return io.Schema(
-            node_id="UC_VLMSysInstrMotionPresets",
-            display_name="VLM System Instruction Motion Presets",
-            category="advanced/text",
-            inputs=[
-                io.Combo.Input(
-                    "preset",
-                    display_name="vlm_system_instruction_motion_preset",
-                    options=options,
-                    default=default,
-                ),
-            ],
-            outputs=[
-                io.String.Output(display_name="system_instruction"),
-            ],
+            node_id="UC_VLMSysInstrMotionPresets", display_name="VLM System Instruction Motion Presets", category="advanced/text", inputs=[io.Combo.Input("preset", display_name="vlm_system_instruction_motion_preset", options=options, default=default)], outputs=[io.String.Output(display_name="system_instruction")]
         )
 
     @classmethod
@@ -171,22 +116,8 @@ class UC_VLMSysQueryAddPresets(io.ComfyNode):
             node_id="UC_VLMSysQueryAddPresets",
             display_name="VLM System Query Add Presets",
             category="advanced/text",
-            inputs=[
-                io.Combo.Input(
-                    "preset",
-                    display_name="vlm_system_query_add_preset",
-                    options=options,
-                    default=default,
-                ),
-                io.String.Input(
-                    "text",
-                    multiline=True,
-                    default="",
-                ),
-            ],
-            outputs=[
-                io.String.Output(display_name="system_instruction"),
-            ],
+            inputs=[io.Combo.Input("preset", display_name="vlm_system_query_add_preset", options=options, default=default), io.String.Input("text", multiline=True, default="")],
+            outputs=[io.String.Output(display_name="system_instruction")],
         )
 
     @classmethod
@@ -201,20 +132,7 @@ class UC_VLMSysQueryRawPresets(io.ComfyNode):
     def define_schema(cls):
         options = sorted(system_query_raw_vlm)
         default = options[0] if options else ""
-        return io.Schema(
-            node_id="UC_VLMSysQueryRawPresets",
-            display_name="VLM System Query Raw Presets",
-            category="advanced/text",
-            inputs=[
-                io.Combo.Input(
-                    "preset",
-                    display_name="vlm_system_query_raw_preset",
-                    options=options,
-                    default=default,
-                ),
-            ],
-            outputs=[io.String.Output(display_name="system_query")],
-        )
+        return io.Schema(node_id="UC_VLMSysQueryRawPresets", display_name="VLM System Query Raw Presets", category="advanced/text", inputs=[io.Combo.Input("preset", display_name="vlm_system_query_raw_preset", options=options, default=default)], outputs=[io.String.Output(display_name="system_query")])
 
     @classmethod
     def execute(cls, preset) -> io.NodeOutput:
@@ -240,27 +158,14 @@ class UC_VLMSysInstrAdvPresets(io.ComfyNode):
             display_name="VLM System Instruction Advanced Presets",
             category="advanced/text",
             inputs=[
-                io.Combo.Input(
-                    "preset",
-                    display_name="vlm_system_instruction_advanced_preset",
-                    options=options,
-                    default=default,
-                    tooltip="Select the system instruction preset. JSON layout presets also output a paired Gemini response_schema.",
-                ),
+                io.Combo.Input("preset", display_name="vlm_system_instruction_advanced_preset", options=options, default=default, tooltip="Select the system instruction preset. JSON layout presets also output a paired Gemini response_schema."),
                 io.Boolean.Input("jailbreak", default=False, tooltip="Wrap the system instruction with the configured jailbreak prefix and suffix."),
                 io.String.Input("system_query", multiline=True, default="", tooltip="Optional high-priority system query instructions appended to the preset."),
                 io.String.Input("user_query", multiline=True, default="", tooltip="Optional user query instructions appended to the preset."),
             ],
             outputs=[
-                io.String.Output(
-                    display_name="system_instruction",
-                    tooltip="Assembled VLM system instruction text.",
-                ),
-                ResponseSchema.Output(
-                    "response_schema",
-                    display_name="response_schema",
-                    tooltip="Paired Gemini response schema for JSON presets (moss_image_json_instruction* and ideogram_4_json_instruction*). Connect to the Gemini node's Response format input.",
-                ),
+                io.String.Output(display_name="system_instruction", tooltip="Assembled VLM system instruction text."),
+                ResponseSchema.Output("response_schema", display_name="response_schema", tooltip="Paired Gemini response schema for JSON presets (moss_image_json_instruction* and ideogram_4_json_instruction*). Connect to the Gemini node's Response format input."),
             ],
         )
 
@@ -323,20 +228,8 @@ class UC_VLMSysInstrAdvPresetsExperimental(UC_VLMSysInstrAdvPresets):
             node_id="UC_VLMSysInstrAdvPresetsExperimental",
             display_name="VLM System Instruction Advanced Presets Experimental",
             category="advanced/text",
-            inputs=[
-                io.Combo.Input(
-                    "preset",
-                    display_name="vlm_system_instruction_advanced_preset_experimental",
-                    options=options,
-                    default=default,
-                ),
-                io.Boolean.Input("jailbreak", default=False),
-                io.String.Input("system_query", multiline=True, default=""),
-                io.String.Input("user_query", multiline=True, default=""),
-            ],
-            outputs=[
-                io.String.Output(display_name="system_instruction"),
-            ],
+            inputs=[io.Combo.Input("preset", display_name="vlm_system_instruction_advanced_preset_experimental", options=options, default=default), io.Boolean.Input("jailbreak", default=False), io.String.Input("system_query", multiline=True, default=""), io.String.Input("user_query", multiline=True, default="")],
+            outputs=[io.String.Output(display_name="system_instruction")],
         )
 
     @classmethod
@@ -358,20 +251,8 @@ class UC_VLMSysInstrAdvMotionPresets(UC_VLMSysInstrAdvPresets):
             node_id="UC_VLMSysInstrAdvMotionPresets",
             display_name="VLM System Instruction Advanced Motion Presets",
             category="advanced/text",
-            inputs=[
-                io.Combo.Input(
-                    "preset",
-                    display_name="vlm_system_instruction_advanced_motion_preset",
-                    options=options,
-                    default=default,
-                ),
-                io.Boolean.Input("jailbreak", default=False),
-                io.String.Input("system_query", multiline=True, default=""),
-                io.String.Input("user_query", multiline=True, default=""),
-            ],
-            outputs=[
-                io.String.Output(display_name="system_instruction"),
-            ],
+            inputs=[io.Combo.Input("preset", display_name="vlm_system_instruction_advanced_motion_preset", options=options, default=default), io.Boolean.Input("jailbreak", default=False), io.String.Input("system_query", multiline=True, default=""), io.String.Input("user_query", multiline=True, default="")],
+            outputs=[io.String.Output(display_name="system_instruction")],
         )
 
     @classmethod

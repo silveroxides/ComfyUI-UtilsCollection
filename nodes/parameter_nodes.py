@@ -21,37 +21,13 @@ class UC_AdjustedResolutionParameters(io.ComfyNode):
             display_name="Adjusted Resolution",
             category="utils",
             inputs=[
-                io.Int.Input(
-                    id="width", default=1024, min=16, max=nodes.MAX_RESOLUTION, step=16
-                ),
-                io.Int.Input(
-                    id="height", default=1024, min=16, max=nodes.MAX_RESOLUTION, step=16
-                ),
+                io.Int.Input(id="width", default=1024, min=16, max=nodes.MAX_RESOLUTION, step=16),
+                io.Int.Input(id="height", default=1024, min=16, max=nodes.MAX_RESOLUTION, step=16),
                 io.Int.Input(id="batch_size", default=1, min=1, max=4096),
-                io.Float.Input(
-                    id="scale_by",
-                    default=1.0,
-                    min=0.0,
-                    max=10.0,
-                    step=0.1,
-                    tooltip="Scale used for the larger output resolution.",
-                ),
-                io.Int.Input(
-                    id="multiple",
-                    default=16,
-                    min=4,
-                    max=128,
-                    step=4,
-                    tooltip="Round the larger resolution to this pixel multiple.",
-                ),
+                io.Float.Input(id="scale_by", default=1.0, min=0.0, max=10.0, step=0.1, tooltip="Scale used for the larger output resolution."),
+                io.Int.Input(id="multiple", default=16, min=4, max=128, step=4, tooltip="Round the larger resolution to this pixel multiple."),
             ],
-            outputs=[
-                io.Int.Output(display_name="Width"),
-                io.Int.Output(display_name="Height"),
-                io.Int.Output(display_name="Upscaled Width"),
-                io.Int.Output(display_name="Upscaled Height"),
-                io.Int.Output(display_name="Batch"),
-            ],
+            outputs=[io.Int.Output(display_name="Width"), io.Int.Output(display_name="Height"), io.Int.Output(display_name="Upscaled Width"), io.Int.Output(display_name="Upscaled Height"), io.Int.Output(display_name="Batch")],
         )
 
     @classmethod
@@ -60,13 +36,7 @@ class UC_AdjustedResolutionParameters(io.ComfyNode):
         adjusted_height = round_to_nearest(height, multiple)
         upscaled_width = round_to_nearest(width * scale_by, multiple)
         upscaled_height = round_to_nearest(height * scale_by, multiple)
-        return io.NodeOutput(
-            adjusted_width,
-            adjusted_height,
-            upscaled_width,
-            upscaled_height,
-            batch_size,
-        )
+        return io.NodeOutput(adjusted_width, adjusted_height, upscaled_width, upscaled_height, batch_size)
 
 
 class UC_ResolutionSelectorExtended(io.ComfyNode):
@@ -80,37 +50,11 @@ class UC_ResolutionSelectorExtended(io.ComfyNode):
             category="utilities",
             description="Calculate width and height from aspect ratio and megapixel target. Useful for setting up Empty Latent Image dimensions.",
             inputs=[
-                io.Combo.Input(
-                    "aspect_ratio",
-                    options=AspectRatio,
-                    default=AspectRatio.SQUARE,
-                    tooltip="The aspect ratio for the output dimensions.",
-                ),
-                io.Float.Input(
-                    "megapixels",
-                    default=1.0,
-                    min=0.1,
-                    max=16.0,
-                    step=0.0125,
-                    tooltip="Target total megapixels. 1.0 MP ≈ 1024×1024 for square.",
-                ),
-                io.Int.Input(
-                    id="multiple",
-                    default=8,
-                    min=8,
-                    max=128,
-                    step=4,
-                    tooltip="Round the selected resolution to this pixel multiple.",
-                ),
+                io.Combo.Input("aspect_ratio", options=AspectRatio, default=AspectRatio.SQUARE, tooltip="The aspect ratio for the output dimensions."),
+                io.Float.Input("megapixels", default=1.0, min=0.1, max=16.0, step=0.0125, tooltip="Target total megapixels. 1.0 MP ≈ 1024×1024 for square."),
+                io.Int.Input(id="multiple", default=8, min=8, max=128, step=4, tooltip="Round the selected resolution to this pixel multiple."),
             ],
-            outputs=[
-                io.Int.Output(
-                    "width", tooltip="Calculated width in pixels multiplied by the selected multiple."
-                ),
-                io.Int.Output(
-                    "height", tooltip="Calculated height in pixels multiplied by the selected multiple."
-                ),
-            ],
+            outputs=[io.Int.Output("width", tooltip="Calculated width in pixels multiplied by the selected multiple."), io.Int.Output("height", tooltip="Calculated height in pixels multiplied by the selected multiple.")],
         )
 
     @classmethod
@@ -140,66 +84,20 @@ class UC_VideoResolutionSelector(io.ComfyNode):
             node_id="UC_VideoResolutionSelector",
             display_name="Video Resolution Selector",
             category="utilities",
-            description=(
-                "Select a video resolution near the target megapixels while keeping "
-                "the chosen aspect ratio within the selected tolerance."
-            ),
+            description=("Select a video resolution near the target megapixels while keeping the chosen aspect ratio within the selected tolerance."),
             inputs=[
-                io.Combo.Input(
-                    "aspect_ratio",
-                    options=AspectRatio,
-                    default=AspectRatio.WIDESCREEN_H,
-                    tooltip="The preferred output aspect ratio.",
-                ),
-                io.Float.Input(
-                    "megapixels",
-                    default=1.0,
-                    min=0.1,
-                    max=16.0,
-                    step=0.0125,
-                    tooltip="Nominal target total megapixels used to choose the nearest viable resolution.",
-                ),
-                io.Int.Input(
-                    "multiple",
-                    default=32,
-                    min=8,
-                    max=128,
-                    step=4,
-                    tooltip="Required pixel multiple for both output dimensions.",
-                ),
-                io.Float.Input(
-                    "duration_seconds",
-                    default=5.16667,
-                    min=0.20833,
-                    step=0.70833,
-                    tooltip="Video duration in seconds at 24 fps. Steps by 17 frames (~0.708s) on the MiniMax H3 5+17k temporal grid. Default is 124 frames (~5.17s). Minimum is 5 frames (~0.21s).",
-                ),
+                io.Combo.Input("aspect_ratio", options=AspectRatio, default=AspectRatio.WIDESCREEN_H, tooltip="The preferred output aspect ratio."),
+                io.Float.Input("megapixels", default=1.0, min=0.1, max=16.0, step=0.0125, tooltip="Nominal target total megapixels used to choose the nearest viable resolution."),
+                io.Int.Input("multiple", default=32, min=8, max=128, step=4, tooltip="Required pixel multiple for both output dimensions."),
+                io.Float.Input("duration_seconds", default=5.16667, min=0.20833, step=0.70833, tooltip="Video duration in seconds at 24 fps. Steps by 17 frames (~0.708s) on the MiniMax H3 5+17k temporal grid. Default is 124 frames (~5.17s). Minimum is 5 frames (~0.21s)."),
             ],
-            outputs=[
-                io.Int.Output("width", tooltip="Selected video width in pixels."),
-                io.Int.Output("height", tooltip="Selected video height in pixels."),
-                io.Int.Output("length", tooltip="H3 generation length in frames at 24 fps, calculated from duration_seconds."),
-            ],
+            outputs=[io.Int.Output("width", tooltip="Selected video width in pixels."), io.Int.Output("height", tooltip="Selected video height in pixels."), io.Int.Output("length", tooltip="H3 generation length in frames at 24 fps, calculated from duration_seconds.")],
         )
 
     @classmethod
-    def execute(
-        cls,
-        aspect_ratio: str,
-        megapixels: float,
-        multiple: int,
-        minimum: int = 256,
-        duration_seconds: float = 5.0,
-    ) -> io.NodeOutput:
+    def execute(cls, aspect_ratio: str, megapixels: float, multiple: int, minimum: int = 256, duration_seconds: float = 5.0) -> io.NodeOutput:
         ratio_width, ratio_height = ASPECT_RATIOS[aspect_ratio]
-        width, height = select_video_resolution(
-            ratio_width,
-            ratio_height,
-            megapixels,
-            multiple,
-            minimum,
-            nodes.MAX_RESOLUTION,
-        )
+        width, height = select_video_resolution(ratio_width, ratio_height, megapixels, multiple, minimum, nodes.MAX_RESOLUTION)
         length = h3_video_length_from_seconds(duration_seconds)
         return io.NodeOutput(width, height, length, ui={"resolution": (f"{width}×{height} · {length} frames",)})
 
@@ -218,37 +116,11 @@ class UC_ImageScaleAndResolutionPicker(io.ComfyNode):
                 io.Image.Input("image", optional=True),
                 io.Combo.Input("upscale_method", options=cls.upscale_methods, default="lanczos"),
                 io.Combo.Input("crop_method", options=cls.crop_methods, tooltip="If cropping is enabled, the image will be cropped to the target aspect ratio before resizing. Center cropping is used, so the center of the image will be preserved and equal amounts will be cropped from either side."),
-                io.Combo.Input(
-                    "aspect_ratio",
-                    options=AspectRatio,
-                    default=AspectRatio.SQUARE,
-                    tooltip="The aspect ratio for the output dimensions and cropping.",
-                ),
+                io.Combo.Input("aspect_ratio", options=AspectRatio, default=AspectRatio.SQUARE, tooltip="The aspect ratio for the output dimensions and cropping."),
                 io.Float.Input("megapixels", default=1.0, min=0.01, max=16.0, step=0.0125),
-                io.Int.Input(
-                    "resolution_steps",
-                    default=1,
-                    min=1,
-                    max=256,
-                    advanced=True,
-                    tooltip="Does not affect output size. Use Multiple to align dimensions.",
-                ),
-                io.Float.Input(
-                    id="scale_by",
-                    default=1.0,
-                    min=0.01,
-                    max=10.0,
-                    step=0.01,
-                    tooltip="Scale used for the larger output resolution.",
-                ),
-                io.Int.Input(
-                    id="multiple",
-                    default=16,
-                    min=4,
-                    max=128,
-                    step=4,
-                    tooltip="Round the larger resolution to this pixel multiple.",
-                ),
+                io.Int.Input("resolution_steps", default=1, min=1, max=256, advanced=True, tooltip="Does not affect output size. Use Multiple to align dimensions."),
+                io.Float.Input(id="scale_by", default=1.0, min=0.01, max=10.0, step=0.01, tooltip="Scale used for the larger output resolution."),
+                io.Int.Input(id="multiple", default=16, min=4, max=128, step=4, tooltip="Round the larger resolution to this pixel multiple."),
             ],
             outputs=[
                 io.Image.Output("image", tooltip="The adjusted/cropped base image"),
@@ -271,7 +143,7 @@ class UC_ImageScaleAndResolutionPicker(io.ComfyNode):
 
         if image is not None:
             # B, H, W, C
-            samples = image.movedim(-1, 1) # B, C, H, W
+            samples = image.movedim(-1, 1)  # B, C, H, W
             img_h, img_w = samples.shape[2], samples.shape[3]
 
             if crop_method == "center":
@@ -294,9 +166,7 @@ class UC_ImageScaleAndResolutionPicker(io.ComfyNode):
 
             device = mm.intermediate_device()
             dtype = mm.intermediate_dtype()
-            samples = torch.zeros(
-                [1, 3, adjusted_height, adjusted_width], dtype=dtype, device=device
-            )  # B, C, H, W
+            samples = torch.zeros([1, 3, adjusted_height, adjusted_width], dtype=dtype, device=device)  # B, C, H, W
 
         adjusted_width = max(multiple, round_to_nearest(width, multiple))
         adjusted_height = max(multiple, round_to_nearest(height, multiple))
@@ -309,14 +179,8 @@ class UC_ImageScaleAndResolutionPicker(io.ComfyNode):
         adjusted_image_out = adjusted_samples.movedim(1, -1)
         upscaled_image_out = upscaled_samples.movedim(1, -1)
 
-        return io.NodeOutput(
-            adjusted_image_out,
-            upscaled_image_out,
-            adjusted_width,
-            adjusted_height,
-            upscaled_width,
-            upscaled_height,
-        )
+        return io.NodeOutput(adjusted_image_out, upscaled_image_out, adjusted_width, adjusted_height, upscaled_width, upscaled_height)
+
 
 class UC_VideoResolutionAndLengthPicker(io.ComfyNode):
     upscale_methods = ["nearest-exact", "bilinear", "area", "bicubic", "lanczos"]
@@ -337,29 +201,10 @@ class UC_VideoResolutionAndLengthPicker(io.ComfyNode):
                 io.Float.Input("duration_seconds", default=5.16667, min=0.20833, step=0.70833, tooltip="Video duration in seconds at 24 fps. Steps by 17 frames (~0.708s) on the MiniMax H3 5+17k temporal grid. Default is 124 frames (~5.17s). Minimum is 5 frames (~0.21s)."),
                 io.Combo.Input("scale_method", options=cls.upscale_methods, default="lanczos"),
                 io.Combo.Input("crop_method", options=cls.crop_methods, default="disabled", tooltip="If cropping is enabled, the image will be cropped to the target aspect ratio before resizing. Center cropping is used, so the center of the image will be preserved and equal amounts will be cropped from either side."),
-                io.Combo.Input(
-                    "aspect_ratio",
-                    options=AspectRatio,
-                    default=AspectRatio.SQUARE,
-                    tooltip="The aspect ratio for the output dimensions and cropping.",
-                ),
+                io.Combo.Input("aspect_ratio", options=AspectRatio, default=AspectRatio.SQUARE, tooltip="The aspect ratio for the output dimensions and cropping."),
                 io.Float.Input("megapixels", default=1.0, min=0.01, max=16.0, step=0.0125),
-                io.Int.Input(
-                    "resolution_steps",
-                    default=1,
-                    min=1,
-                    max=256,
-                    advanced=True,
-                    tooltip="Does not affect output size. Use Multiple to align dimensions.",
-                ),
-                io.Int.Input(
-                    id="multiple",
-                    default=32,
-                    min=4,
-                    max=128,
-                    step=4,
-                    tooltip="Round the resolution to this pixel multiple.",
-                ),
+                io.Int.Input("resolution_steps", default=1, min=1, max=256, advanced=True, tooltip="Does not affect output size. Use Multiple to align dimensions."),
+                io.Int.Input(id="multiple", default=32, min=4, max=128, step=4, tooltip="Round the resolution to this pixel multiple."),
             ],
             outputs=[
                 io.Image.Output("images", tooltip="The adjusted/cropped base image or video frames."),
@@ -373,18 +218,7 @@ class UC_VideoResolutionAndLengthPicker(io.ComfyNode):
 
     @classmethod
     def execute(
-        cls,
-        video=None,
-        use_video_duration: bool = True,
-        match_video_length: bool = True,
-        image=None,
-        duration_seconds: float = 5.16667,
-        scale_method: str = "lanczos",
-        crop_method: str = "disabled",
-        aspect_ratio: AspectRatio = AspectRatio.SQUARE,
-        megapixels: float = 1.0,
-        resolution_steps: int = 1,
-        multiple: int = 32,
+        cls, video=None, use_video_duration: bool = True, match_video_length: bool = True, image=None, duration_seconds: float = 5.16667, scale_method: str = "lanczos", crop_method: str = "disabled", aspect_ratio: AspectRatio = AspectRatio.SQUARE, megapixels: float = 1.0, resolution_steps: int = 1, multiple: int = 32
     ) -> io.NodeOutput:
         total = megapixels * 1024 * 1024
         _ = resolution_steps
@@ -407,6 +241,7 @@ class UC_VideoResolutionAndLengthPicker(io.ComfyNode):
             elif hasattr(video, "get_stream_source"):
                 try:
                     from ..helpers.image_helpers import cached_video_components
+
                     components = cached_video_components(video)
                     if source_frames is None:
                         source_frames = getattr(components, "images", None)
@@ -484,21 +319,31 @@ class UC_VideoResolutionAndLengthPicker(io.ComfyNode):
                 chunks = []
                 with tqdm(total=samples.shape[0], desc="Resizing Video Frames", unit="frame") as pbar:
                     for start in range(0, samples.shape[0], 16):
-                        chunk = samples[start:start + 16]
+                        chunk = samples[start : start + 16]
                         chunks.append(resize_nchw(chunk, int(adjusted_width), int(adjusted_height), scale_method, crop_method))
                         pbar.update(chunk.shape[0])
                 adjusted_samples = torch.cat(chunks, dim=0)
             else:
-                adjusted_samples = resize_nchw(
-                    samples, int(adjusted_width), int(adjusted_height), scale_method, crop_method
-                )
+                adjusted_samples = resize_nchw(samples, int(adjusted_width), int(adjusted_height), scale_method, crop_method)
             adjusted_image_out = adjusted_samples.movedim(1, -1)
             if has_video_input or orig_frame_count > 1:
                 audio_desc = f"32kHz ({prepared_audio['waveform'].shape[-1]} samples)" if isinstance(prepared_audio, dict) and prepared_audio.get("waveform") is not None else "none"
                 logging.info(
                     "[UC_VideoResolutionAndLengthPicker] Source %d frame(s) at %dx%d (%.2f fps) -> %d frame(s) at %dx%d (H3 length=%d, %.2fs, scale=%s, crop=%s, trimmed=%d, padded=%d) | audio=%s",
-                    orig_frame_count, img_w, img_h, orig_fps, int(adjusted_image_out.shape[0]), adjusted_width, adjusted_height,
-                    length, effective_duration, scale_method, crop_method, trimmed_frames, padded_frames, audio_desc,
+                    orig_frame_count,
+                    img_w,
+                    img_h,
+                    orig_fps,
+                    int(adjusted_image_out.shape[0]),
+                    adjusted_width,
+                    adjusted_height,
+                    length,
+                    effective_duration,
+                    scale_method,
+                    crop_method,
+                    trimmed_frames,
+                    padded_frames,
+                    audio_desc,
                 )
         else:
             target_ratio_w, target_ratio_h = ASPECT_RATIOS[aspect_ratio]
@@ -511,18 +356,8 @@ class UC_VideoResolutionAndLengthPicker(io.ComfyNode):
 
             device = mm.intermediate_device()
             dtype = mm.intermediate_dtype()
-            adjusted_image_out = torch.zeros(
-                [1, adjusted_height, adjusted_width, 3], dtype=dtype, device=device
-            )
+            adjusted_image_out = torch.zeros([1, adjusted_height, adjusted_width, 3], dtype=dtype, device=device)
 
         length = h3_video_length_from_seconds(effective_duration)
 
-        return io.NodeOutput(
-            adjusted_image_out,
-            adjusted_width,
-            adjusted_height,
-            length,
-            effective_duration,
-            prepared_audio,
-            ui={"resolution": (f"{adjusted_width}×{adjusted_height} · {length} frames · {effective_duration:.2f} s",)},
-        )
+        return io.NodeOutput(adjusted_image_out, adjusted_width, adjusted_height, length, effective_duration, prepared_audio, ui={"resolution": (f"{adjusted_width}×{adjusted_height} · {length} frames · {effective_duration:.2f} s",)})

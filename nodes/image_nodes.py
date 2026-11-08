@@ -13,11 +13,7 @@ from tqdm import tqdm
 from PIL import Image, ImageOps, ImageSequence, ImageDraw, ImageFont
 import kornia.morphology as morph
 from ..helpers.helper_functions import pil2tensor, math_diag, pct_to_px, composite, fill_mask_from_edges, iterative_directional_stretch_fill, gaussian_blur_nchw, hex_to_rgb, string_to_color, resize_nchw, FLOW_PRESETS
-from ..helpers.tile_helpers import (
-    accumulate_tile_images,
-    apply_tile_differential_diffusion,
-    split_and_encode_tiles,
-)
+from ..helpers.tile_helpers import accumulate_tile_images, apply_tile_differential_diffusion, split_and_encode_tiles
 from ..helpers.color_palette_helpers import extract_prevalent_color_outputs
 from ..helpers.image_helpers import (
     run_openpose_batch,
@@ -58,7 +54,9 @@ class UC_BatchedOpenPose(io.ComfyNode):
     @classmethod
     def define_schema(cls):
         return io.Schema(
-            node_id="UC_BatchedOpenPose", display_name="Batched OpenPose Pose", category="image/pose",
+            node_id="UC_BatchedOpenPose",
+            display_name="Batched OpenPose Pose",
+            category="image/pose",
             description="Detect human body, hand and face keypoints and draw pose maps. Processes image batches on ComfyUI's selected device. Missing models download on execution to models/controlnet/preprocessors.",
             inputs=[
                 io.Image.Input("image", tooltip="Image or image batch to process. For temporal filtering, supply consecutive video frames in order, not unrelated images."),
@@ -81,21 +79,58 @@ class UC_BatchedOpenPose(io.ComfyNode):
                 io.Float.Input("temporal_max_distance", default=0.1, min=0.001, max=1.0, step=0.01, tooltip="Temporal filter only: allowed joint displacement relative to the person's body-box diagonal; 0.1 means 10%. Raise for faster motion; lower to reject sudden jumps."),
                 io.Float.Input("temporal_match_iou", default=0.3, min=0.0, max=1.0, step=0.01, tooltip="Temporal filter only: required overlap between body boxes to match a person across frames. Raise to avoid mixing people; lower for faster movement or changing boxes."),
             ],
-            outputs=[io.Image.Output("image", tooltip="Pose maps in input-frame order, showing the enabled body, hand and face drawings."), PoseKeypoint.Output("pose_keypoint", tooltip="Per-frame OpenPose-format keypoints after thresholding and optional temporal filtering. Disabled hand/face detectors omit those landmarks."), io.Mask.Output("mask", display_name="Pose Overlay Mask", tooltip="White on rendered pose lines and points; black elsewhere. Use to composite the pose map over an image or video. Matches pose-map size and frame order; not a person silhouette.")],
+            outputs=[
+                io.Image.Output("image", tooltip="Pose maps in input-frame order, showing the enabled body, hand and face drawings."),
+                PoseKeypoint.Output("pose_keypoint", tooltip="Per-frame OpenPose-format keypoints after thresholding and optional temporal filtering. Disabled hand/face detectors omit those landmarks."),
+                io.Mask.Output("mask", display_name="Pose Overlay Mask", tooltip="White on rendered pose lines and points; black elsewhere. Use to composite the pose map over an image or video. Matches pose-map size and frame order; not a person silhouette."),
+            ],
         )
 
     @classmethod
-    def execute(cls, image, detect_hand=True, detect_body=True, detect_face=True, resolution=0,
-                batch_size=4, scale_stick_for_xinsr_cn=False, body_threshold=0.45, hand_threshold=0.45, face_threshold=0.45,
-                limb_threshold=0.45, limb_support=0.8, min_body_parts=4, min_body_score=0.4,
-                temporal_filter=False, temporal_radius=2, temporal_min_support=2, temporal_max_distance=0.1, temporal_match_iou=0.3):
+    def execute(
+        cls,
+        image,
+        detect_hand=True,
+        detect_body=True,
+        detect_face=True,
+        resolution=0,
+        batch_size=4,
+        scale_stick_for_xinsr_cn=False,
+        body_threshold=0.45,
+        hand_threshold=0.45,
+        face_threshold=0.45,
+        limb_threshold=0.45,
+        limb_support=0.8,
+        min_body_parts=4,
+        min_body_score=0.4,
+        temporal_filter=False,
+        temporal_radius=2,
+        temporal_min_support=2,
+        temporal_max_distance=0.1,
+        temporal_match_iou=0.3,
+    ):
         result, poses = run_openpose_batch(
-            image, resolution, batch_size, detect_body, detect_hand, detect_face, scale_stick_for_xinsr_cn,
-            loader=load_openpose_model, forward=openpose_forward, body_threshold=body_threshold,
-            hand_threshold=hand_threshold, face_threshold=face_threshold, limb_threshold=limb_threshold,
-            limb_support=limb_support, min_body_parts=min_body_parts, min_body_score=min_body_score,
-            temporal_filter=temporal_filter, temporal_radius=temporal_radius, temporal_min_support=temporal_min_support,
-            temporal_max_distance=temporal_max_distance, temporal_match_iou=temporal_match_iou,
+            image,
+            resolution,
+            batch_size,
+            detect_body,
+            detect_hand,
+            detect_face,
+            scale_stick_for_xinsr_cn,
+            loader=load_openpose_model,
+            forward=openpose_forward,
+            body_threshold=body_threshold,
+            hand_threshold=hand_threshold,
+            face_threshold=face_threshold,
+            limb_threshold=limb_threshold,
+            limb_support=limb_support,
+            min_body_parts=min_body_parts,
+            min_body_score=min_body_score,
+            temporal_filter=temporal_filter,
+            temporal_radius=temporal_radius,
+            temporal_min_support=temporal_min_support,
+            temporal_max_distance=temporal_max_distance,
+            temporal_match_iou=temporal_match_iou,
         )
         return io.NodeOutput(result, poses, pose_overlay_mask(result), ui={"openpose_json": [json.dumps(poses)]})
 
@@ -104,7 +139,9 @@ class UC_DWPoseEstimator(io.ComfyNode):
     @classmethod
     def define_schema(cls):
         return io.Schema(
-            node_id="UC_DWPoseEstimator", display_name="DWPose Estimator", category="image/pose",
+            node_id="UC_DWPoseEstimator",
+            display_name="DWPose Estimator",
+            category="image/pose",
             description="Detect people and draw body, hand and face pose maps. Processes image batches; missing models download on execution to models/controlnet/preprocessors.",
             inputs=[
                 io.Image.Input("image", tooltip="Image or image batch to process. For temporal filtering, supply consecutive video frames in order, not unrelated images."),
@@ -114,34 +151,45 @@ class UC_DWPoseEstimator(io.ComfyNode):
                 io.Int.Input("resolution", default=0, min=0, max=4096, step=1, tooltip="0 preserves the input dimensions. A positive value sets the output's shortest edge in pixels, preserving aspect ratio. Larger maps do not increase the model's fixed input size."),
                 io.Int.Input("batch_size", default=5, min=1, max=64, tooltip="Maximum images or person crops processed together. Higher values may improve throughput but use more memory; lower if VRAM runs out. Does not change temporal-filter range."),
                 io.Boolean.Input("scale_stick_for_xinsr_cn", default=False, tooltip="Scale body-line thickness with image size for Xinsir-style pose maps. Changes drawing only, not detected coordinates."),
-                io.Float.Input("detection_threshold", default=0.45, min=0.0, max=1.0, step=0.01,
-                               tooltip="Minimum person-detection confidence. Raise to reject weak detections such as shadows; may also remove real people."),
-                io.Float.Input("keypoint_threshold", default=0.45, min=0.0, max=1.0, step=0.01,
-                               tooltip="Minimum confidence for body, hand, and face keypoints. Raise to hide uncertain joints; this does not track or smooth motion."),
-                io.Boolean.Input("temporal_filter", default=False,
-                                 tooltip="Video frames only: remove joints unsupported by nearby frames from both pose maps and keypoints. Keeps person entries; does not smooth or fill missing joints. Leave off for unrelated images."),
+                io.Float.Input("detection_threshold", default=0.45, min=0.0, max=1.0, step=0.01, tooltip="Minimum person-detection confidence. Raise to reject weak detections such as shadows; may also remove real people."),
+                io.Float.Input("keypoint_threshold", default=0.45, min=0.0, max=1.0, step=0.01, tooltip="Minimum confidence for body, hand, and face keypoints. Raise to hide uncertain joints; this does not track or smooth motion."),
+                io.Boolean.Input("temporal_filter", default=False, tooltip="Video frames only: remove joints unsupported by nearby frames from both pose maps and keypoints. Keeps person entries; does not smooth or fill missing joints. Leave off for unrelated images."),
                 io.Int.Input("temporal_radius", default=2, min=1, max=30, tooltip="Temporal filter only: frames to inspect before and after each frame. 2 checks up to four neighbors, across batch_size chunks. Larger windows cost more and may reject fast motion."),
                 io.Int.Input("temporal_min_support", default=2, min=1, max=60, tooltip="Temporal filter only: neighboring frames that must confirm a joint. Raise to remove more flicker; lower to retain brief poses. Limited to available neighbors, including at clip edges."),
-                io.Float.Input("temporal_max_distance", default=0.1, min=0.001, max=1.0, step=0.01,
-                               tooltip="Temporal filter only: allowed joint displacement relative to the person's box diagonal; 0.1 means 10%. Raise for faster motion; lower to reject sudden jumps."),
-                io.Float.Input("temporal_match_iou", default=0.3, min=0.0, max=1.0, step=0.01,
-                               tooltip="Temporal filter only: required overlap between detection boxes to match a person across frames. Raise to avoid mixing people; lower for faster movement or changing boxes."),
+                io.Float.Input("temporal_max_distance", default=0.1, min=0.001, max=1.0, step=0.01, tooltip="Temporal filter only: allowed joint displacement relative to the person's box diagonal; 0.1 means 10%. Raise for faster motion; lower to reject sudden jumps."),
+                io.Float.Input("temporal_match_iou", default=0.3, min=0.0, max=1.0, step=0.01, tooltip="Temporal filter only: required overlap between detection boxes to match a person across frames. Raise to avoid mixing people; lower for faster movement or changing boxes."),
                 io.Float.Input("nms_threshold", default=0.45, min=0.0, max=1.0, step=0.01, tooltip="Overlap limit for removing duplicate person boxes. Lower removes more overlapping detections but can lose nearby people; higher keeps more and may leave duplicates."),
             ],
-            outputs=[io.Image.Output("image", tooltip="Pose maps in input-frame order, showing the enabled body, hand and face drawings."), PoseKeypoint.Output("pose_keypoint", tooltip="Per-frame OpenPose-format keypoints after thresholding and optional temporal filtering. Drawing toggles do not remove body, hand or face keypoints."), io.Mask.Output("mask", display_name="Pose Overlay Mask", tooltip="White on rendered pose lines and points; black elsewhere. Use to composite the pose map over an image or video. Matches pose-map size and frame order; not a person silhouette.")],
+            outputs=[
+                io.Image.Output("image", tooltip="Pose maps in input-frame order, showing the enabled body, hand and face drawings."),
+                PoseKeypoint.Output("pose_keypoint", tooltip="Per-frame OpenPose-format keypoints after thresholding and optional temporal filtering. Drawing toggles do not remove body, hand or face keypoints."),
+                io.Mask.Output("mask", display_name="Pose Overlay Mask", tooltip="White on rendered pose lines and points; black elsewhere. Use to composite the pose map over an image or video. Matches pose-map size and frame order; not a person silhouette."),
+            ],
         )
 
     @classmethod
-    def execute(cls, image, detect_hand=True, detect_body=True, detect_face=True, resolution=0,
-                batch_size=5, scale_stick_for_xinsr_cn=False, detection_threshold=0.45, keypoint_threshold=0.45,
-                temporal_filter=False, temporal_radius=2, temporal_min_support=2, temporal_max_distance=0.1, temporal_match_iou=0.3, nms_threshold=0.45):
-        result, poses = run_dwpose_batch(image, resolution, batch_size, detect_body, detect_hand, detect_face,
-                                        scale_stick_for_xinsr_cn, loader=load_dwpose_model, forward=dwpose_forward,
-                                        detection_threshold=detection_threshold, keypoint_threshold=keypoint_threshold,
-                                        nms_threshold=nms_threshold,
-                                        temporal_filter=temporal_filter, temporal_radius=temporal_radius,
-                                        temporal_min_support=temporal_min_support, temporal_max_distance=temporal_max_distance,
-                                        temporal_match_iou=temporal_match_iou)
+    def execute(
+        cls, image, detect_hand=True, detect_body=True, detect_face=True, resolution=0, batch_size=5, scale_stick_for_xinsr_cn=False, detection_threshold=0.45, keypoint_threshold=0.45, temporal_filter=False, temporal_radius=2, temporal_min_support=2, temporal_max_distance=0.1, temporal_match_iou=0.3, nms_threshold=0.45
+    ):
+        result, poses = run_dwpose_batch(
+            image,
+            resolution,
+            batch_size,
+            detect_body,
+            detect_hand,
+            detect_face,
+            scale_stick_for_xinsr_cn,
+            loader=load_dwpose_model,
+            forward=dwpose_forward,
+            detection_threshold=detection_threshold,
+            keypoint_threshold=keypoint_threshold,
+            nms_threshold=nms_threshold,
+            temporal_filter=temporal_filter,
+            temporal_radius=temporal_radius,
+            temporal_min_support=temporal_min_support,
+            temporal_max_distance=temporal_max_distance,
+            temporal_match_iou=temporal_match_iou,
+        )
         return io.NodeOutput(result, poses, pose_overlay_mask(result), ui={"openpose_json": [json.dumps(poses)]})
 
 
@@ -149,7 +197,9 @@ class UC_OverlayPoseKeypoints(io.ComfyNode):
     @classmethod
     def define_schema(cls):
         return io.Schema(
-            node_id="UC_OverlayPoseKeypoints", display_name="Overlay Pose Keypoints", category="image/pose",
+            node_id="UC_OverlayPoseKeypoints",
+            display_name="Overlay Pose Keypoints",
+            category="image/pose",
             description="Draw human OpenPose or DWPose keypoints directly over images or video frames. No model inference. Uses normalized keypoints from this pack's pose estimators.",
             inputs=[
                 io.Image.Input("image", display_name="Background Images", tooltip="Image or ordered video-frame batch to draw over. Output keeps its dimensions, frame order and alpha channel."),
@@ -172,7 +222,9 @@ class UC_AnimalPoseEstimator(io.ComfyNode):
     @classmethod
     def define_schema(cls):
         return io.Schema(
-            node_id="UC_AnimalPoseEstimator", display_name="AnimalPose Estimator (AP10K)", category="image/pose",
+            node_id="UC_AnimalPoseEstimator",
+            display_name="AnimalPose Estimator (AP10K)",
+            category="image/pose",
             description="Detect supported animals and draw 17-joint AP10K skeletons. Processes image batches; missing models download on execution to models/controlnet/preprocessors.",
             inputs=[
                 io.Image.Input("image", tooltip="Image or image batch containing animals. Detector categories: bird, cat, dog, horse, sheep, cow, elephant, bear, zebra and giraffe. For temporal filtering, supply consecutive video frames in order."),
@@ -187,16 +239,30 @@ class UC_AnimalPoseEstimator(io.ComfyNode):
                 io.Float.Input("temporal_max_distance", default=0.1, min=0.001, max=1.0, step=0.01, tooltip="Temporal filter only: allowed joint displacement relative to the animal's box diagonal; 0.1 means 10%. Raise for faster motion; lower to reject sudden jumps."),
                 io.Float.Input("temporal_match_iou", default=0.3, min=0.0, max=1.0, step=0.01, tooltip="Temporal filter only: required overlap between detection boxes to match an animal across frames. Raise to avoid mixing animals; lower for faster movement or changing boxes."),
             ],
-            outputs=[io.Image.Output("image", tooltip="Animal skeleton maps in input-frame order."), PoseKeypoint.Output("pose_keypoint", tooltip="Per-frame AP10K animal keypoints: 17 joints with pixel coordinates and confidence, after thresholding and optional temporal filtering. Not the human OpenPose joint layout.")],
+            outputs=[
+                io.Image.Output("image", tooltip="Animal skeleton maps in input-frame order."),
+                PoseKeypoint.Output("pose_keypoint", tooltip="Per-frame AP10K animal keypoints: 17 joints with pixel coordinates and confidence, after thresholding and optional temporal filtering. Not the human OpenPose joint layout."),
+            ],
         )
 
     @classmethod
-    def execute(cls, image, resolution=0, batch_size=5, detection_threshold=0.3, keypoint_threshold=0.3, nms_threshold=0.45,
-                temporal_filter=False, temporal_radius=2, temporal_min_support=2, temporal_max_distance=0.1, temporal_match_iou=0.3):
-        result, poses = run_dwpose_batch(image, resolution, batch_size, loader=load_animal_pose_model, forward=dwpose_forward, animal=True,
-                                        detection_threshold=detection_threshold, keypoint_threshold=keypoint_threshold, nms_threshold=nms_threshold,
-                                        temporal_filter=temporal_filter, temporal_radius=temporal_radius, temporal_min_support=temporal_min_support,
-                                        temporal_max_distance=temporal_max_distance, temporal_match_iou=temporal_match_iou)
+    def execute(cls, image, resolution=0, batch_size=5, detection_threshold=0.3, keypoint_threshold=0.3, nms_threshold=0.45, temporal_filter=False, temporal_radius=2, temporal_min_support=2, temporal_max_distance=0.1, temporal_match_iou=0.3):
+        result, poses = run_dwpose_batch(
+            image,
+            resolution,
+            batch_size,
+            loader=load_animal_pose_model,
+            forward=dwpose_forward,
+            animal=True,
+            detection_threshold=detection_threshold,
+            keypoint_threshold=keypoint_threshold,
+            nms_threshold=nms_threshold,
+            temporal_filter=temporal_filter,
+            temporal_radius=temporal_radius,
+            temporal_min_support=temporal_min_support,
+            temporal_max_distance=temporal_max_distance,
+            temporal_match_iou=temporal_match_iou,
+        )
         return io.NodeOutput(result, poses, ui={"openpose_json": [json.dumps(poses)]})
 
 
@@ -204,30 +270,61 @@ class UC_DensePoseEstimator(io.ComfyNode):
     @classmethod
     def define_schema(cls):
         return io.Schema(
-            node_id="UC_DensePoseEstimator", display_name="DensePose Estimator", category="image/pose",
+            node_id="UC_DensePoseEstimator",
+            display_name="DensePose Estimator",
+            category="image/pose",
             description="Detect people and color their visible body regions, rather than drawing joint skeletons. Processes image batches; missing models download on execution to models/controlnet/preprocessors.",
             inputs=[
                 io.Image.Input("image", display_name="Images", tooltip="Image or image batch containing people. Each frame is detected independently; this node does not track or smooth motion."),
                 io.Combo.Input("cmap", display_name="Color Palette", options=["viridis", "parula"], default="viridis", tooltip="Body-region color palette: viridis uses a purple background; parula uses black. Changes drawing only. Choose the palette expected by your downstream model."),
-                io.Int.Input("resolution", display_name="Detection Resolution", default=0, min=0, max=4096, step=1, tooltip="0 preserves the input dimensions. A positive value sets the shortest edge for detection and output, preserving aspect ratio. Higher values can reveal smaller people but increase processing time and memory use."),
+                io.Int.Input(
+                    "resolution",
+                    display_name="Detection Resolution",
+                    default=0,
+                    min=0,
+                    max=4096,
+                    step=1,
+                    tooltip="0 preserves the input dimensions. A positive value sets the shortest edge for detection and output, preserving aspect ratio. Higher values can reveal smaller people but increase processing time and memory use.",
+                ),
                 io.Int.Input("batch_size", display_name="Frames per Batch", default=2, min=1, max=64, tooltip="Maximum frames processed together. Higher values may improve throughput but use more memory; lower if VRAM runs out. Does not add tracking between frames."),
                 io.Float.Input("score_threshold", display_name="Minimum Person Confidence", default=0.05, min=0.0, max=1.0, step=0.01, tooltip="Minimum confidence for keeping a person. Raise to reject false detections; lower to recover difficult or partly hidden people."),
                 io.Float.Input("detection_nms_threshold", display_name="Person Overlap Limit", default=0.5, min=0.0, max=1.0, step=0.01, tooltip="Overlap limit for removing duplicate final person boxes. Lower removes more duplicates but can lose overlapping people; higher keeps more overlapping detections."),
                 io.Int.Input("max_detections", display_name="Maximum People per Frame", default=100, min=1, max=1000, tooltip="Maximum people kept per frame, highest scores first. Lower to limit body-region processing; too low drops people in crowds. This does not track the same person over time."),
                 io.Int.Input("rpn_pre_nms_topk", display_name="Candidates per Scale (Before Filtering)", default=1000, min=1, max=10000, tooltip="Advanced: candidate boxes kept per detection scale before duplicate removal. Lower reduces proposal processing; too low can miss people. Usually leave at the default."),
-                io.Int.Input("rpn_post_nms_topk", display_name="Candidates per Frame (After Filtering)", default=1000, min=1, max=10000, tooltip="Advanced: candidate boxes per frame sent to the person classifier after duplicate removal. Lower reduces work and memory; too low can miss people. Usually leave at the default."),
-                io.Float.Input("rpn_nms_threshold", display_name="Candidate Overlap Limit", default=0.7, min=0.0, max=1.0, step=0.01, tooltip="Advanced: overlap limit for removing duplicate candidate boxes within each detection scale. Lower prunes more candidates; higher retains more alternatives. Separate from final-person duplicate removal."),
-            ], outputs=[io.Image.Output("image", tooltip="One colored body-region map per input frame, in input order. Background only when no person is detected.")],
+                io.Int.Input(
+                    "rpn_post_nms_topk", display_name="Candidates per Frame (After Filtering)", default=1000, min=1, max=10000, tooltip="Advanced: candidate boxes per frame sent to the person classifier after duplicate removal. Lower reduces work and memory; too low can miss people. Usually leave at the default."
+                ),
+                io.Float.Input(
+                    "rpn_nms_threshold",
+                    display_name="Candidate Overlap Limit",
+                    default=0.7,
+                    min=0.0,
+                    max=1.0,
+                    step=0.01,
+                    tooltip="Advanced: overlap limit for removing duplicate candidate boxes within each detection scale. Lower prunes more candidates; higher retains more alternatives. Separate from final-person duplicate removal.",
+                ),
+            ],
+            outputs=[io.Image.Output("image", tooltip="One colored body-region map per input frame, in input order. Background only when no person is detected.")],
         )
 
     @classmethod
-    def execute(cls, image, cmap="viridis", resolution=0, batch_size=2, score_threshold=0.05,
-                detection_nms_threshold=0.5, max_detections=100, rpn_pre_nms_topk=1000, rpn_post_nms_topk=1000, rpn_nms_threshold=0.7):
-        return io.NodeOutput(run_densepose_batch(
-            image, resolution, batch_size, cmap, loader=load_densepose_model, forward=densepose_forward,
-            score_threshold=score_threshold, detection_nms_threshold=detection_nms_threshold, max_detections=max_detections,
-            rpn_pre_nms_topk=rpn_pre_nms_topk, rpn_post_nms_topk=rpn_post_nms_topk, rpn_nms_threshold=rpn_nms_threshold,
-        ))
+    def execute(cls, image, cmap="viridis", resolution=0, batch_size=2, score_threshold=0.05, detection_nms_threshold=0.5, max_detections=100, rpn_pre_nms_topk=1000, rpn_post_nms_topk=1000, rpn_nms_threshold=0.7):
+        return io.NodeOutput(
+            run_densepose_batch(
+                image,
+                resolution,
+                batch_size,
+                cmap,
+                loader=load_densepose_model,
+                forward=densepose_forward,
+                score_threshold=score_threshold,
+                detection_nms_threshold=detection_nms_threshold,
+                max_detections=max_detections,
+                rpn_pre_nms_topk=rpn_pre_nms_topk,
+                rpn_post_nms_topk=rpn_post_nms_topk,
+                rpn_nms_threshold=rpn_nms_threshold,
+            )
+        )
 
 
 class UC_ExtractPrevalentColors(io.ComfyNode):
@@ -237,75 +334,20 @@ class UC_ExtractPrevalentColors(io.ComfyNode):
             node_id="UC_ExtractPrevalentColors",
             display_name="Extract Prevalent Colors",
             category="image/color",
-            description=(
-                "Extracts perceptually distinct prevalent colors from every image "
-                "without resizing or spatial sampling."
-            ),
-            inputs=[
-                io.Image.Input("image"),
-                io.Int.Input(
-                    "color_count",
-                    default=8,
-                    min=1,
-                    max=64,
-                    step=1,
-                    tooltip="Maximum number of prevalent colors returned per image.",
-                ),
-                io.Boolean.Input(
-                    "prefix_hash",
-                    default=True,
-                    tooltip="Prefix every six-digit hexadecimal color with #.",
-                ),
-            ],
+            description=("Extracts perceptually distinct prevalent colors from every image without resizing or spatial sampling."),
+            inputs=[io.Image.Input("image"), io.Int.Input("color_count", default=8, min=1, max=64, step=1, tooltip="Maximum number of prevalent colors returned per image."), io.Boolean.Input("prefix_hash", default=True, tooltip="Prefix every six-digit hexadecimal color with #.")],
             outputs=[
-                io.String.Output(
-                    "colors",
-                    display_name="colors",
-                    tooltip=(
-                        "One comma-separated palette ordered from most prevalent "
-                        "to least prevalent."
-                    ),
-                ),
-                io.Image.Output(
-                    "palette_grid",
-                    display_name="palette grid",
-                    tooltip=(
-                        "RGB color blocks in reading order from the top-left. "
-                        "Unused cells are flattened to black."
-                    ),
-                ),
-                io.String.Output(
-                    "color_names",
-                    display_name="color names",
-                    tooltip=(
-                        "Nearest human color names in the same order as the "
-                        "exact hexadecimal colors."
-                    ),
-                ),
-                io.String.Output(
-                    "palette_description",
-                    display_name="palette description",
-                    tooltip=(
-                        "Deterministic palette-level temperature, lightness, "
-                        "chroma, neutrality, and contrast description."
-                    ),
-                ),
+                io.String.Output("colors", display_name="colors", tooltip=("One comma-separated palette ordered from most prevalent to least prevalent.")),
+                io.Image.Output("palette_grid", display_name="palette grid", tooltip=("RGB color blocks in reading order from the top-left. Unused cells are flattened to black.")),
+                io.String.Output("color_names", display_name="color names", tooltip=("Nearest human color names in the same order as the exact hexadecimal colors.")),
+                io.String.Output("palette_description", display_name="palette description", tooltip=("Deterministic palette-level temperature, lightness, chroma, neutrality, and contrast description.")),
             ],
         )
 
     @classmethod
     def execute(cls, image, color_count, prefix_hash) -> io.NodeOutput:
-        palette, grid, color_names, palette_description = (
-            extract_prevalent_color_outputs(
-                image, color_count, prefix_hash
-            )
-        )
-        return io.NodeOutput(
-            palette,
-            grid,
-            color_names,
-            palette_description,
-        )
+        palette, grid, color_names, palette_description = extract_prevalent_color_outputs(image, color_count, prefix_hash)
+        return io.NodeOutput(palette, grid, color_names, palette_description)
 
 
 class UC_Image_Color_Noise(io.ComfyNode):
@@ -319,37 +361,24 @@ class UC_Image_Color_Noise(io.ComfyNode):
                 io.Int.Input("width", default=512, max=4096, min=64, step=1),
                 io.Int.Input("height", default=512, max=4096, min=64, step=1),
                 io.Float.Input("frequency", default=0.5, max=100.0, min=0.0, step=0.01),
-                io.Float.Input(
-                    "attenuation", default=0.5, max=100.0, min=0.0, step=0.01
-                ),
-                io.Combo.Input(
-                    "noise_type",
-                    options=["grey", "white", "red", "pink", "green", "blue", "mix"],
-                ),
+                io.Float.Input("attenuation", default=0.5, max=100.0, min=0.0, step=0.01),
+                io.Combo.Input("noise_type", options=["grey", "white", "red", "pink", "green", "blue", "mix"]),
                 io.Int.Input("seed", default=0, min=0, max=0xFFFFFFFFFFFFFFFF),
             ],
-            outputs=[
-                io.Image.Output(display_name="Image"),
-            ],
+            outputs=[io.Image.Output(display_name="Image")],
         )
 
     @classmethod
     def execute(cls, width, height, frequency, attenuation, noise_type, seed):
         generator = torch.Generator()
         generator.manual_seed(seed)
-        noise_image = cls.generate_power_noise(
-            width, height, frequency, attenuation, noise_type, generator
-        )
+        noise_image = cls.generate_power_noise(width, height, frequency, attenuation, noise_type, generator)
         return io.NodeOutput(pil2tensor(noise_image))
 
     @classmethod
-    def generate_power_noise(
-        cls, width, height, frequency, attenuation, noise_type, generator
-    ):
+    def generate_power_noise(cls, width, height, frequency, attenuation, noise_type, generator):
         def normalize_array(arr):
-            return (255 * (arr - np.min(arr)) / (np.max(arr) - np.min(arr))).astype(
-                np.uint8
-            )
+            return (255 * (arr - np.min(arr)) / (np.max(arr) - np.min(arr))).astype(np.uint8)
 
         def white_noise(w, h, gen):
             return torch.rand(h, w, generator=gen).numpy()
@@ -373,9 +402,7 @@ class UC_Image_Color_Noise(io.ComfyNode):
         zeros_channel = np.zeros((height, width), dtype=np.uint8)
 
         if noise_type == "grey":
-            luma = normalize_array(
-                grey_noise_texture(width, height, attenuation, generator)
-            )
+            luma = normalize_array(grey_noise_texture(width, height, attenuation, generator))
             noise_array = np.stack([luma, luma, luma], axis=-1)
 
         elif noise_type == "white":
@@ -404,15 +431,9 @@ class UC_Image_Color_Noise(io.ComfyNode):
             noise_array = np.stack([r, g, b], axis=-1)
 
         elif noise_type == "mix":
-            r = normalize_array(
-                fourier_noise(width, height, attenuation, -1.0, generator)
-            )  # Pink Frequency
-            g = normalize_array(
-                fourier_noise(width, height, attenuation, 0.5, generator)
-            )  # Green Frequency
-            b = normalize_array(
-                fourier_noise(width, height, attenuation, 1.0, generator)
-            )  # Blue Frequency
+            r = normalize_array(fourier_noise(width, height, attenuation, -1.0, generator))  # Pink Frequency
+            g = normalize_array(fourier_noise(width, height, attenuation, 0.5, generator))  # Green Frequency
+            b = normalize_array(fourier_noise(width, height, attenuation, 1.0, generator))  # Blue Frequency
             noise_array = np.stack([r, g, b], axis=-1)
 
         else:
@@ -428,28 +449,13 @@ class UC_LoadImageWithAlpha(io.ComfyNode):
     @classmethod
     def define_schema(cls) -> io.Schema:
         input_directory = folder_paths.get_input_directory()
-        image_files = folder_paths.filter_files_content_types(
-            [name for name in os.listdir(input_directory) if os.path.isfile(os.path.join(input_directory, name))],
-            ["image"],
-        )
+        image_files = folder_paths.filter_files_content_types([name for name in os.listdir(input_directory) if os.path.isfile(os.path.join(input_directory, name))], ["image"])
         return io.Schema(
             node_id="UC_LoadImageWithAlpha",
             display_name="Load Image (Preserve Alpha)",
             category="image/loaders",
-            inputs=[
-                io.Combo.Input(
-                    "image",
-                    options=sorted(image_files),
-                    upload=io.UploadType.image,
-                    image_folder=io.FolderType.input,
-                    tooltip="Image file to load. Matches Core Load Image while also exposing its alpha as a fourth IMAGE channel.",
-                ),
-            ],
-            outputs=[
-                io.Image.Output("image", display_name="IMAGE"),
-                io.Mask.Output("mask", display_name="MASK"),
-                io.Image.Output("image_rgba", display_name="IMAGE_RGBA"),
-            ],
+            inputs=[io.Combo.Input("image", options=sorted(image_files), upload=io.UploadType.image, image_folder=io.FolderType.input, tooltip="Image file to load. Matches Core Load Image while also exposing its alpha as a fourth IMAGE channel.")],
+            outputs=[io.Image.Output("image", display_name="IMAGE"), io.Mask.Output("mask", display_name="MASK"), io.Image.Output("image_rgba", display_name="IMAGE_RGBA")],
         )
 
     @classmethod
@@ -496,7 +502,7 @@ class UC_LoadImagePath(io.ComfyNode):
 
         # Normalize path separators: replace backslashes with forward slashes
         # Then use os.path.normpath to get the OS-appropriate format
-        path = path.replace('\\', '/')
+        path = path.replace("\\", "/")
         path = os.path.normpath(path)
 
         # Convert to absolute path if relative
@@ -512,19 +518,8 @@ class UC_LoadImagePath(io.ComfyNode):
             node_id="UC_LoadImagePath",
             display_name="Load Image (Path)",
             category="advanced/image",
-            inputs=[
-                io.String.Input(
-                    "image_path",
-                    multiline=False,
-                    placeholder="path/to/image.png or X:/path/to/image.png",
-                    tooltip="Path to the image file. Supports absolute or relative paths with any OS format (backslashes or forward slashes). Whitespaces in paths are supported.",
-                ),
-            ],
-            outputs=[
-                io.Image.Output(display_name="IMAGE"),
-                io.Mask.Output(display_name="MASK"),
-                io.Mask.Output(display_name="MASK_INVERTED"),
-            ],
+            inputs=[io.String.Input("image_path", multiline=False, placeholder="path/to/image.png or X:/path/to/image.png", tooltip="Path to the image file. Supports absolute or relative paths with any OS format (backslashes or forward slashes). Whitespaces in paths are supported.")],
+            outputs=[io.Image.Output(display_name="IMAGE"), io.Mask.Output(display_name="MASK"), io.Mask.Output(display_name="MASK_INVERTED")],
         )
 
     @classmethod
@@ -546,7 +541,7 @@ class UC_LoadImagePath(io.ComfyNode):
             i = node_helpers.pillow(ImageOps.exif_transpose, i)
 
             # Handle 16-bit images (mode 'I') - normalize by 65535, not 255
-            if i.mode == 'I':
+            if i.mode == "I":
                 i = i.point(lambda x: x * (1 / 65535))
 
             image = i.convert("RGB")
@@ -565,14 +560,14 @@ class UC_LoadImagePath(io.ComfyNode):
             image_tensor = torch.from_numpy(image_np)[None,]
 
             # Extract mask from alpha channel
-            if 'A' in i.getbands():
+            if "A" in i.getbands():
                 # RGBA image - extract alpha
-                mask_np = np.array(i.getchannel('A')).astype(np.float32) / 255.0
+                mask_np = np.array(i.getchannel("A")).astype(np.float32) / 255.0
                 mask = 1.0 - torch.from_numpy(mask_np)
-            elif i.mode == 'P' and 'transparency' in i.info:
+            elif i.mode == "P" and "transparency" in i.info:
                 # Palette mode with transparency - convert to RGBA (already transposed)
-                rgba = i.convert('RGBA')
-                mask_np = np.array(rgba.getchannel('A')).astype(np.float32) / 255.0
+                rgba = i.convert("RGBA")
+                mask_np = np.array(rgba.getchannel("A")).astype(np.float32) / 255.0
                 mask = 1.0 - torch.from_numpy(mask_np)
             else:
                 # No alpha - return full-sized zero mask (NOT 64x64!)
@@ -607,7 +602,7 @@ class UC_LoadImagePath(io.ComfyNode):
         if not normalized_path or not os.path.isfile(normalized_path):
             return ""
         m = hashlib.sha256()
-        with open(normalized_path, 'rb') as f:
+        with open(normalized_path, "rb") as f:
             m.update(f.read())
         return m.digest().hex()
 
@@ -633,7 +628,7 @@ class UC_LoadImageDirectory(io.ComfyNode):
         if not path:
             return path
         path = path.strip()
-        path = path.replace('\\', '/')
+        path = path.replace("\\", "/")
         path = os.path.normpath(path)
         if not os.path.isabs(path):
             path = os.path.abspath(path)
@@ -646,33 +641,11 @@ class UC_LoadImageDirectory(io.ComfyNode):
             display_name="Load Images (Directory)",
             category="advanced/image",
             inputs=[
-                io.String.Input(
-                    "directory_path",
-                    multiline=False,
-                    placeholder="path/to/directory",
-                    tooltip="Path to the directory containing images.",
-                ),
-                io.Int.Input(
-                    "start_index",
-                    default=0,
-                    min=0,
-                    step=1,
-                    tooltip="Index of the first image to load (sorted alphabetically)."
-                ),
-                io.Int.Input(
-                    "load_count",
-                    default=1,
-                    min=1,
-                    max=1024,
-                    step=1,
-                    tooltip="Number of images to load."
-                ),
+                io.String.Input("directory_path", multiline=False, placeholder="path/to/directory", tooltip="Path to the directory containing images."),
+                io.Int.Input("start_index", default=0, min=0, step=1, tooltip="Index of the first image to load (sorted alphabetically)."),
+                io.Int.Input("load_count", default=1, min=1, max=1024, step=1, tooltip="Number of images to load."),
             ],
-            outputs=[
-                io.Image.Output(display_name="IMAGE", is_output_list=True),
-                io.Mask.Output(display_name="MASK", is_output_list=True),
-                io.Mask.Output(display_name="MASK_INVERTED", is_output_list=True),
-            ],
+            outputs=[io.Image.Output(display_name="IMAGE", is_output_list=True), io.Mask.Output(display_name="MASK", is_output_list=True), io.Mask.Output(display_name="MASK_INVERTED", is_output_list=True)],
         )
 
     @classmethod
@@ -683,7 +656,7 @@ class UC_LoadImageDirectory(io.ComfyNode):
             raise ValueError(f"Invalid directory path: {directory_path}")
 
         # Get valid image files
-        valid_extensions = {'.png', '.jpg', '.jpeg', '.webp', '.bmp', '.tiff', '.gif', '.mpo'}
+        valid_extensions = {".png", ".jpg", ".jpeg", ".webp", ".bmp", ".tiff", ".gif", ".mpo"}
         files = []
         for f in os.listdir(normalized_path):
             ext = os.path.splitext(f)[1].lower()
@@ -697,7 +670,7 @@ class UC_LoadImageDirectory(io.ComfyNode):
         selected_files = files[start_index:end_index]
 
         if not selected_files:
-             raise ValueError(f"No images found in range [{start_index}:{end_index}] in directory: {directory_path}")
+            raise ValueError(f"No images found in range [{start_index}:{end_index}] in directory: {directory_path}")
 
         # Group images by size to handle batching or provide warning
         output_images = []
@@ -715,7 +688,7 @@ class UC_LoadImageDirectory(io.ComfyNode):
             # Process just the first frame
             i = node_helpers.pillow(ImageOps.exif_transpose, img)
 
-            if i.mode == 'I':
+            if i.mode == "I":
                 i = i.point(lambda x: x * (1 / 65535))
 
             image = i.convert("RGB")
@@ -731,19 +704,18 @@ class UC_LoadImageDirectory(io.ComfyNode):
             image_np = np.array(image).astype(np.float32) / 255.0
             image_tensor = torch.from_numpy(image_np)[None,]
 
-            if 'A' in i.getbands():
-                mask_np = np.array(i.getchannel('A')).astype(np.float32) / 255.0
+            if "A" in i.getbands():
+                mask_np = np.array(i.getchannel("A")).astype(np.float32) / 255.0
                 mask = 1.0 - torch.from_numpy(mask_np)
                 mask_inverted = 1.0 - mask
-            elif i.mode == 'P' and 'transparency' in i.info:
-                rgba = i.convert('RGBA')
-                mask_np = np.array(rgba.getchannel('A')).astype(np.float32) / 255.0
+            elif i.mode == "P" and "transparency" in i.info:
+                rgba = i.convert("RGBA")
+                mask_np = np.array(rgba.getchannel("A")).astype(np.float32) / 255.0
                 mask = 1.0 - torch.from_numpy(mask_np)
                 mask_inverted = 1.0 - mask
             else:
                 mask = torch.zeros((h, w), dtype=torch.float32, device="cpu")
                 mask_inverted = 1.0 - mask
-
 
             output_images.append(image_tensor)
             output_masks.append(mask.unsqueeze(0))
@@ -751,7 +723,6 @@ class UC_LoadImageDirectory(io.ComfyNode):
 
         if not output_images:
             raise ValueError("No valid images loaded (checked dimensions and validity).")
-
 
         return io.NodeOutput(output_images, output_masks, output_masks_inverted)
 
@@ -761,7 +732,7 @@ class UC_LoadImageDirectory(io.ComfyNode):
         if not normalized_path or not os.path.isdir(normalized_path):
             return ""
 
-        valid_extensions = {'.png', '.jpg', '.jpeg', '.webp', '.bmp', '.tiff', '.gif', '.mpo'}
+        valid_extensions = {".png", ".jpg", ".jpeg", ".webp", ".bmp", ".tiff", ".gif", ".mpo"}
         files = []
         try:
             for f in os.listdir(normalized_path):
@@ -779,8 +750,8 @@ class UC_LoadImageDirectory(io.ComfyNode):
         for p in selected_files:
             try:
                 # Hash filename and mtime
-                m.update(p.encode('utf-8'))
-                m.update(str(os.path.getmtime(p)).encode('utf-8'))
+                m.update(p.encode("utf-8"))
+                m.update(str(os.path.getmtime(p)).encode("utf-8"))
             except Exception:
                 pass
         return m.digest().hex()
@@ -793,145 +764,37 @@ class UC_SampleVideoFramesAsImages(io.ComfyNode):
             node_id="UC_SampleVideoFramesAsImages",
             display_name="Sample Video Frames (Images)",
             category="image/video",
-            description=(
-                "Samples presentation-timestamp-aligned video frames as both an "
-                "IMAGE batch and independently mappable IMAGE list."
-            ),
-            search_aliases=[
-                "sample video frames",
-                "extract video frames",
-                "video keyframes",
-                "video to images",
-                "video image batch",
-                "video image list",
-            ],
+            description=("Samples presentation-timestamp-aligned video frames as both an IMAGE batch and independently mappable IMAGE list."),
+            search_aliases=["sample video frames", "extract video frames", "video keyframes", "video to images", "video image batch", "video image list"],
             inputs=[
                 io.Video.Input("video", tooltip="Core VIDEO input to sample."),
-                io.Combo.Input(
-                    "sampling_strategy",
-                    options=list(VIDEO_FRAME_SAMPLING_STRATEGIES),
-                    default="codec keyframes",
-                    tooltip=(
-                        "Choose which video frames to keep. Focused PTS groups "
-                        "frames around the focus settings."
-                    ),
-                ),
-                io.Int.Input(
-                    "maximum_frames",
-                    default=16,
-                    min=0,
-                    step=1,
-                    tooltip=(
-                        "Maximum total output count, including the zero-time frame. "
-                        "0 returns every frame eligible after spacing and stride."
-                    ),
-                ),
+                io.Combo.Input("sampling_strategy", options=list(VIDEO_FRAME_SAMPLING_STRATEGIES), default="codec keyframes", tooltip=("Choose which video frames to keep. Focused PTS groups frames around the focus settings.")),
+                io.Int.Input("maximum_frames", default=16, min=0, step=1, tooltip=("Maximum total output count, including the zero-time frame. 0 returns every frame eligible after spacing and stride.")),
                 io.Int.Input("focus_areas", default=0, min=0, max=3, step=1, tooltip="Focused PTS only. How many parts to split the video into. 0 spaces frames evenly."),
                 io.Float.Input("focus_one", default=0.50, min=0.00, max=1.00, step=0.01, tooltip="Focused PTS only. Where frames group in the first part. 0 is early, 0.5 is balanced, 1 is late."),
                 io.Float.Input("focus_two", default=0.50, min=0.00, max=1.00, step=0.01, tooltip="Focused PTS only. Where frames group in the second part. 0 is early, 0.5 is balanced, 1 is late."),
                 io.Float.Input("focus_three", default=0.50, min=0.00, max=1.00, step=0.01, tooltip="Focused PTS only. Where frames group in the third part. 0 is early, 0.5 is balanced, 1 is late."),
-                io.Boolean.Input(
-                    "include_zero_time",
-                    default=True,
-                    tooltip=(
-                        "Place the first visible frame at output position 0 and "
-                        "normalize its presentation timestamp to zero."
-                    ),
-                ),
-                io.Float.Input(
-                    "minimum_spacing_seconds",
-                    default=0.25,
-                    min=0.0,
-                    step=0.01,
-                    round=0.001,
-                    tooltip=(
-                        "Minimum presentation-time separation between selected "
-                        "frames."
-                    ),
-                ),
-                io.Int.Input(
-                    "keyframe_stride",
-                    default=1,
-                    min=1,
-                    step=1,
-                    tooltip=(
-                        "For codec keyframes only, retain every Nth raw codec "
-                        "keyframe before spacing and count limiting."
-                    ),
-                ),
-                io.Combo.Input(
-                    "timestamp_format",
-                    options=list(VIDEO_FRAME_TIMESTAMP_FORMATS),
-                    default="00.000s",
-                    tooltip="Formatting reused verbatim by every text output.",
-                ),
-                io.Combo.Input(
-                    "timeline_style",
-                    options=list(VIDEO_FRAME_TIMELINE_STYLES),
-                    default="H3 alignment prefix",
-                    tooltip="Built-in timeline syntax, or custom to use the timeline text structure.",
-                ),
-                io.String.Input(
-                    "timeline_text_structure",
-                    multiline=True,
-                    dynamic_prompts=False,
-                    default=VIDEO_TIMELINE_TEXT_STRUCTURE,
-                    tooltip=(
-                        "One structure repeated for every selected frame. Use "
-                        "<<time>> or <<timestamp>>, <<picture>>, and <<shot>>."
-                    ),
-                ),
+                io.Boolean.Input("include_zero_time", default=True, tooltip=("Place the first visible frame at output position 0 and normalize its presentation timestamp to zero.")),
+                io.Float.Input("minimum_spacing_seconds", default=0.25, min=0.0, step=0.01, round=0.001, tooltip=("Minimum presentation-time separation between selected frames.")),
+                io.Int.Input("keyframe_stride", default=1, min=1, step=1, tooltip=("For codec keyframes only, retain every Nth raw codec keyframe before spacing and count limiting.")),
+                io.Combo.Input("timestamp_format", options=list(VIDEO_FRAME_TIMESTAMP_FORMATS), default="00.000s", tooltip="Formatting reused verbatim by every text output."),
+                io.Combo.Input("timeline_style", options=list(VIDEO_FRAME_TIMELINE_STYLES), default="H3 alignment prefix", tooltip="Built-in timeline syntax, or custom to use the timeline text structure."),
+                io.String.Input("timeline_text_structure", multiline=True, dynamic_prompts=False, default=VIDEO_TIMELINE_TEXT_STRUCTURE, tooltip=("One structure repeated for every selected frame. Use <<time>> or <<timestamp>>, <<picture>>, and <<shot>>.")),
                 io.String.Input(
                     "structured_timeline_text_structure",
                     multiline=True,
                     dynamic_prompts=False,
                     default=VIDEO_STRUCTURED_TIMELINE_TEXT_STRUCTURE,
-                    tooltip=(
-                        "One whole-timeline structure. Use <<duration>>, "
-                        "<<segments>>, <<timestamps>>, and <<references>>. One <<shot>> … "
-                        "<<timestamp>> section repeats for every selected frame."
-                    ),
+                    tooltip=("One whole-timeline structure. Use <<duration>>, <<segments>>, <<timestamps>>, and <<references>>. One <<shot>> … <<timestamp>> section repeats for every selected frame."),
                 ),
-                io.Int.Input(
-                    "index_offset",
-                    default=0,
-                    min=0,
-                    step=1,
-                    tooltip=(
-                        "Adds this value to every <Picture N> reference so "
-                        "earlier reference images can occupy the first indices."
-                    ),
-                ),
+                io.Int.Input("index_offset", default=0, min=0, step=1, tooltip=("Adds this value to every <Picture N> reference so earlier reference images can occupy the first indices.")),
             ],
             outputs=[
-                io.Image.Output(
-                    "image_batch",
-                    display_name="image batch",
-                    tooltip="Selected frames as one chronological IMAGE batch.",
-                ),
-                io.String.Output(
-                    "timestamps_text",
-                    display_name="timestamps text",
-                    tooltip="All formatted timestamps joined into one comma-and-space-separated string.",
-                ),
-                io.String.Output(
-                    "timeline_text",
-                    display_name="timeline text",
-                    tooltip="One concatenation-ready timeline string.",
-                ),
-                io.Float.Output(
-                    "video_runtime",
-                    display_name="video runtime",
-                    tooltip="Generation duration in seconds, rounded up to H3's supported length at 24 fps. Use this duration for captioning and generation; sampled frames keep their source timestamps.",
-                ),
-                io.String.Output(
-                    "structured_timeline_text",
-                    display_name="structured timeline text",
-                    tooltip=(
-                        "Video duration, segment count, and chronological "
-                        "<Picture N> timestamp references in one sentence."
-                    ),
-                ),
+                io.Image.Output("image_batch", display_name="image batch", tooltip="Selected frames as one chronological IMAGE batch."),
+                io.String.Output("timestamps_text", display_name="timestamps text", tooltip="All formatted timestamps joined into one comma-and-space-separated string."),
+                io.String.Output("timeline_text", display_name="timeline text", tooltip="One concatenation-ready timeline string."),
+                io.Float.Output("video_runtime", display_name="video runtime", tooltip="Generation duration in seconds, rounded up to H3's supported length at 24 fps. Use this duration for captioning and generation; sampled frames keep their source timestamps."),
+                io.String.Output("structured_timeline_text", display_name="structured timeline text", tooltip=("Video duration, segment count, and chronological <Picture N> timestamp references in one sentence.")),
             ],
         )
 
@@ -954,30 +817,8 @@ class UC_SampleVideoFramesAsImages(io.ComfyNode):
         structured_timeline_text_structure: str,
         index_offset: int,
     ) -> io.NodeOutput:
-        sampled = sample_video_frames_as_images(
-            video,
-            sampling_strategy,
-            maximum_frames,
-            include_zero_time,
-            minimum_spacing_seconds,
-            keyframe_stride,
-            timestamp_format,
-            timeline_style,
-            timeline_text_structure,
-            structured_timeline_text_structure,
-            index_offset,
-            focus_areas,
-            focus_one,
-            focus_two,
-            focus_three,
-        )
-        return io.NodeOutput(
-            sampled.image_batch,
-            sampled.timestamps_text,
-            sampled.timeline_text,
-            sampled.video_runtime,
-            sampled.structured_timeline_text,
-        )
+        sampled = sample_video_frames_as_images(video, sampling_strategy, maximum_frames, include_zero_time, minimum_spacing_seconds, keyframe_stride, timestamp_format, timeline_style, timeline_text_structure, structured_timeline_text_structure, index_offset, focus_areas, focus_one, focus_two, focus_three)
+        return io.NodeOutput(sampled.image_batch, sampled.timestamps_text, sampled.timeline_text, sampled.video_runtime, sampled.structured_timeline_text)
 
 
 class UC_ImagesToVideoTimeline(io.ComfyNode):
@@ -991,26 +832,19 @@ class UC_ImagesToVideoTimeline(io.ComfyNode):
             description="Gives ordered images timestamps for a video.",
             search_aliases=["image timeline", "images to video", "video timestamps", "image frames"],
             inputs=[
-                io.Float.Input(
-                    "duration", default=5.0, min=0.01, step=0.01,
-                    tooltip="Requested video duration in seconds. Rounds up to H3's supported length at 24 fps before placing image timestamps.",
-                ),
-                io.Int.Input(
-                    "focus_areas", default=0, min=0, max=3, step=1,
-                    tooltip="How many parts to split the video into. 0 spaces images evenly.",
-                ),
+                io.Float.Input("duration", default=5.0, min=0.01, step=0.01, tooltip="Requested video duration in seconds. Rounds up to H3's supported length at 24 fps before placing image timestamps."),
+                io.Int.Input("focus_areas", default=0, min=0, max=3, step=1, tooltip="How many parts to split the video into. 0 spaces images evenly."),
                 io.Float.Input("focus_one", default=0.50, min=0.00, max=1.00, step=0.01, tooltip="Where images group in the first part. 0 is early, 0.5 is balanced, 1 is late."),
                 io.Float.Input("focus_two", default=0.50, min=0.00, max=1.00, step=0.01, tooltip="Where images group in the second part. 0 is early, 0.5 is balanced, 1 is late."),
                 io.Float.Input("focus_three", default=0.50, min=0.00, max=1.00, step=0.01, tooltip="Where images group in the third part. 0 is early, 0.5 is balanced, 1 is late."),
                 io.Boolean.Input("last_image_is_final", default=False, tooltip="Turn on only when the last image is the final video frame."),
-                io.Boolean.Input(
-                    "resize_images", default=True,
-                    tooltip="Make all images the same size as the first image. Turn off to keep their original sizes. Image batch becomes black.",
-                ),
+                io.Boolean.Input("resize_images", default=True, tooltip="Make all images the same size as the first image. Turn off to keep their original sizes. Image batch becomes black."),
                 io.Combo.Input("timestamp_format", options=list(VIDEO_FRAME_TIMESTAMP_FORMATS), default="00.000s", tooltip="How timestamps look in text outputs."),
                 io.Combo.Input("timeline_style", options=list(VIDEO_FRAME_TIMELINE_STYLES), default="H3 alignment prefix", tooltip="Built-in timeline syntax, or custom to use the timeline text structure."),
                 io.String.Input("timeline_text_structure", multiline=True, dynamic_prompts=False, default=VIDEO_TIMELINE_TEXT_STRUCTURE, tooltip="One structure repeated for every image when timeline style is custom. Use <<time>> or <<timestamp>>, <<picture>>, and <<shot>>."),
-                io.String.Input("structured_timeline_text_structure", multiline=True, dynamic_prompts=False, default=VIDEO_STRUCTURED_TIMELINE_TEXT_STRUCTURE, tooltip="One whole-timeline structure. Use <<duration>>, <<segments>>, <<timestamps>>, and <<references>>. One <<shot>> … <<timestamp>> section repeats for every image."),
+                io.String.Input(
+                    "structured_timeline_text_structure", multiline=True, dynamic_prompts=False, default=VIDEO_STRUCTURED_TIMELINE_TEXT_STRUCTURE, tooltip="One whole-timeline structure. Use <<duration>>, <<segments>>, <<timestamps>>, and <<references>>. One <<shot>> … <<timestamp>> section repeats for every image."
+                ),
                 io.Int.Input("index_offset", default=0, min=0, step=1, tooltip="Skip this many Picture numbers before the first image."),
                 io.Autogrow.Input("image_inputs", template=image_template, tooltip="Add images in order. Each image in a batch gets its own timestamp."),
             ],
@@ -1024,15 +858,11 @@ class UC_ImagesToVideoTimeline(io.ComfyNode):
         )
 
     @classmethod
-    def execute(cls, duration: float, focus_areas: int, focus_one: float, focus_two: float, focus_three: float, last_image_is_final: bool, resize_images: bool, timestamp_format: str, timeline_style: str, timeline_text_structure: str, structured_timeline_text_structure: str, index_offset: int, image_inputs: io.Autogrow.Type) -> io.NodeOutput:
+    def execute(
+        cls, duration: float, focus_areas: int, focus_one: float, focus_two: float, focus_three: float, last_image_is_final: bool, resize_images: bool, timestamp_format: str, timeline_style: str, timeline_text_structure: str, structured_timeline_text_structure: str, index_offset: int, image_inputs: io.Autogrow.Type
+    ) -> io.NodeOutput:
         sampled = images_to_video_timeline(image_inputs, duration, focus_areas, focus_one, focus_two, focus_three, last_image_is_final, resize_images, timestamp_format, timeline_style, timeline_text_structure, structured_timeline_text_structure, index_offset)
-        return io.NodeOutput(
-            sampled.image_batch,
-            sampled.timestamps_text,
-            sampled.timeline_text,
-            sampled.video_runtime,
-            sampled.structured_timeline_text,
-        )
+        return io.NodeOutput(sampled.image_batch, sampled.timestamps_text, sampled.timeline_text, sampled.video_runtime, sampled.structured_timeline_text)
 
 
 class UC_VideoTimelineText(io.ComfyNode):
@@ -1052,7 +882,13 @@ class UC_VideoTimelineText(io.ComfyNode):
                 io.Float.Input("focus_three", default=0.50, min=0.00, max=1.00, step=0.01, tooltip="Where entries group in the third part. 0 is early, 0.5 is balanced, 1 is late."),
                 io.Combo.Input("timestamp_format", options=list(VIDEO_FRAME_TIMESTAMP_FORMATS), default="00.000s", tooltip="Formatting reused verbatim by every text output."),
                 io.String.Input("timeline_text_structure", multiline=True, dynamic_prompts=False, default=VIDEO_TEXT_TIMELINE_TEXT_STRUCTURE, tooltip="One structure repeated for every timeline entry. Use <<shot>> and <<time>> or <<timestamp>>."),
-                io.String.Input("structured_timeline_text_structure", multiline=True, dynamic_prompts=False, default=VIDEO_TEXT_STRUCTURED_TIMELINE_TEXT_STRUCTURE, tooltip="One whole-timeline structure. <<duration>> and <<segments>> are scalars; <<timestamps>> is comma-and-space-separated; one <<shot>> … <<timestamp>> section repeats comma-and-space-separated for every timeline entry."),
+                io.String.Input(
+                    "structured_timeline_text_structure",
+                    multiline=True,
+                    dynamic_prompts=False,
+                    default=VIDEO_TEXT_STRUCTURED_TIMELINE_TEXT_STRUCTURE,
+                    tooltip="One whole-timeline structure. <<duration>> and <<segments>> are scalars; <<timestamps>> is comma-and-space-separated; one <<shot>> … <<timestamp>> section repeats comma-and-space-separated for every timeline entry.",
+                ),
                 io.Video.Input("video", optional=True, tooltip="Optional video whose duration replaces the duration widget, then rounds up to the supported H3 generation length."),
             ],
             outputs=[
@@ -1083,13 +919,15 @@ class UC_ImageMatchPropertiesNode(io.ComfyNode):
                 io.Float.Input("color_weight", default=1.0, min=0.0, max=3.0, step=0.001, tooltip="Matches the original image's overall color cast and balance. Values above 1 push the result farther toward those colors. It does not copy colors by pixel position."),
                 io.Float.Input("lighting_weight", default=1.0, min=0.0, max=3.0, step=0.001, tooltip="Matches the original image's overall brightness. Values above 1 make the brightness correction stronger."),
                 io.Float.Input("texture_preservation", default=0.5, min=0.0, max=1.0, step=0.001, tooltip="Keeps fine detail from the generated image while correcting contrast. Increase it if textures become too harsh or too soft."),
-                io.Mask.Input("mask", optional=True, tooltip="Connect the outpaint mask when available. White generated areas are measured and corrected; black original areas stay unchanged. The correction feathers automatically inside the generated edge. Leave disconnected for automatic edge matching and whole-image correction."),
+                io.Mask.Input(
+                    "mask",
+                    optional=True,
+                    tooltip="Connect the outpaint mask when available. White generated areas are measured and corrected; black original areas stay unchanged. The correction feathers automatically inside the generated edge. Leave disconnected for automatic edge matching and whole-image correction.",
+                ),
                 io.Float.Input("saturation_weight", optional=True, default=1.0, min=0.0, max=3.0, step=0.001, tooltip="Matches how vivid or muted the original image is. Values above 1 strengthen the saturation correction; lower it if the result becomes too colorful."),
                 io.Float.Input("contrast_weight", optional=True, default=1.0, min=0.0, max=3.0, step=0.001, tooltip="Matches the difference between dark and bright areas in the original image. Values above 1 strengthen the contrast correction; lower it if shadows or highlights become too strong."),
             ],
-            outputs=[
-                io.Image.Output(display_name="image"),
-            ],
+            outputs=[io.Image.Output(display_name="image")],
         )
 
     @classmethod
@@ -1109,17 +947,7 @@ class UC_ImageMatchPropertiesNode(io.ComfyNode):
     ) -> io.NodeOutput:
         if mask is None and target_analysis_mask is not None:
             mask = target_analysis_mask
-        result = match_image_properties(
-            original_image,
-            generated_image,
-            overall_weight,
-            color_weight,
-            lighting_weight,
-            texture_preservation,
-            mask,
-            saturation_weight,
-            contrast_weight,
-        )
+        result = match_image_properties(original_image, generated_image, overall_weight, color_weight, lighting_weight, texture_preservation, mask, saturation_weight, contrast_weight)
         return io.NodeOutput(result)
 
 
@@ -1144,27 +972,8 @@ class UC_ImageColorRestore(io.ComfyNode):
         )
 
     @classmethod
-    def execute(
-        cls,
-        original_image: torch.Tensor,
-        generated_image: torch.Tensor,
-        overall_weight: float,
-        color_weight: float,
-        lighting_weight: float,
-        texture_preservation: float,
-        mask: torch.Tensor = None,
-    ) -> io.NodeOutput:
-        return io.NodeOutput(
-            restore_image_color_properties(
-                original_image,
-                generated_image,
-                overall_weight,
-                color_weight,
-                lighting_weight,
-                texture_preservation,
-                mask,
-            )
-        )
+    def execute(cls, original_image: torch.Tensor, generated_image: torch.Tensor, overall_weight: float, color_weight: float, lighting_weight: float, texture_preservation: float, mask: torch.Tensor = None) -> io.NodeOutput:
+        return io.NodeOutput(restore_image_color_properties(original_image, generated_image, overall_weight, color_weight, lighting_weight, texture_preservation, mask))
 
 
 class UC_OpticalFlowComposite(io.ComfyNode):
@@ -1187,56 +996,67 @@ class UC_OpticalFlowComposite(io.ComfyNode):
                 io.Image.Input("generated_image"),
                 io.Float.Input(
                     "delta_e_threshold",
-                    default=-1.0, min=-1.0, max=100.0, step=1.0,
-                    tooltip="How different a pixel's color must be to count as 'edited'. Higher values = only obvious edits are detected (smaller mask, more original preserved). Lower values = subtle changes are also captured (larger mask, more of the generated image used). Set to -1 for automatic tuning."
+                    default=-1.0,
+                    min=-1.0,
+                    max=100.0,
+                    step=1.0,
+                    tooltip="How different a pixel's color must be to count as 'edited'. Higher values = only obvious edits are detected (smaller mask, more original preserved). Lower values = subtle changes are also captured (larger mask, more of the generated image used). Set to -1 for automatic tuning.",
                 ),
                 io.Float.Input(
                     "grow_mask_pct",
-                    default=0.0, min=-3.0, max=3.0, step=0.1,
-                    tooltip="Expands or shrinks the detected edit region. Positive values grow the mask outward, capturing more of the surrounding area (useful if edges of the edit are being clipped). Negative values erode the mask inward, trimming the edges (useful if too much background is being pulled in)."
+                    default=0.0,
+                    min=-3.0,
+                    max=3.0,
+                    step=0.1,
+                    tooltip="Expands or shrinks the detected edit region. Positive values grow the mask outward, capturing more of the surrounding area (useful if edges of the edit are being clipped). Negative values erode the mask inward, trimming the edges (useful if too much background is being pulled in).",
                 ),
                 io.Float.Input(
                     "feather_pct",
-                    default=2.0, min=0.0, max=10.0, step=0.25,
-                    tooltip="How gradually the edit blends into the original at the mask boundary. Higher values create a wider, softer transition (smoother blending, but may wash out fine edges). Lower values create a sharper, more abrupt cutover (crisper edges, but seams may be more visible)."
+                    default=2.0,
+                    min=0.0,
+                    max=10.0,
+                    step=0.25,
+                    tooltip="How gradually the edit blends into the original at the mask boundary. Higher values create a wider, softer transition (smoother blending, but may wash out fine edges). Lower values create a sharper, more abrupt cutover (crisper edges, but seams may be more visible).",
                 ),
                 io.Combo.Input(
                     "flow_quality",
                     options=["medium", "fast", "ultrafast"],
                     default="medium",
-                    tooltip="Accuracy of the optical flow alignment between original and generated images. Higher quality = more precise change detection and alignment (slower). Lower quality = faster processing but may miss subtle shifts or produce noisier masks."
+                    tooltip="Accuracy of the optical flow alignment between original and generated images. Higher quality = more precise change detection and alignment (slower). Lower quality = faster processing but may miss subtle shifts or produce noisier masks.",
                 ),
                 io.Float.Input(
                     "occlusion_threshold",
-                    default=-1.0, min=-1.0, max=20.0, step=0.5,
-                    tooltip="Sensitivity to pixels that moved so much they can't be reliably matched between images. Higher values ignore more motion discrepancies (fewer false positives from camera jitter, but may miss real edits). Lower values flag more pixels as changed (catches more edits, but may over-detect in noisy areas). Set to -1 for automatic tuning."
+                    default=-1.0,
+                    min=-1.0,
+                    max=20.0,
+                    step=0.5,
+                    tooltip="Sensitivity to pixels that moved so much they can't be reliably matched between images. Higher values ignore more motion discrepancies (fewer false positives from camera jitter, but may miss real edits). Lower values flag more pixels as changed (catches more edits, but may over-detect in noisy areas). Set to -1 for automatic tuning.",
                 ),
                 io.Float.Input(
                     "close_radius_pct",
-                    default=0.5, min=0.0, max=5.0, step=0.1,
-                    tooltip="Fills small holes and gaps inside the detected edit region. Higher values close larger gaps (creates a more solid, continuous mask). Lower values leave small holes intact (preserves finer mask detail but may leave speckled artifacts inside the edit)."
+                    default=0.5,
+                    min=0.0,
+                    max=5.0,
+                    step=0.1,
+                    tooltip="Fills small holes and gaps inside the detected edit region. Higher values close larger gaps (creates a more solid, continuous mask). Lower values leave small holes intact (preserves finer mask detail but may leave speckled artifacts inside the edit).",
                 ),
                 io.Float.Input(
                     "min_region_pct",
-                    default=1.0, min=0.0, max=2.0, step=0.01,
-                    tooltip="Removes small isolated blobs from the mask that are likely false positives. Higher values filter out larger stray regions (cleaner mask, but may discard small intentional edits). Lower values keep smaller regions (preserves tiny edits, but may let through noise)."
+                    default=1.0,
+                    min=0.0,
+                    max=2.0,
+                    step=0.01,
+                    tooltip="Removes small isolated blobs from the mask that are likely false positives. Higher values filter out larger stray regions (cleaner mask, but may discard small intentional edits). Lower values keep smaller regions (preserves tiny edits, but may let through noise).",
                 ),
             ],
-            outputs=[
-                io.Image.Output(display_name="composited_image"),
-                io.Mask.Output(display_name="change_mask"),
-                io.String.Output(display_name="report"),
-            ]
+            outputs=[io.Image.Output(display_name="composited_image"), io.Mask.Output(display_name="change_mask"), io.String.Output(display_name="report")],
         )
 
     @classmethod
-    def execute(cls, original_image, generated_image,
-            delta_e_threshold=-1.0, grow_mask_pct=0.0, feather_pct=2.0,
-            flow_quality="medium", occlusion_threshold=-1.0,
-            close_radius_pct=0.5, min_region_pct=0.05):
+    def execute(cls, original_image, generated_image, delta_e_threshold=-1.0, grow_mask_pct=0.0, feather_pct=2.0, flow_quality="medium", occlusion_threshold=-1.0, close_radius_pct=0.5, min_region_pct=0.05):
 
         orig_np = original_image[0].cpu().float().numpy()
-        gen_np  = generated_image[0].cpu().float().numpy()
+        gen_np = generated_image[0].cpu().float().numpy()
 
         if orig_np.shape != gen_np.shape:
             H, W = gen_np.shape[:2]
@@ -1246,27 +1066,14 @@ class UC_OpticalFlowComposite(io.ComfyNode):
         diag = math_diag(H, W)
         total_area = H * W
 
-        grow_px    = round(grow_mask_pct * diag / 100.0)
+        grow_px = round(grow_mask_pct * diag / 100.0)
         feather_px = abs(feather_pct) * diag / 100.0
-        close_px   = pct_to_px(close_radius_pct, diag)
-        min_px     = max(0, round(min_region_pct * total_area / 100.0))
+        close_px = pct_to_px(close_radius_pct, diag)
+        min_px = max(0, round(min_region_pct * total_area / 100.0))
 
-        result, change_mask, stats = composite(
-            orig_np, gen_np,
-            delta_e_threshold   = delta_e_threshold,
-            flow_preset         = FLOW_PRESETS[flow_quality],
-            occlusion_threshold = occlusion_threshold,
-            grow_px             = grow_px,
-            close_radius        = close_px,
-            min_region_px       = min_px,
-            feather_px          = feather_px,
-        )
+        result, change_mask, stats = composite(orig_np, gen_np, delta_e_threshold=delta_e_threshold, flow_preset=FLOW_PRESETS[flow_quality], occlusion_threshold=occlusion_threshold, grow_px=grow_px, close_radius=close_px, min_region_px=min_px, feather_px=feather_px)
 
-        report_lines =[
-            "=== Klein Edit Composite v2.2 (Global Align) ===",
-            f"Resolution:       {stats['resolution']}  (diag {stats['diagonal_px']}px)",
-            f"",
-        ]
+        report_lines = ["=== Klein Edit Composite v2.2 (Global Align) ===", f"Resolution:       {stats['resolution']}  (diag {stats['diagonal_px']}px)", f""]
 
         if "auto_delta_e" in stats:
             report_lines.append(f"ΔE threshold:     AUTO → {stats['auto_delta_e']:.1f}")
@@ -1278,7 +1085,7 @@ class UC_OpticalFlowComposite(io.ComfyNode):
         else:
             report_lines.append(f"Occlusion thresh: {occlusion_threshold:.1f}")
 
-        report_lines +=[
+        report_lines += [
             f"Grow mask:        {grow_mask_pct:+.1f}% → {grow_px:+d}px",
             f"Feather:          {feather_pct:.1f}% → {feather_px:.0f}px",
             f"Close radius:     {close_radius_pct:.1f}% → {close_px}px",
@@ -1292,9 +1099,7 @@ class UC_OpticalFlowComposite(io.ComfyNode):
             f"Median ΔE:        {stats['median_de']:.2f}",
         ]
 
-        return io.NodeOutput(torch.from_numpy(result).unsqueeze(0),
-                torch.from_numpy(change_mask).unsqueeze(0),
-                "\n".join(report_lines))
+        return io.NodeOutput(torch.from_numpy(result).unsqueeze(0), torch.from_numpy(change_mask).unsqueeze(0), "\n".join(report_lines))
 
 
 class UC_ImageInwardEdgeFill(io.ComfyNode):
@@ -1307,42 +1112,15 @@ class UC_ImageInwardEdgeFill(io.ComfyNode):
             inputs=[
                 io.Image.Input("image"),
                 io.Mask.Input("mask"),
-                io.Int.Input(
-                    "inpaint_radius",
-                    default=3,
-                    min=1,
-                    max=100,
-                    step=1,
-                    tooltip="How far the algorithm looks for edge pixels. Higher values are slower but better for large holes."
-                ),
-                io.Int.Input(
-                    "edge_blend_blur",
-                    default=9,
-                    min=0,
-                    max=101,
-                    step=2,
-                    tooltip="Applies a Gaussian blur to the mask to smoothly blend the filled area with the original edges. 0 disables it."
-                ),
+                io.Int.Input("inpaint_radius", default=3, min=1, max=100, step=1, tooltip="How far the algorithm looks for edge pixels. Higher values are slower but better for large holes."),
+                io.Int.Input("edge_blend_blur", default=9, min=0, max=101, step=2, tooltip="Applies a Gaussian blur to the mask to smoothly blend the filled area with the original edges. 0 disables it."),
             ],
-            outputs=[
-                io.Image.Output(display_name="image"),
-            ],
+            outputs=[io.Image.Output(display_name="image")],
         )
 
     @classmethod
-    def execute(
-        cls,
-        image: torch.Tensor,
-        mask: torch.Tensor,
-        inpaint_radius: int,
-        edge_blend_blur: int,
-    ) -> io.NodeOutput:
-        result = fill_mask_from_edges(
-            image,
-            mask,
-            inpaint_radius,
-            edge_blend_blur,
-        )
+    def execute(cls, image: torch.Tensor, mask: torch.Tensor, inpaint_radius: int, edge_blend_blur: int) -> io.NodeOutput:
+        result = fill_mask_from_edges(image, mask, inpaint_radius, edge_blend_blur)
         return io.NodeOutput(result)
 
 
@@ -1356,70 +1134,18 @@ class UC_ImageIterativeStretchFill(io.ComfyNode):
             inputs=[
                 io.Image.Input("image"),
                 io.Mask.Input("mask"),
-                io.Combo.Input(
-                    "stretch_axis",
-                    default="auto",
-                    options=["auto", "horizontal", "vertical"],
-                    tooltip="'Auto' stretches across the narrowest dimension of the current mask."
-                ),
-                io.Int.Input(
-                    "sample_thickness",
-                    default=32,
-                    min=1,
-                    max=512,
-                    step=1,
-                    tooltip="How many pixels of unmasked image to grab from the edges to stretch inwards."
-                ),
-                io.Int.Input(
-                    "edge_blend_blur",
-                    default=9,
-                    min=0,
-                    max=101,
-                    step=2,
-                    tooltip="Softens the mask boundary to seamlessly blend the stretched fill."
-                ),
-                io.Int.Input(
-                    "iterations",
-                    default=5,
-                    min=1,
-                    max=50,
-                    step=1,
-                    tooltip="Number of times to repeat the stretch and fill process."
-                ),
-                io.Int.Input(
-                    "mask_decay_pixels",
-                    default=4,
-                    min=0,
-                    max=64,
-                    step=1,
-                    tooltip="Shrinks the mask by this many pixels each iteration, creating a telescoping fill effect."
-                ),
+                io.Combo.Input("stretch_axis", default="auto", options=["auto", "horizontal", "vertical"], tooltip="'Auto' stretches across the narrowest dimension of the current mask."),
+                io.Int.Input("sample_thickness", default=32, min=1, max=512, step=1, tooltip="How many pixels of unmasked image to grab from the edges to stretch inwards."),
+                io.Int.Input("edge_blend_blur", default=9, min=0, max=101, step=2, tooltip="Softens the mask boundary to seamlessly blend the stretched fill."),
+                io.Int.Input("iterations", default=5, min=1, max=50, step=1, tooltip="Number of times to repeat the stretch and fill process."),
+                io.Int.Input("mask_decay_pixels", default=4, min=0, max=64, step=1, tooltip="Shrinks the mask by this many pixels each iteration, creating a telescoping fill effect."),
             ],
-            outputs=[
-                io.Image.Output(display_name="image"),
-            ],
+            outputs=[io.Image.Output(display_name="image")],
         )
 
     @classmethod
-    def execute(
-        cls,
-        image: torch.Tensor,
-        mask: torch.Tensor,
-        stretch_axis: str,
-        sample_thickness: int,
-        edge_blend_blur: int,
-        iterations: int,
-        mask_decay_pixels: int,
-    ) -> io.NodeOutput:
-        result = iterative_directional_stretch_fill(
-            image,
-            mask,
-            stretch_axis,
-            sample_thickness,
-            edge_blend_blur,
-            iterations,
-            mask_decay_pixels,
-        )
+    def execute(cls, image: torch.Tensor, mask: torch.Tensor, stretch_axis: str, sample_thickness: int, edge_blend_blur: int, iterations: int, mask_decay_pixels: int) -> io.NodeOutput:
+        result = iterative_directional_stretch_fill(image, mask, stretch_axis, sample_thickness, edge_blend_blur, iterations, mask_decay_pixels)
         return io.NodeOutput(result)
 
 
@@ -1445,28 +1171,11 @@ class UC_TextOverlayNode(io.ComfyNode):
                 io.Int.Input("left", default=-1, min=-1, max=8192, tooltip="-1 for center horizontally or use right offset"),
                 io.Int.Input("right", default=-1, min=-1, max=8192, tooltip="-1 for center horizontally or use left offset"),
             ],
-            outputs=[
-                io.Image.Output(display_name="image"),
-            ],
+            outputs=[io.Image.Output(display_name="image")],
         )
 
     @classmethod
-    def execute(
-        cls,
-        image,
-        text: str,
-        font_size: int,
-        text_color: str,
-        bg_color: str,
-        draw_background: bool,
-        bg_padding: int,
-        bg_transparency: float,
-        use_percentage: bool,
-        top: int,
-        bottom: int,
-        left: int,
-        right: int,
-    ) -> io.NodeOutput:
+    def execute(cls, image, text: str, font_size: int, text_color: str, bg_color: str, draw_background: bool, bg_padding: int, bg_transparency: float, use_percentage: bool, top: int, bottom: int, left: int, right: int) -> io.NodeOutput:
 
         t_color = hex_to_rgb(text_color, (255, 255, 255))
 
@@ -1476,7 +1185,7 @@ class UC_TextOverlayNode(io.ComfyNode):
         # Ensure b_color is exactly 4 elements long for RGBA
         if len(b_color_base) == 3:
             b_color = (b_color_base[0], b_color_base[1], b_color_base[2], alpha)
-        else: # Handle case where hex_to_rgb returns a 4-element tuple or default
+        else:  # Handle case where hex_to_rgb returns a 4-element tuple or default
             b_color = (b_color_base[0], b_color_base[1], b_color_base[2], alpha)
 
         # Try to load a font, fallback to default
@@ -1496,7 +1205,7 @@ class UC_TextOverlayNode(io.ComfyNode):
         for i in range(batch_count):
             img_tensor = image[i] if batch_count > 1 else image[0]
             img_height, img_width = img_tensor.shape[:2]
-            overlay = Image.new('RGBA', (img_width, img_height), (0, 0, 0, 0))
+            overlay = Image.new("RGBA", (img_width, img_height), (0, 0, 0, 0))
             draw = ImageDraw.Draw(overlay)
 
             # Calculate text size using textbbox
@@ -1526,7 +1235,7 @@ class UC_TextOverlayNode(io.ComfyNode):
                 x_pos = (img_width - total_width) // 2
             elif l_resolved != -1:
                 x_pos = l_resolved
-            else: # r_resolved != -1
+            else:  # r_resolved != -1
                 x_pos = img_width - total_width - r_resolved
 
             # Determine Y position
@@ -1534,7 +1243,7 @@ class UC_TextOverlayNode(io.ComfyNode):
                 y_pos = (img_height - total_height) // 2
             elif t_resolved != -1:
                 y_pos = t_resolved
-            else: # b_resolved != -1
+            else:  # b_resolved != -1
                 y_pos = img_height - total_height - b_resolved
 
             # Draw background
@@ -1572,46 +1281,22 @@ class UC_ModifyMask(io.ComfyNode):
             display_name="Modify Mask",
             inputs=[
                 io.Mask.Input("mask"),
-                io.Int.Input(
-                    "expand", default=0, max=MAX_RESOLUTION, min=-MAX_RESOLUTION, step=1, tooltip="Pixels used to grow each mask; negative values shrink it."
-                ),
-                io.Float.Input(
-                    "incremental_expandrate", default=0.0, max=100.0, min=0.0, step=0.01, tooltip="Additional grow or shrink amount applied after each mask in the batch."
-                ),
+                io.Int.Input("expand", default=0, max=MAX_RESOLUTION, min=-MAX_RESOLUTION, step=1, tooltip="Pixels used to grow each mask; negative values shrink it."),
+                io.Float.Input("incremental_expandrate", default=0.0, max=100.0, min=0.0, step=0.01, tooltip="Additional grow or shrink amount applied after each mask in the batch."),
                 io.Boolean.Input("tapered_corners", default=True, tooltip="Uses a cross-shaped kernel for more tapered corners; disabled uses a square kernel."),
                 io.Boolean.Input("flip_input", default=False, tooltip="Inverts the input mask before all other processing."),
-                io.Float.Input(
-                    "blur_radius", default=0.0, max=100.0, min=0.0, step=0.01, tooltip="Gaussian blur radius applied after grow or shrink; zero disables blur."
-                ),
+                io.Float.Input("blur_radius", default=0.0, max=100.0, min=0.0, step=0.01, tooltip="Gaussian blur radius applied after grow or shrink; zero disables blur."),
                 io.Float.Input("lerp_alpha", default=1.0, max=1.0, min=0.0, step=0.01, tooltip="Blends each batch mask with the previous processed mask; 1 uses only the current mask."),
-                io.Float.Input(
-                    "decay_factor", default=1.0, max=1.0, min=0.0, step=0.01, tooltip="Adds a decayed previous batch mask before normalization; 1 preserves its full contribution."
-                ),
+                io.Float.Input("decay_factor", default=1.0, max=1.0, min=0.0, step=0.01, tooltip="Adds a decayed previous batch mask before normalization; 1 preserves its full contribution."),
                 io.Boolean.Input("fill_holes", default=False, optional=True, tooltip="Fills enclosed zero-valued holes after grow or shrink."),
                 io.Float.Input("lower_clamp", default=0.0, max=100.0, min=0.0, step=0.1, tooltip="Minimum output mask value as a percentage."),
                 io.Float.Input("upper_clamp", default=100.0, max=100.0, min=0.0, step=0.1, tooltip="Maximum output mask value as a percentage."),
             ],
-            outputs=[
-                io.Mask.Output(display_name="Mask"),
-                io.Mask.Output(display_name="Inverted Mask"),
-            ],
+            outputs=[io.Mask.Output(display_name="Mask"), io.Mask.Output(display_name="Inverted Mask")],
         )
 
     @classmethod
-    def execute(
-        self,
-        mask,
-        expand,
-        tapered_corners,
-        flip_input,
-        blur_radius,
-        incremental_expandrate,
-        lerp_alpha,
-        decay_factor,
-        fill_holes=False,
-        lower_clamp=0.0,
-        upper_clamp=100.0,
-    ):
+    def execute(self, mask, expand, tapered_corners, flip_input, blur_radius, incremental_expandrate, lerp_alpha, decay_factor, fill_holes=False, lower_clamp=0.0, upper_clamp=100.0):
 
         alpha = lerp_alpha
         decay = decay_factor
@@ -1626,31 +1311,19 @@ class UC_ModifyMask(io.ComfyNode):
         growmask = mask.reshape((-1, mask.shape[-2], mask.shape[-1]))
 
         # Prepare original mask for processing loop (match dimensions)
-        original_mask_batches = original_mask_input.reshape(
-            (-1, mask.shape[-2], mask.shape[-1])
-        )
+        original_mask_batches = original_mask_input.reshape((-1, mask.shape[-2], mask.shape[-1]))
 
         out = []
         previous_output = None
         current_expand = expand
         for m in tqdm(growmask, desc="Expanding/Contracting Mask"):
-            output = (
-                m.unsqueeze(0).unsqueeze(0).to(model_management.get_torch_device())
-            )  # Add batch and channel dims for kornia
+            output = m.unsqueeze(0).unsqueeze(0).to(model_management.get_torch_device())  # Add batch and channel dims for kornia
             if abs(round(current_expand)) > 0:
                 # Create kernel - kornia expects kernel on same device as input
                 if tapered_corners:
-                    kernel = torch.tensor(
-                        [[0, 1, 0], [1, 1, 1], [0, 1, 0]],
-                        dtype=torch.float32,
-                        device=output.device,
-                    )
+                    kernel = torch.tensor([[0, 1, 0], [1, 1, 1], [0, 1, 0]], dtype=torch.float32, device=output.device)
                 else:
-                    kernel = torch.tensor(
-                        [[1, 1, 1], [1, 1, 1], [1, 1, 1]],
-                        dtype=torch.float32,
-                        device=output.device,
-                    )
+                    kernel = torch.tensor([[1, 1, 1], [1, 1, 1], [1, 1, 1]], dtype=torch.float32, device=output.device)
 
                 for _ in range(abs(round(current_expand))):
                     if current_expand < 0:
@@ -1681,9 +1354,7 @@ class UC_ModifyMask(io.ComfyNode):
 
         if blur_radius != 0:
             for idx, tensor in enumerate(out):
-                blurred_tensor = gaussian_blur_nchw(
-                    tensor.unsqueeze(0).unsqueeze(0), float(blur_radius)
-                )[0, 0].unsqueeze(0)
+                blurred_tensor = gaussian_blur_nchw(tensor.unsqueeze(0).unsqueeze(0), float(blur_radius))[0, 0].unsqueeze(0)
                 if current_expand > 0:
                     original_slice = original_mask_batches[idx].unsqueeze(0).cpu()
                     blurred_tensor = torch.max(blurred_tensor, original_slice)
@@ -1717,19 +1388,8 @@ class UC_MaskToBoundingBox(io.ComfyNode):
             display_name="Mask to Bounding Box",
             category="utils/mask",
             description="Finds the smallest bounding box containing all nonzero mask pixels.",
-            inputs=[
-                io.Mask.Input("mask"),
-                io.Boolean.Input("invert", default=False),
-                io.Image.Input(
-                    "image",
-                    optional=True,
-                    tooltip="Optional image cropped to the detected bounding box.",
-                ),
-            ],
-            outputs=[
-                io.BoundingBox.Output("bounding_box", display_name="bounding box"),
-                io.Image.Output("image", display_name="cropped image"),
-            ],
+            inputs=[io.Mask.Input("mask"), io.Boolean.Input("invert", default=False), io.Image.Input("image", optional=True, tooltip="Optional image cropped to the detected bounding box.")],
+            outputs=[io.BoundingBox.Output("bounding_box", display_name="bounding box"), io.Image.Output("image", display_name="cropped image")],
         )
 
     @classmethod
@@ -1794,16 +1454,8 @@ def _blend_rgb(destination, source, mode):
     if mode == "color_burn":
         return torch.where(source <= 0.0, torch.zeros_like(source), 1.0 - (1.0 - destination) / source.clamp_min(1e-12)).clamp(0.0, 1.0)
     if mode == "soft_light":
-        curve = torch.where(
-            destination <= 0.25,
-            ((16.0 * destination - 12.0) * destination + 4.0) * destination,
-            torch.sqrt(destination),
-        )
-        return torch.where(
-            source <= 0.5,
-            destination - (1.0 - 2.0 * source) * destination * (1.0 - destination),
-            destination + (2.0 * source - 1.0) * (curve - destination),
-        )
+        curve = torch.where(destination <= 0.25, ((16.0 * destination - 12.0) * destination + 4.0) * destination, torch.sqrt(destination))
+        return torch.where(source <= 0.5, destination - (1.0 - 2.0 * source) * destination * (1.0 - destination), destination + (2.0 * source - 1.0) * (curve - destination))
     if mode == "hue":
         return _set_blend_luminosity(_set_blend_saturation(source, _blend_saturation(destination)), _blend_luminosity(destination))
     if mode == "color":
@@ -1821,48 +1473,16 @@ class UC_ImageBlendByMask(io.ComfyNode):
             inputs=[
                 io.Image.Input("destination", tooltip="Base image retained where the mask or blend strength is zero."),
                 io.Image.Input("source", tooltip="Image combined with the destination using the selected blend mode."),
-                io.Combo.Input(
-                    "mode",
-                    options=[
-                        "add",
-                        "color",
-                        "color_burn",
-                        "color_dodge",
-                        "darken",
-                        "difference",
-                        "exclusion",
-                        "hard_light",
-                        "hue",
-                        "lighten",
-                        "multiply",
-                        "overlay",
-                        "screen",
-                        "soft_light",
-                    ],
-                    default="add",
-                    tooltip="Color blend operation applied between the source and destination images.",
-                ),
-                io.Float.Input(
-                    "blend_percentage", default=1.0, max=1.0, min=0.0, step=0.01, tooltip="Overall blend strength multiplied by the optional mask."
-                ),
+                io.Combo.Input("mode", options=["add", "color", "color_burn", "color_dodge", "darken", "difference", "exclusion", "hard_light", "hue", "lighten", "multiply", "overlay", "screen", "soft_light"], default="add", tooltip="Color blend operation applied between the source and destination images."),
+                io.Float.Input("blend_percentage", default=1.0, max=1.0, min=0.0, step=0.01, tooltip="Overall blend strength multiplied by the optional mask."),
                 io.Boolean.Input("resize_source", default=False, tooltip="Resizes the source to destination dimensions with bicubic interpolation; otherwise dimensions must match."),
                 io.Mask.Input("mask", tooltip="Controls where the blend is applied; it is resized and singleton batches broadcast to the image batch."),
             ],
-            outputs=[
-                io.Image.Output(display_name="blended_image"),
-            ],
+            outputs=[io.Image.Output(display_name="blended_image")],
         )
 
     @classmethod
-    def execute(
-        self,
-        destination,
-        source,
-        mode="add",
-        blend_percentage=1.0,
-        resize_source=False,
-        mask=None,
-    ):
+    def execute(self, destination, source, mode="add", blend_percentage=1.0, resize_source=False, mask=None):
         destination, source = node_helpers.image_alpha_fix(destination, source)
         destination = destination[..., :3]
         source = source[..., :3].to(destination)
@@ -1887,6 +1507,7 @@ class UC_ImageBlendByMask(io.ComfyNode):
             weight = weight * mask.expand(batch_size, -1, -1).clamp(0.0, 1.0).unsqueeze(-1)
         return io.NodeOutput(destination * (1.0 - weight) + blended * weight)
 
+
 class UC_ImagePad(io.ComfyNode):
     @classmethod
     def define_schema(cls) -> io.Schema:
@@ -1900,23 +1521,25 @@ class UC_ImagePad(io.ComfyNode):
                 io.Int.Input("right", default=0, min=0, max=MAX_RESOLUTION, step=1, tooltip="Pixels added to the right when target dimensions are disconnected. When target dimensions are connected, weights horizontal padding direction; 0 centers unless other horizontal direction is set."),
                 io.Int.Input("top", default=0, min=0, max=MAX_RESOLUTION, step=1, tooltip="Pixels added above the image when target dimensions are disconnected. When target dimensions are connected, weights vertical padding direction; 0 centers unless other vertical direction is set."),
                 io.Int.Input("bottom", default=0, min=0, max=MAX_RESOLUTION, step=1, tooltip="Pixels added below the image when target dimensions are disconnected. When target dimensions are connected, weights vertical padding direction; 0 centers unless other vertical direction is set."),
-                io.Int.Input("extra_padding", default=0, min=0, max=MAX_RESOLUTION, step=1, tooltip="Additional padding on all sides when target dimensions are disconnected. When target dimensions are connected, adds extra padding in directions above 0 scaled relative to the maximum directional value, or expands existing target-padded axes if all directions are 0."),
+                io.Int.Input(
+                    "extra_padding",
+                    default=0,
+                    min=0,
+                    max=MAX_RESOLUTION,
+                    step=1,
+                    tooltip="Additional padding on all sides when target dimensions are disconnected. When target dimensions are connected, adds extra padding in directions above 0 scaled relative to the maximum directional value, or expands existing target-padded axes if all directions are 0.",
+                ),
                 io.Combo.Input(
-                    "pad_mode",
-                    default="edge",
-                    options=["edge", "edge_pixel", "color", "pillarbox_blur"],
-                    tooltip="edge: Extend the edge pixels. edge_pixel: Extend the edge pixels but keep the original edge pixel color. color: Fill with a solid color. pillarbox_blur: Fill with a blurred version of the image."
+                    "pad_mode", default="edge", options=["edge", "edge_pixel", "color", "pillarbox_blur"], tooltip="edge: Extend the edge pixels. edge_pixel: Extend the edge pixels but keep the original edge pixel color. color: Fill with a solid color. pillarbox_blur: Fill with a blurred version of the image."
                 ),
                 io.String.Input("color", multiline=False, default="0, 0, 0", tooltip="Color as RGB values in range 0-255 or 0.0-1.0, or color name or hex code"),
                 io.Mask.Input("mask", optional=True, tooltip="Optional source mask padded with value 1 outside the image; disconnected creates a mask for the added border."),
                 io.Int.Input("target_width", default=512, min=0, max=MAX_RESOLUTION, step=1, force_input=True, optional=True, tooltip="Optional final width. Connect both target dimensions to proportionally fit and center the image."),
                 io.Int.Input("target_height", default=512, min=0, max=MAX_RESOLUTION, step=1, force_input=True, optional=True, tooltip="Optional final height. Connect both target dimensions to proportionally fit and center the image."),
             ],
-            outputs=[
-                io.Image.Output(display_name="image"),
-                io.Mask.Output(display_name="mask"),
-            ],
+            outputs=[io.Image.Output(display_name="image"), io.Mask.Output(display_name="mask")],
         )
+
     # DESCRIPTION = "Pad the input image and optionally mask with the specified padding."
 
     @classmethod
@@ -1926,7 +1549,7 @@ class UC_ImagePad(io.ComfyNode):
         if mask is not None:
             BM, HM, WM = mask.shape
             if HM != H or WM != W:
-                mask = F.interpolate(mask.unsqueeze(1), size=(H, W), mode='nearest-exact').squeeze(1)
+                mask = F.interpolate(mask.unsqueeze(1), size=(H, W), mode="nearest-exact").squeeze(1)
 
         # Parse background color using helper function
         color_list = string_to_color(color)
@@ -1949,7 +1572,7 @@ class UC_ImagePad(io.ComfyNode):
 
             # Upscale/downscale the mask tensor if provided
             if mask is not None:
-                mask = F.interpolate(mask.unsqueeze(1), size=(H, W), mode='nearest-exact').squeeze(1)
+                mask = F.interpolate(mask.unsqueeze(1), size=(H, W), mode="nearest-exact").squeeze(1)
 
             base_slack_w = target_width - W
             base_slack_h = target_height - H
@@ -2041,62 +1664,57 @@ class UC_ImagePad(io.ComfyNode):
                 dim = 0.35
                 bg = torch.clamp(bg * dim, 0.0, 1.0)
                 out_image[b] = bg.squeeze(0).movedim(0, -1)
-            out_image[:, pad_top:pad_top+H, pad_left:pad_left+W, :] = image
+            out_image[:, pad_top : pad_top + H, pad_left : pad_left + W, :] = image
             # Mask handling for pillarbox_blur
             if mask is not None:
                 fg_mask = mask
                 out_masks = torch.ones((B, padded_height, padded_width), dtype=image.dtype, device=image.device)
-                out_masks[:, pad_top:pad_top+H, pad_left:pad_left+W] = fg_mask
+                out_masks[:, pad_top : pad_top + H, pad_left : pad_left + W] = fg_mask
             else:
                 out_masks = torch.ones((B, padded_height, padded_width), dtype=image.dtype, device=image.device)
-                out_masks[:, pad_top:pad_top+H, pad_left:pad_left+W] = 0.0
+                out_masks[:, pad_top : pad_top + H, pad_left : pad_left + W] = 0.0
             return (out_image, out_masks)
 
         # Standard pad logic (edge/color)
         out_image = torch.zeros((B, padded_height, padded_width, C), dtype=image.dtype, device=image.device)
         for b in range(B):
-                if pad_mode == "edge":
-                    # Pad with edge color (mean)
-                    top_edge = image[b, 0, :, :]
-                    bottom_edge = image[b, H-1, :, :]
-                    left_edge = image[b, :, 0, :]
-                    right_edge = image[b, :, W-1, :]
-                    out_image[b, :pad_top, :, :] = top_edge.mean(dim=0)
-                    out_image[b, pad_top+H:, :, :] = bottom_edge.mean(dim=0)
-                    out_image[b, :, :pad_left, :] = left_edge.mean(dim=0)
-                    out_image[b, :, pad_left+W:, :] = right_edge.mean(dim=0)
-                    out_image[b, pad_top:pad_top+H, pad_left:pad_left+W, :] = image[b]
-                elif pad_mode == "edge_pixel":
-                    # Pad with exact edge pixel values
-                    for y in range(pad_top):
-                        out_image[b, y, pad_left:pad_left+W, :] = image[b, 0, :, :]
-                    for y in range(pad_top+H, padded_height):
-                        out_image[b, y, pad_left:pad_left+W, :] = image[b, H-1, :, :]
-                    for x in range(pad_left):
-                        out_image[b, pad_top:pad_top+H, x, :] = image[b, :, 0, :]
-                    for x in range(pad_left+W, padded_width):
-                        out_image[b, pad_top:pad_top+H, x, :] = image[b, :, W-1, :]
-                    out_image[b, :pad_top, :pad_left, :] = image[b, 0, 0, :]
-                    out_image[b, :pad_top, pad_left+W:, :] = image[b, 0, W-1, :]
-                    out_image[b, pad_top+H:, :pad_left, :] = image[b, H-1, 0, :]
-                    out_image[b, pad_top+H:, pad_left+W:, :] = image[b, H-1, W-1, :]
-                    out_image[b, pad_top:pad_top+H, pad_left:pad_left+W, :] = image[b]
-                else:
-                    # Pad with specified background color
-                    out_image[b, :, :, :] = bg_color.unsqueeze(0).unsqueeze(0)
-                    out_image[b, pad_top:pad_top+H, pad_left:pad_left+W, :] = image[b]
+            if pad_mode == "edge":
+                # Pad with edge color (mean)
+                top_edge = image[b, 0, :, :]
+                bottom_edge = image[b, H - 1, :, :]
+                left_edge = image[b, :, 0, :]
+                right_edge = image[b, :, W - 1, :]
+                out_image[b, :pad_top, :, :] = top_edge.mean(dim=0)
+                out_image[b, pad_top + H :, :, :] = bottom_edge.mean(dim=0)
+                out_image[b, :, :pad_left, :] = left_edge.mean(dim=0)
+                out_image[b, :, pad_left + W :, :] = right_edge.mean(dim=0)
+                out_image[b, pad_top : pad_top + H, pad_left : pad_left + W, :] = image[b]
+            elif pad_mode == "edge_pixel":
+                # Pad with exact edge pixel values
+                for y in range(pad_top):
+                    out_image[b, y, pad_left : pad_left + W, :] = image[b, 0, :, :]
+                for y in range(pad_top + H, padded_height):
+                    out_image[b, y, pad_left : pad_left + W, :] = image[b, H - 1, :, :]
+                for x in range(pad_left):
+                    out_image[b, pad_top : pad_top + H, x, :] = image[b, :, 0, :]
+                for x in range(pad_left + W, padded_width):
+                    out_image[b, pad_top : pad_top + H, x, :] = image[b, :, W - 1, :]
+                out_image[b, :pad_top, :pad_left, :] = image[b, 0, 0, :]
+                out_image[b, :pad_top, pad_left + W :, :] = image[b, 0, W - 1, :]
+                out_image[b, pad_top + H :, :pad_left, :] = image[b, H - 1, 0, :]
+                out_image[b, pad_top + H :, pad_left + W :, :] = image[b, H - 1, W - 1, :]
+                out_image[b, pad_top : pad_top + H, pad_left : pad_left + W, :] = image[b]
+            else:
+                # Pad with specified background color
+                out_image[b, :, :, :] = bg_color.unsqueeze(0).unsqueeze(0)
+                out_image[b, pad_top : pad_top + H, pad_left : pad_left + W, :] = image[b]
 
         if mask is not None:
-            out_masks = torch.nn.functional.pad(
-                mask,
-                (pad_left, pad_right, pad_top, pad_bottom),
-                mode='constant',
-                value=1.0
-            )
+            out_masks = torch.nn.functional.pad(mask, (pad_left, pad_right, pad_top, pad_bottom), mode="constant", value=1.0)
         else:
             out_masks = torch.ones((B, padded_height, padded_width), dtype=image.dtype, device=image.device)
             for m in range(B):
-                out_masks[m, pad_top:pad_top+H, pad_left:pad_left+W] = 0.0
+                out_masks[m, pad_top : pad_top + H, pad_left : pad_left + W] = 0.0
 
         return io.NodeOutput(out_image, out_masks)
 
@@ -2108,12 +1726,7 @@ class UC_NoHaloLoHaloDownscale(io.ComfyNode):
             node_id="UC_NoHaloLoHaloDownscale",
             display_name="NoHalo / LoHalo Downscale",
             category="advanced/image",
-            inputs=[
-                io.Image.Input("image"),
-                io.Combo.Input("method", options=["lohalo", "nohalo"], default="lohalo"),
-                io.Float.Input("megapixels", default=1.0, min=0.01, max=16.0, step=0.0125),
-                io.Int.Input("multiple", default=16, min=4, max=128, step=4),
-            ],
+            inputs=[io.Image.Input("image"), io.Combo.Input("method", options=["lohalo", "nohalo"], default="lohalo"), io.Float.Input("megapixels", default=1.0, min=0.01, max=16.0, step=0.0125), io.Int.Input("multiple", default=16, min=4, max=128, step=4)],
             outputs=[io.Image.Output(display_name="image")],
         )
 
@@ -2129,217 +1742,39 @@ class UC_HighResolutionTileSplit(io.ComfyNode):
             node_id="UC_HighResolutionTileSplit",
             display_name="High Resolution Tile Split & VAE Encode",
             category="image/tiling",
-            description=(
-                "Splits one pre-upscaled image into overlapping tiles, then "
-                "VAE-encodes every tile sequentially for list-mapped sampling."
-            ),
+            description=("Splits one pre-upscaled image into overlapping tiles, then VAE-encodes every tile sequentially for list-mapped sampling."),
             inputs=[
                 io.Image.Input("image"),
                 io.Vae.Input("vae"),
-                io.Model.Input(
-                    "model",
-                    optional=True,
-                    tooltip=(
-                        "Optional diffusion model. Required only when a "
-                        "Differential Diffusion mode is enabled."
-                    ),
-                ),
-                io.Combo.Input(
-                    "tile_mode",
-                    options=["tile_size", "grid"],
-                    default="tile_size",
-                    tooltip=(
-                        "tile_size uses tile width and height. grid uses rows "
-                        "and columns. Controls for the other mode are ignored."
-                    ),
-                ),
-                io.Int.Input(
-                    "tile_width",
-                    default=1024,
-                    min=64,
-                    max=MAX_RESOLUTION,
-                    step=8,
-                    tooltip="Processed tile width in tile_size mode.",
-                ),
-                io.Int.Input(
-                    "tile_height",
-                    default=1024,
-                    min=64,
-                    max=MAX_RESOLUTION,
-                    step=8,
-                    tooltip="Processed tile height in tile_size mode.",
-                ),
-                io.Int.Input(
-                    "rows",
-                    default=2,
-                    min=1,
-                    max=256,
-                    step=1,
-                    tooltip="Number of tile rows in grid mode.",
-                ),
-                io.Int.Input(
-                    "columns",
-                    default=2,
-                    min=1,
-                    max=256,
-                    step=1,
-                    tooltip="Number of tile columns in grid mode.",
-                ),
-                io.Int.Input(
-                    "overlap",
-                    default=128,
-                    min=0,
-                    max=MAX_RESOLUTION // 2,
-                    step=8,
-                    tooltip=(
-                        "Actual shared pixels between neighboring tiles in "
-                        "both tiling modes."
-                    ),
-                ),
-                io.Combo.Input(
-                    "mask_profile",
-                    options=["cosine", "linear"],
-                    default="cosine",
-                    tooltip="Transition profile used for overlap denoising and reconstruction.",
-                ),
+                io.Model.Input("model", optional=True, tooltip=("Optional diffusion model. Required only when a Differential Diffusion mode is enabled.")),
+                io.Combo.Input("tile_mode", options=["tile_size", "grid"], default="tile_size", tooltip=("tile_size uses tile width and height. grid uses rows and columns. Controls for the other mode are ignored.")),
+                io.Int.Input("tile_width", default=1024, min=64, max=MAX_RESOLUTION, step=8, tooltip="Processed tile width in tile_size mode."),
+                io.Int.Input("tile_height", default=1024, min=64, max=MAX_RESOLUTION, step=8, tooltip="Processed tile height in tile_size mode."),
+                io.Int.Input("rows", default=2, min=1, max=256, step=1, tooltip="Number of tile rows in grid mode."),
+                io.Int.Input("columns", default=2, min=1, max=256, step=1, tooltip="Number of tile columns in grid mode."),
+                io.Int.Input("overlap", default=128, min=0, max=MAX_RESOLUTION // 2, step=8, tooltip=("Actual shared pixels between neighboring tiles in both tiling modes.")),
+                io.Combo.Input("mask_profile", options=["cosine", "linear"], default="cosine", tooltip="Transition profile used for overlap denoising and reconstruction."),
+                io.Float.Input("feather_width", default=1.0, min=0.0, max=1.0, step=0.01, tooltip="Fraction of each overlap occupied by the mask transition."),
+                io.Float.Input("mask_strength", default=1.0, min=0.0, max=1.0, step=0.01, tooltip=("Overlap edge protection. 0 leaves the mask flat; 1 reaches zero at protected internal tile edges.")),
+                io.Combo.Input("differential_diffusion_mode", options=["off", "core", "advanced"], default="off", tooltip=("off leaves the model unchanged. core applies ComfyUI Core Differential Diffusion. advanced uses the threshold multiplier control.")),
                 io.Float.Input(
-                    "feather_width",
-                    default=1.0,
-                    min=0.0,
-                    max=1.0,
-                    step=0.01,
-                    tooltip="Fraction of each overlap occupied by the mask transition.",
+                    "differential_diffusion_value", default=1.0, min=-10.0, max=10.0, step=0.001, tooltip=("Mode-dependent value. Core: strength from 0 to 1, blending its progressive binary mask with the soft mask. Advanced: nonzero threshold divisor from -10 to 10, matching KJNodes Differential Diffusion Advanced.")
                 ),
-                io.Float.Input(
-                    "mask_strength",
-                    default=1.0,
-                    min=0.0,
-                    max=1.0,
-                    step=0.01,
-                    tooltip=(
-                        "Overlap edge protection. 0 leaves the mask flat; "
-                        "1 reaches zero at protected internal tile edges."
-                    ),
-                ),
-                io.Combo.Input(
-                    "differential_diffusion_mode",
-                    options=["off", "core", "advanced"],
-                    default="off",
-                    tooltip=(
-                        "off leaves the model unchanged. core applies "
-                        "ComfyUI Core Differential Diffusion. advanced uses "
-                        "the threshold multiplier control."
-                    ),
-                ),
-                io.Float.Input(
-                    "differential_diffusion_value",
-                    default=1.0,
-                    min=-10.0,
-                    max=10.0,
-                    step=0.001,
-                    tooltip=(
-                        "Mode-dependent value. Core: strength from 0 to 1, "
-                        "blending its progressive binary mask with the soft "
-                        "mask. Advanced: nonzero threshold divisor from -10 "
-                        "to 10, matching KJNodes Differential Diffusion Advanced."
-                    ),
-                ),
-                io.Image.Input(
-                    "depth_map",
-                    optional=True,
-                    tooltip=(
-                        "Optional grayscale depth image used to preserve "
-                        "structure across solid and feathered denoise-mask "
-                        "regions. It is converted to luminance and resized to "
-                        "the source image."
-                    ),
-                ),
-                io.Float.Input(
-                    "depth_influence",
-                    default=1.0,
-                    min=-1.0,
-                    max=1.0,
-                    step=0.01,
-                    tooltip=(
-                        "Signed depth-mask influence. Positive values use the "
-                        "map as supplied, negative values use its inverse, and "
-                        "the magnitude controls the effect. 0 disables depth "
-                        "modulation."
-                    ),
-                ),
+                io.Image.Input("depth_map", optional=True, tooltip=("Optional grayscale depth image used to preserve structure across solid and feathered denoise-mask regions. It is converted to luminance and resized to the source image.")),
+                io.Float.Input("depth_influence", default=1.0, min=-1.0, max=1.0, step=0.01, tooltip=("Signed depth-mask influence. Positive values use the map as supplied, negative values use its inverse, and the magnitude controls the effect. 0 disables depth modulation.")),
             ],
             outputs=[
-                io.Image.Output(
-                    "tile_images",
-                    display_name="tile images",
-                    is_output_list=True,
-                    tooltip=(
-                        "The exact padded image tensors sent to VAE encoding, "
-                        "for spatially matched list-mapped visual conditioning."
-                    ),
-                ),
-                io.Latent.Output(
-                    "tile_latents",
-                    display_name="tile latents",
-                    is_output_list=True,
-                    tooltip="Matching VAE latents with Core-compatible noise masks.",
-                ),
-                HighResolutionTileLayout.Output(
-                    "tile_layout",
-                    display_name="tile layout",
-                    tooltip="Coordinate and overlap metadata for the tile accumulator.",
-                ),
-                io.Model.Output(
-                    "model",
-                    display_name="model",
-                    tooltip=(
-                        "Differential Diffusion model for the sampler guider, "
-                        "or the unchanged connected model when mode is off."
-                    ),
-                ),
+                io.Image.Output("tile_images", display_name="tile images", is_output_list=True, tooltip=("The exact padded image tensors sent to VAE encoding, for spatially matched list-mapped visual conditioning.")),
+                io.Latent.Output("tile_latents", display_name="tile latents", is_output_list=True, tooltip="Matching VAE latents with Core-compatible noise masks."),
+                HighResolutionTileLayout.Output("tile_layout", display_name="tile layout", tooltip="Coordinate and overlap metadata for the tile accumulator."),
+                io.Model.Output("model", display_name="model", tooltip=("Differential Diffusion model for the sampler guider, or the unchanged connected model when mode is off.")),
             ],
         )
 
     @classmethod
-    def execute(
-        cls,
-        image,
-        vae,
-        tile_mode,
-        tile_width,
-        tile_height,
-        rows,
-        columns,
-        overlap,
-        mask_profile,
-        feather_width,
-        mask_strength,
-        model=None,
-        differential_diffusion_mode="off",
-        differential_diffusion_value=1.0,
-        depth_map=None,
-        depth_influence=1.0,
-    ) -> io.NodeOutput:
-        image_tiles, latent_tiles, layout = split_and_encode_tiles(
-            image,
-            vae,
-            tile_mode,
-            tile_width,
-            tile_height,
-            rows,
-            columns,
-            overlap,
-            mask_profile,
-            feather_width,
-            mask_strength,
-            depth_map,
-            depth_influence,
-        )
-        output_model = apply_tile_differential_diffusion(
-            model,
-            differential_diffusion_mode,
-            differential_diffusion_value,
-        )
+    def execute(cls, image, vae, tile_mode, tile_width, tile_height, rows, columns, overlap, mask_profile, feather_width, mask_strength, model=None, differential_diffusion_mode="off", differential_diffusion_value=1.0, depth_map=None, depth_influence=1.0) -> io.NodeOutput:
+        image_tiles, latent_tiles, layout = split_and_encode_tiles(image, vae, tile_mode, tile_width, tile_height, rows, columns, overlap, mask_profile, feather_width, mask_strength, depth_map, depth_influence)
+        output_model = apply_tile_differential_diffusion(model, differential_diffusion_mode, differential_diffusion_value)
         return io.NodeOutput(image_tiles, latent_tiles, layout, output_model)
 
 
@@ -2350,21 +1785,9 @@ class UC_HighResolutionTileAccumulator(io.ComfyNode):
             node_id="UC_HighResolutionTileAccumulator",
             display_name="High Resolution Tile Accumulator",
             category="image/tiling",
-            description=(
-                "Collects a completed decoded tile list and reconstructs the "
-                "original canvas with normalized overlap blending."
-            ),
+            description=("Collects a completed decoded tile list and reconstructs the original canvas with normalized overlap blending."),
             is_input_list=True,
-            inputs=[
-                io.Image.Input(
-                    "images",
-                    tooltip="Decoded image list produced by the mapped sampler path.",
-                ),
-                HighResolutionTileLayout.Input(
-                    "tile_layout",
-                    tooltip="Layout from High Resolution Tile Split & VAE Encode.",
-                ),
-            ],
+            inputs=[io.Image.Input("images", tooltip="Decoded image list produced by the mapped sampler path."), HighResolutionTileLayout.Input("tile_layout", tooltip="Layout from High Resolution Tile Split & VAE Encode.")],
             outputs=[io.Image.Output("image", display_name="image")],
         )
 
@@ -2381,12 +1804,8 @@ class UC_ListToImageBatch(io.ComfyNode):
             display_name="List to Image Batch (High Performance)",
             category="utils",
             is_input_list=True,  # Tells ComfyUI to pass the list itself instead of auto-iterating!
-            inputs=[
-                io.Image.Input("images"),
-            ],
-            outputs=[
-                io.Image.Output(display_name="images"),
-            ]
+            inputs=[io.Image.Input("images")],
+            outputs=[io.Image.Output(display_name="images")],
         )
 
     @classmethod
@@ -2419,7 +1838,7 @@ class UC_ListToImageBatch(io.ComfyNode):
         for image in valid_images:
             if image.shape[-1] < max_channels:
                 pad_size = max_channels - image.shape[-1]
-                padded = torch.nn.functional.pad(image, (0, pad_size), mode='constant', value=1.0)
+                padded = torch.nn.functional.pad(image, (0, pad_size), mode="constant", value=1.0)
                 padded_images.append(padded)
             else:
                 padded_images.append(image)
@@ -2444,21 +1863,11 @@ class UC_ListToImageBatch(io.ComfyNode):
 class UC_ImageBatchToList(io.ComfyNode):
     @classmethod
     def define_schema(cls) -> io.Schema:
-        return io.Schema(
-            node_id="UC_ImageBatchToList",
-            display_name="Image Batch to List",
-            category="utils",
-            inputs=[
-                io.Image.Input("images"),
-            ],
-            outputs=[
-                io.Image.Output(display_name="images", is_output_list=True, tooltip="Splits the input image batch into a list of individual images."),
-            ]
-        )
+        return io.Schema(node_id="UC_ImageBatchToList", display_name="Image Batch to List", category="utils", inputs=[io.Image.Input("images")], outputs=[io.Image.Output(display_name="images", is_output_list=True, tooltip="Splits the input image batch into a list of individual images.")])
 
     @classmethod
     def execute(cls, images):
-        return ([images[i].unsqueeze(0) for i in range(images.shape[0])], )
+        return ([images[i].unsqueeze(0) for i in range(images.shape[0])],)
 
 
 class UC_ImageBatchToBatchList(io.ComfyNode):
@@ -2469,18 +1878,13 @@ class UC_ImageBatchToBatchList(io.ComfyNode):
             display_name="Image Batch to Batch List",
             category="utils",
             description="Splits an image batch into an ordered list of smaller image batches of a specified batch size.",
-            inputs=[
-                io.Image.Input("images", tooltip="Input image batch to split into smaller batches."),
-                io.Int.Input("batch_size", default=8, min=1, max=4096, step=1, tooltip="Maximum number of images per batch in the output list."),
-            ],
-            outputs=[
-                io.Image.Output(display_name="images", is_output_list=True, tooltip="Ordered list of smaller image batches."),
-            ],
+            inputs=[io.Image.Input("images", tooltip="Input image batch to split into smaller batches."), io.Int.Input("batch_size", default=8, min=1, max=4096, step=1, tooltip="Maximum number of images per batch in the output list.")],
+            outputs=[io.Image.Output(display_name="images", is_output_list=True, tooltip="Ordered list of smaller image batches.")],
         )
 
     @classmethod
     def execute(cls, images, batch_size: int = 8):
-        return (split_image_batch_into_batches(images, batch_size), )
+        return (split_image_batch_into_batches(images, batch_size),)
 
 
 class UC_StitchImageGrid(io.ComfyNode):
@@ -2493,64 +1897,16 @@ class UC_StitchImageGrid(io.ComfyNode):
             description="Stitches an image batch or list of images into a grid, row-by-row then vertically, using configurable spacing.",
             inputs=[
                 io.Image.Input("images", tooltip="Image batch or list of images to stitch into a grid."),
-                io.Int.Input(
-                    "max_images_per_row",
-                    default=4,
-                    min=1,
-                    max=128,
-                    step=1,
-                    tooltip="Maximum number of images per row.",
-                ),
-                io.Int.Input(
-                    "max_rows",
-                    default=0,
-                    min=0,
-                    max=128,
-                    step=1,
-                    tooltip="Maximum number of rows. Set to 0 for unlimited rows.",
-                ),
-                io.Boolean.Input(
-                    "match_image_size",
-                    default=True,
-                    tooltip="Match image sizes during stitching.",
-                ),
-                io.Int.Input(
-                    "spacing_width",
-                    default=0,
-                    min=0,
-                    max=1024,
-                    step=2,
-                    tooltip="Width of spacing between images in pixels.",
-                ),
-                io.Combo.Input(
-                    "spacing_color",
-                    options=["white", "black", "red", "green", "blue"],
-                    default="white",
-                    tooltip="Color of spacing between images.",
-                ),
+                io.Int.Input("max_images_per_row", default=4, min=1, max=128, step=1, tooltip="Maximum number of images per row."),
+                io.Int.Input("max_rows", default=0, min=0, max=128, step=1, tooltip="Maximum number of rows. Set to 0 for unlimited rows."),
+                io.Boolean.Input("match_image_size", default=True, tooltip="Match image sizes during stitching."),
+                io.Int.Input("spacing_width", default=0, min=0, max=1024, step=2, tooltip="Width of spacing between images in pixels."),
+                io.Combo.Input("spacing_color", options=["white", "black", "red", "green", "blue"], default="white", tooltip="Color of spacing between images."),
             ],
-            outputs=[
-                io.Image.Output("image", display_name="IMAGE", tooltip="Stitched grid image."),
-            ],
+            outputs=[io.Image.Output("image", display_name="IMAGE", tooltip="Stitched grid image.")],
         )
 
     @classmethod
-    def execute(
-        cls,
-        images,
-        max_images_per_row: int = 4,
-        max_rows: int = 0,
-        match_image_size: bool = True,
-        spacing_width: int = 0,
-        spacing_color: str = "white",
-    ) -> io.NodeOutput:
-        result = stitch_image_grid(
-            images=images,
-            max_images_per_row=max_images_per_row,
-            max_rows=max_rows,
-            match_image_size=match_image_size,
-            spacing_width=spacing_width,
-            spacing_color=spacing_color,
-        )
+    def execute(cls, images, max_images_per_row: int = 4, max_rows: int = 0, match_image_size: bool = True, spacing_width: int = 0, spacing_color: str = "white") -> io.NodeOutput:
+        result = stitch_image_grid(images=images, max_images_per_row=max_images_per_row, max_rows=max_rows, match_image_size=match_image_size, spacing_width=spacing_width, spacing_color=spacing_color)
         return io.NodeOutput(result)
-

@@ -10,6 +10,7 @@ def escape_prompt_parentheses(text, enabled=False):
     """Backslash-escape unescaped parentheses for downstream prompt-weight parsers."""
     return re.sub(r"(?<!\\)([()])", r"\\\1", text) if enabled else text
 
+
 class UC_SystemMessagePresets(io.ComfyNode):
     @classmethod
     def get_presets(cls):
@@ -36,17 +37,10 @@ class UC_SystemMessagePresets(io.ComfyNode):
             category="advanced/text",
             display_name="System Message Presets",
             inputs=[
-                io.Combo.Input(
-                    "preset",
-                    display_name="system_styles_preset",
-                    options=sorted(list(presets.keys())),
-                    default="F2_SYSTEM_MESSAGE" if "F2_SYSTEM_MESSAGE" in presets else sorted(list(presets.keys()))[0],
-                ),
+                io.Combo.Input("preset", display_name="system_styles_preset", options=sorted(list(presets.keys())), default="F2_SYSTEM_MESSAGE" if "F2_SYSTEM_MESSAGE" in presets else sorted(list(presets.keys()))[0]),
                 io.Boolean.Input("escape_parentheses", default=False, tooltip="Prevents errors from parentheses left in the prompt."),
             ],
-            outputs=[
-                io.String.Output(display_name="system_prompt"),
-            ],
+            outputs=[io.String.Output(display_name="system_prompt")],
         )
 
     @classmethod
@@ -74,18 +68,8 @@ class UC_InstructPromptPresets(io.ComfyNode):
             node_id="UC_InstructPromptPresets",
             category="advanced/text",
             display_name="Instruct Prompt Presets",
-            inputs=[
-                io.Combo.Input(
-                    "preset",
-                    display_name="instruct_styles_preset",
-                    options=sorted(list(presets.keys())),
-                    default=sorted(list(presets.keys()))[0] if presets else "",
-                ),
-                io.Boolean.Input("escape_parentheses", default=False, tooltip="Prevents errors from parentheses left in the prompt."),
-            ],
-            outputs=[
-                io.String.Output(display_name="instruct_prompt"),
-            ],
+            inputs=[io.Combo.Input("preset", display_name="instruct_styles_preset", options=sorted(list(presets.keys())), default=sorted(list(presets.keys()))[0] if presets else ""), io.Boolean.Input("escape_parentheses", default=False, tooltip="Prevents errors from parentheses left in the prompt.")],
+            outputs=[io.String.Output(display_name="instruct_prompt")],
         )
 
     @classmethod
@@ -113,18 +97,8 @@ class UC_BonusPromptPresets(io.ComfyNode):
             node_id="UC_BonusPromptPresets",
             category="advanced/text",
             display_name="Bonus Prompt Presets",
-            inputs=[
-                io.Combo.Input(
-                    "preset",
-                    display_name="bonus_styles_preset",
-                    options=sorted(list(presets.keys())),
-                    default=sorted(list(presets.keys()))[0] if presets else "",
-                ),
-                io.Boolean.Input("escape_parentheses", default=False, tooltip="Prevents errors from parentheses left in the prompt."),
-            ],
-            outputs=[
-                io.String.Output(display_name="bonus_prompt"),
-            ],
+            inputs=[io.Combo.Input("preset", display_name="bonus_styles_preset", options=sorted(list(presets.keys())), default=sorted(list(presets.keys()))[0] if presets else ""), io.Boolean.Input("escape_parentheses", default=False, tooltip="Prevents errors from parentheses left in the prompt.")],
+            outputs=[io.String.Output(display_name="bonus_prompt")],
         )
 
     @classmethod
@@ -152,18 +126,8 @@ class UC_LegacyPromptPresets(io.ComfyNode):
             node_id="UC_LegacyPromptPresets",
             category="advanced/text",
             display_name="Legacy Prompt Presets",
-            inputs=[
-                io.Combo.Input(
-                    "preset",
-                    display_name="legacy_prompt_preset",
-                    options=sorted(list(presets.keys())),
-                    default=sorted(list(presets.keys()))[0] if presets else "",
-                ),
-                io.Boolean.Input("escape_parentheses", default=False, tooltip="Prevents errors from parentheses left in the prompt."),
-            ],
-            outputs=[
-                io.String.Output(display_name="legacy_prompt"),
-            ],
+            inputs=[io.Combo.Input("preset", display_name="legacy_prompt_preset", options=sorted(list(presets.keys())), default=sorted(list(presets.keys()))[0] if presets else ""), io.Boolean.Input("escape_parentheses", default=False, tooltip="Prevents errors from parentheses left in the prompt.")],
+            outputs=[io.String.Output(display_name="legacy_prompt")],
         )
 
     @classmethod
@@ -199,17 +163,10 @@ class UC_SystemMessageVideoPresets(io.ComfyNode):
             category="advanced/text",
             display_name="System Message Video Presets",
             inputs=[
-                io.Combo.Input(
-                    "preset",
-                    display_name="system_video_styles_preset",
-                    options=sorted(list(presets.keys())),
-                    default="F2_SYSTEM_MESSAGE" if "F2_SYSTEM_MESSAGE" in presets else sorted(list(presets.keys()))[0],
-                ),
+                io.Combo.Input("preset", display_name="system_video_styles_preset", options=sorted(list(presets.keys())), default="F2_SYSTEM_MESSAGE" if "F2_SYSTEM_MESSAGE" in presets else sorted(list(presets.keys()))[0]),
                 io.Boolean.Input("escape_parentheses", default=False, tooltip="Prevents errors from parentheses left in the prompt."),
             ],
-            outputs=[
-                io.String.Output(display_name="system_prompt"),
-            ],
+            outputs=[io.String.Output(display_name="system_prompt")],
         )
 
     @classmethod
@@ -237,18 +194,8 @@ class UC_InstructPromptVideoPresets(io.ComfyNode):
             node_id="UC_InstructPromptVideoPresets",
             category="advanced/text",
             display_name="Instruct Prompt Video Presets",
-            inputs=[
-                io.Combo.Input(
-                    "preset",
-                    display_name="instruct_video_styles_preset",
-                    options=sorted(list(presets.keys())),
-                    default=sorted(list(presets.keys()))[0] if presets else "",
-                ),
-                io.Boolean.Input("escape_parentheses", default=False, tooltip="Prevents errors from parentheses left in the prompt."),
-            ],
-            outputs=[
-                io.String.Output(display_name="instruct_prompt"),
-            ],
+            inputs=[io.Combo.Input("preset", display_name="instruct_video_styles_preset", options=sorted(list(presets.keys())), default=sorted(list(presets.keys()))[0] if presets else ""), io.Boolean.Input("escape_parentheses", default=False, tooltip="Prevents errors from parentheses left in the prompt.")],
+            outputs=[io.String.Output(display_name="instruct_prompt")],
         )
 
     @classmethod
@@ -276,18 +223,8 @@ class UC_BonusPromptVideoPresets(io.ComfyNode):
             node_id="UC_BonusPromptVideoPresets",
             category="advanced/text",
             display_name="Bonus Prompt Video Presets",
-            inputs=[
-                io.Combo.Input(
-                    "preset",
-                    display_name="bonus_video_styles_preset",
-                    options=sorted(list(presets.keys())),
-                    default=sorted(list(presets.keys()))[0] if presets else "",
-                ),
-                io.Boolean.Input("escape_parentheses", default=False, tooltip="Prevents errors from parentheses left in the prompt."),
-            ],
-            outputs=[
-                io.String.Output(display_name="bonus_prompt"),
-            ],
+            inputs=[io.Combo.Input("preset", display_name="bonus_video_styles_preset", options=sorted(list(presets.keys())), default=sorted(list(presets.keys()))[0] if presets else ""), io.Boolean.Input("escape_parentheses", default=False, tooltip="Prevents errors from parentheses left in the prompt.")],
+            outputs=[io.String.Output(display_name="bonus_prompt")],
         )
 
     @classmethod
@@ -315,18 +252,8 @@ class UC_EditTargetPresets(io.ComfyNode):
             node_id="UC_EditTargetPresets",
             category="advanced/text",
             display_name="Edit Target Presets",
-            inputs=[
-                io.Combo.Input(
-                    "preset",
-                    display_name="edit_target_preset",
-                    options=sorted(list(presets.keys())),
-                    default=sorted(list(presets.keys()))[0] if presets else "",
-                ),
-                io.Boolean.Input("escape_parentheses", default=False, tooltip="Prevents errors from parentheses left in the prompt."),
-            ],
-            outputs=[
-                io.String.Output(display_name="edit_target_prompt"),
-            ],
+            inputs=[io.Combo.Input("preset", display_name="edit_target_preset", options=sorted(list(presets.keys())), default=sorted(list(presets.keys()))[0] if presets else ""), io.Boolean.Input("escape_parentheses", default=False, tooltip="Prevents errors from parentheses left in the prompt.")],
+            outputs=[io.String.Output(display_name="edit_target_prompt")],
         )
 
     @classmethod
@@ -354,18 +281,8 @@ class UC_EditOpPresets(io.ComfyNode):
             node_id="UC_EditOpPresets",
             category="advanced/text",
             display_name="Edit Operation Presets",
-            inputs=[
-                io.Combo.Input(
-                    "preset",
-                    display_name="edit_op_preset",
-                    options=sorted(list(presets.keys())),
-                    default=sorted(list(presets.keys()))[0] if presets else "",
-                ),
-                io.Boolean.Input("escape_parentheses", default=False, tooltip="Prevents errors from parentheses left in the prompt."),
-            ],
-            outputs=[
-                io.String.Output(display_name="edit_op_prompt"),
-            ],
+            inputs=[io.Combo.Input("preset", display_name="edit_op_preset", options=sorted(list(presets.keys())), default=sorted(list(presets.keys()))[0] if presets else ""), io.Boolean.Input("escape_parentheses", default=False, tooltip="Prevents errors from parentheses left in the prompt.")],
+            outputs=[io.String.Output(display_name="edit_op_prompt")],
         )
 
     @classmethod
@@ -393,18 +310,8 @@ class UC_CameraShotPresets(io.ComfyNode):
             node_id="UC_CameraShotPresets",
             category="advanced/text",
             display_name="Camera Shot Presets",
-            inputs=[
-                io.Combo.Input(
-                    "preset",
-                    display_name="camera_shot_preset",
-                    options=sorted(list(presets.keys())),
-                    default=sorted(list(presets.keys()))[0] if presets else "",
-                ),
-                io.Boolean.Input("escape_parentheses", default=False, tooltip="Prevents errors from parentheses left in the prompt."),
-            ],
-            outputs=[
-                io.String.Output(display_name="camera_shot_prompt"),
-            ],
+            inputs=[io.Combo.Input("preset", display_name="camera_shot_preset", options=sorted(list(presets.keys())), default=sorted(list(presets.keys()))[0] if presets else ""), io.Boolean.Input("escape_parentheses", default=False, tooltip="Prevents errors from parentheses left in the prompt.")],
+            outputs=[io.String.Output(display_name="camera_shot_prompt")],
         )
 
     @classmethod
@@ -412,6 +319,7 @@ class UC_CameraShotPresets(io.ComfyNode):
         presets_dict = cls.get_presets()
         camera_shot_prompt = presets_dict.get(preset, "")
         return io.NodeOutput(escape_prompt_parentheses(camera_shot_prompt, escape_parentheses))
+
 
 class UC_UnifiedPresets(io.ComfyNode):
     """
@@ -440,23 +348,8 @@ class UC_UnifiedPresets(io.ComfyNode):
             node_id="UC_UnifiedPresets",
             display_name="Unified Presets (Primitive)",
             category="advanced/primitives",
-            inputs=[
-                io.Combo.Input(
-                    "preset",
-                    display_name="styles_preset",
-                    options=shared_presets,
-                    default=default_preset,
-                ),
-                io.Boolean.Input(
-                    "escape_parentheses",
-                    default=False,
-                    tooltip="Prevents errors from parentheses left in the prompt.",
-                ),
-            ],
-            outputs=[
-                io.AnyType.Output(display_name="preset"),
-                io.Boolean.Output(display_name="escape_parentheses"),
-            ],
+            inputs=[io.Combo.Input("preset", display_name="styles_preset", options=shared_presets, default=default_preset), io.Boolean.Input("escape_parentheses", default=False, tooltip="Prevents errors from parentheses left in the prompt.")],
+            outputs=[io.AnyType.Output(display_name="preset"), io.Boolean.Output(display_name="escape_parentheses")],
         )
 
     @classmethod

@@ -15,7 +15,7 @@ import node_helpers
 from comfy_api.latest import ComfyExtension, io
 from ..helpers.helper_functions import get_token_count, get_token_count_scaled, resize_nchw
 from ..helpers.minimax_h3_cache_helpers import H3_CACHE_MODES
-from ..helpers.encoder_helpers import(
+from ..helpers.encoder_helpers import (
     encode_embedding_scaled_bias,
     is_image_token,
     evaluate_formula,
@@ -74,6 +74,7 @@ from ..helpers.encoder_helpers import(
 from ..helpers.minimax_h3_reference_media_helpers import execute_advanced_minimax_h3_reference_media_image_to_video
 from ..helpers.image_helpers import VIDEO_FRAME_TIMESTAMP_FORMATS
 
+
 def apply_parallel_ref_latents(clip, conditioning, ref_latents, ref_latent_mode):
     if not ref_latents:
         return conditioning
@@ -82,11 +83,7 @@ def apply_parallel_ref_latents(clip, conditioning, ref_latents, ref_latent_mode)
         return node_helpers.conditioning_set_values(conditioning, {"reference_latents": list(ref_latents)}, append=True)
 
     stage = getattr(clip, "cond_stage_model", None)
-    stage_names = " ".join(
-        type(value).__name__
-        for value in (stage, getattr(stage, "clip_model", None), getattr(stage, "clip", None))
-        if value is not None
-    ).lower()
+    stage_names = " ".join(type(value).__name__ for value in (stage, getattr(stage, "clip_model", None), getattr(stage, "clip", None)) if value is not None).lower()
     if "parallel" in ref_latent_mode and "krea2" not in stage_names:
         # Keep semantic conditioning and reference-latent conditioning as separate
         # Comfy conditioning entries. Sequence concatenation is not a parallel stream.
@@ -119,26 +116,14 @@ def multiply_conditioning(conditioning, multiplier):
 class UC_AttentionBiasTextEncode(io.ComfyNode):
     @classmethod
     def define_schema(cls) -> io.Schema:
-        return io.Schema(
-            node_id="UC_AttentionBiasTextEncode",
-            category="advanced/conditioning",
-            display_name="Attention Bias Encode",
-            inputs=[
-                io.Clip.Input("clip"),
-                io.String.Input("text", multiline=True, dynamic_prompts=True),
-            ],
-            outputs=[
-                io.Conditioning.Output(display_name="conditioning"),
-            ],
-            is_experimental=True,
-        )
+        return io.Schema(node_id="UC_AttentionBiasTextEncode", category="advanced/conditioning", display_name="Attention Bias Encode", inputs=[io.Clip.Input("clip"), io.String.Input("text", multiline=True, dynamic_prompts=True)], outputs=[io.Conditioning.Output(display_name="conditioning")], is_experimental=True)
 
     @classmethod
     def execute(cls, clip, text) -> io.NodeOutput:
         if clip is None:
             raise RuntimeError("ERROR: clip input is invalid: None\n\nIf the clip is from a checkpoint loader node your checkpoint does not contain a valid clip or text encoder model.")
 
-        if '<' not in text and '>' not in text and '=' not in text:
+        if "<" not in text and ">" not in text and "=" not in text:
             tokens = clip.tokenize(text)
             return io.NodeOutput(clip.encode_from_tokens_scheduled(tokens))
 
@@ -211,6 +196,7 @@ class UC_AttentionBiasTextEncode(io.ComfyNode):
             output.append([cond, new_metadata])
         return io.NodeOutput(output)
 
+
 # --- Type Definitions for Modular Configurations ---
 TextBlendConfig = io.Custom("TEXT_BLEND_CONFIG")
 VisualFusionConfig = io.Custom("VISUAL_FUSION_CONFIG")
@@ -220,6 +206,7 @@ VisualConsensusConfig = io.Custom("VISUAL_CONSENSUS_CONFIG")
 MiniMaxH3MediaConfig = io.Custom("MINIMAX_H3_MEDIA_CONFIG")
 MiniMaxH3ClipContinuationMedia = io.Custom("MINIMAX_H3_CLIP_CONTINUATION_MEDIA")
 MiniMaxH3ReferenceMedia = io.Custom("MINIMAX_H3_REFERENCE_MEDIA")
+
 
 class UC_TextConsensusBlendConfig(io.ComfyNode):
     @classmethod
@@ -231,31 +218,13 @@ class UC_TextConsensusBlendConfig(io.ComfyNode):
             inputs=[
                 io.Combo.Input(
                     "blend_preset",
-                    options=[
-                        "off", "custom", "baseline", "power_blend", "high_clarity", "smooth", "varied_merge", "diverse_concept", "high_diversity_concept",
-                        "dsc_baseline", "dsc_high_clarity", "dsc_smooth", "dsc_varied_merge", "dsc_diverse_concept", "dsc_high_diversity_concept"
-                    ],
+                    options=["off", "custom", "baseline", "power_blend", "high_clarity", "smooth", "varied_merge", "diverse_concept", "high_diversity_concept", "dsc_baseline", "dsc_high_clarity", "dsc_smooth", "dsc_varied_merge", "dsc_diverse_concept", "dsc_high_diversity_concept"],
                     default="baseline",
-                    tooltip="Preset configuration for Text Consensus-Weighted Blending. Set to 'off' to bypass CWB, or 'custom' to use the manual parameters below."
+                    tooltip="Preset configuration for Text Consensus-Weighted Blending. Set to 'off' to bypass CWB, or 'custom' to use the manual parameters below.",
                 ),
-                io.Combo.Input(
-                    "blend_method",
-                    options=["linear", "consensus"],
-                    default="consensus",
-                    tooltip="Active only in 'custom' preset. 'consensus' aligns prompts and filters noise; 'linear' averages them."
-                ),
-                io.Combo.Input(
-                    "consensus_type",
-                    options=["mean", "median"],
-                    default="median",
-                    tooltip="Active only in 'custom' preset. 'median' rejects up to 50% outlying noise; 'mean' is smooth averaging."
-                ),
-                io.Combo.Input(
-                    "alignment_method",
-                    options=["index", "similarity"],
-                    default="similarity",
-                    tooltip="Active only in 'custom' preset. 'similarity' aligns shifted prompt concepts; 'index' aligns them sequentially."
-                ),
+                io.Combo.Input("blend_method", options=["linear", "consensus"], default="consensus", tooltip="Active only in 'custom' preset. 'consensus' aligns prompts and filters noise; 'linear' averages them."),
+                io.Combo.Input("consensus_type", options=["mean", "median"], default="median", tooltip="Active only in 'custom' preset. 'median' rejects up to 50% outlying noise; 'mean' is smooth averaging."),
+                io.Combo.Input("alignment_method", options=["index", "similarity"], default="similarity", tooltip="Active only in 'custom' preset. 'similarity' aligns shifted prompt concepts; 'index' aligns them sequentially."),
                 io.Float.Input("alignment_threshold", default=0.4, min=0.0, max=1.0, step=0.01, tooltip="Active only in similarity alignment. Minimum similarity to match words."),
                 io.Float.Input("similarity_threshold", default=0.0, min=-1.0, max=1.0, step=0.01, tooltip="Prunes passing words if similarity to consensus falls below this."),
                 io.Float.Input("power_alpha", default=2.0, min=0.0, max=10.0, step=0.1, tooltip="Soft-masking exponent. Higher values penalize outliers (e.g. 2.0)."),
@@ -267,9 +236,7 @@ class UC_TextConsensusBlendConfig(io.ComfyNode):
                 io.Float.Input("position_weight", default=0.0, min=0.0, max=1.0, step=0.01, tooltip="Bias similarity alignment toward nearby normalized token positions. Zero preserves current behavior."),
                 io.Boolean.Input("preserve_common_prefix", default=False, tooltip="Keep the longest numerically identical conditioning prefix exactly from the first input."),
             ],
-            outputs=[
-                TextBlendConfig.Output("text_blend_config", display_name="Blend Config")
-            ],
+            outputs=[TextBlendConfig.Output("text_blend_config", display_name="Blend Config")],
         )
 
     @classmethod
@@ -315,6 +282,7 @@ class UC_VisualFusionConfig(io.ComfyNode):
     Specifies methods for blending or spatially interleaving isolated visual token vectors,
     and provides controls to save dynamically blended visual embeddings directly to disk.
     """
+
     @classmethod
     def define_schema(cls) -> io.Schema:
         return io.Schema(
@@ -326,27 +294,25 @@ class UC_VisualFusionConfig(io.ComfyNode):
                     "visual_fusion_method",
                     options=["off", "linear", "spatial-checkerboard", "spatial-block-interleave", "spatial-dither-random"],
                     default="spatial-checkerboard",
-                    tooltip="Method to combine isolated visual-token vectors. Spatial methods select source vectors according to a reproducible token-grid pattern; generation quality is model and prompt dependent."
+                    tooltip="Method to combine isolated visual-token vectors. Spatial methods select source vectors according to a reproducible token-grid pattern; generation quality is model and prompt dependent.",
                 ),
                 io.Int.Input("visual_block_size", default=2, min=1, max=8, step=1, tooltip="Active for spatial-block-interleave. Size of the spatial token patches to group and switch together."),
                 io.Float.Input("dither_ratio", default=0.5, min=0.0, max=1.0, step=0.01, tooltip="Active for spatial-dither-random. Probability of selecting the first image. Remaining images are selected with a checkerboard pattern."),
                 io.Boolean.Input("save_blended_embeds", default=False, tooltip="Enable to save the blended visual tokens as a standalone .safetensors embedding."),
                 io.String.Input("save_path", default="blended_visual_embeds.safetensors", tooltip="Target filename/path under models/embeddings to save the .safetensors file."),
-                io.Int.Input("seed", default=0, min=0, max=0xffffffffffffffff, control_after_generate=True, tooltip="Seed for the spatial-dither-random pattern."),
+                io.Int.Input("seed", default=0, min=0, max=0xFFFFFFFFFFFFFFFF, control_after_generate=True, tooltip="Seed for the spatial-dither-random pattern."),
+                io.Combo.Input("visual_encoder_path", options=["grid-deepstack", "legacy-flat"], default="grid-deepstack", tooltip="Qwen3-VL encoder route used by visual fusion. grid-deepstack uses current Core grid MRoPE and DeepStack injection; legacy-flat reproduces the pre-d0008a89 flat 1D route."),
                 io.Combo.Input(
-                    "visual_encoder_path",
-                    options=["grid-deepstack", "legacy-flat"],
-                    default="grid-deepstack",
-                    tooltip="Qwen3-VL encoder route used by visual fusion. grid-deepstack uses current Core grid MRoPE and DeepStack injection; legacy-flat reproduces the pre-d0008a89 flat 1D route."
+                    "dither_secondary_pattern",
+                    options=["checkerboard", "block-interleave", "dither-random-reverse", "dither-random-forward"],
+                    default="checkerboard",
+                    tooltip="How images 2+ participate in spatial-dither-random. Reverse starts with the last pair and works toward image 1; forward starts with images 1 and 2 and accumulates later images.",
                 ),
-                io.Combo.Input("dither_secondary_pattern", options=["checkerboard", "block-interleave", "dither-random-reverse", "dither-random-forward"], default="checkerboard", tooltip="How images 2+ participate in spatial-dither-random. Reverse starts with the last pair and works toward image 1; forward starts with images 1 and 2 and accumulates later images."),
                 io.Boolean.Input("dither_mask_cleanup", default=False, tooltip="Swap paired one-token image-1 islands and holes with a deterministic 3x3 pass while preserving every source's token count."),
                 io.Float.Input("spatial_perturbation", default=0.0, min=0.0, max=1.0, step=0.01, tooltip="Seeded spatial variation for hard fusion methods. Exchanges cells between sources without changing any source's token count; higher values may reduce spatial coherence."),
                 io.Boolean.Input("combine_video_embeds", default=True, tooltip="Save all MiniMax H3 video visual blocks as one ordered embedding. Disable to save one embedding per two-frame video block."),
             ],
-            outputs=[
-                VisualFusionConfig.Output("visual_fusion_config", display_name="Fusion Config")
-            ]
+            outputs=[VisualFusionConfig.Output("visual_fusion_config", display_name="Fusion Config")],
         )
 
     @classmethod
@@ -375,7 +341,7 @@ class UC_VisualFusionConfig(io.ComfyNode):
             "spatial_perturbation": spatial_perturbation,
             "combine_video_embeds": combine_video_embeds,
             "save_blended_embeds": save_blended_embeds,
-            "save_path": save_path
+            "save_path": save_path,
         }
         return io.NodeOutput(config)
 
@@ -385,32 +351,17 @@ class UC_VisualFusionImages(io.ComfyNode):
     Isolated container for visual fusion image inputs.
     Extracts autogrow inputs into a single dedicated output to avoid multiple autogrows on complex nodes.
     """
+
     @classmethod
     def define_schema(cls) -> io.Schema:
-        fusion_template = io.Autogrow.TemplateNames(
-            io.Image.Input(
-                "fusion_image",
-                tooltip="Ordered Qwen-only visual source for visual component fusion.",
-            ),
-            names=[f"fusion_image_{index}" for index in range(1, 33)],
-            min=0,
-        )
+        fusion_template = io.Autogrow.TemplateNames(io.Image.Input("fusion_image", tooltip="Ordered Qwen-only visual source for visual component fusion."), names=[f"fusion_image_{index}" for index in range(1, 33)], min=0)
         return io.Schema(
             node_id="UC_VisualFusionImages",
             display_name="Visual Fusion Images",
             category="advanced/conditioning",
             description="Collects ordered visual fusion images for Advanced MiniMax H3 and visual conditioning encoders.",
-            inputs=[
-                io.Autogrow.Input(
-                    "fusion_images",
-                    template=fusion_template,
-                    optional=True,
-                    tooltip="Connect images to combine via visual component fusion. Images pair by index or broadcast per node fusion rules.",
-                ),
-            ],
-            outputs=[
-                VisualFusionImages.Output("fusion_images", display_name="Fusion Images")
-            ],
+            inputs=[io.Autogrow.Input("fusion_images", template=fusion_template, optional=True, tooltip="Connect images to combine via visual component fusion. Images pair by index or broadcast per node fusion rules.")],
+            outputs=[VisualFusionImages.Output("fusion_images", display_name="Fusion Images")],
         )
 
     @classmethod
@@ -422,23 +373,15 @@ class UC_MiniMaxH3ReferenceMedia(io.ComfyNode):
     @classmethod
     def define_schema(cls) -> io.Schema:
         video_template = io.Autogrow.TemplateNames(
-            io.Image.Input("reference_video", tooltip="Reference video frame batch [F, H, W, C] (24 fps native; sampled at configured video_fps for Qwen VLM conditioning and encoded into reference video latents)."),
-            names=[f"reference_video_{index}" for index in range(1, 33)],
-            min=0,
+            io.Image.Input("reference_video", tooltip="Reference video frame batch [F, H, W, C] (24 fps native; sampled at configured video_fps for Qwen VLM conditioning and encoded into reference video latents)."), names=[f"reference_video_{index}" for index in range(1, 33)], min=0
         )
         video_audio_template = io.Autogrow.TemplateNames(
-            io.Audio.Input(
-                "reference_video_audio",
-                tooltip="Audio track paired with reference video by matching index number (e.g. reference_video_audio_1 pairs with reference_video_1). Video soundtracks are numbered first in prompt <Audio N> tags (<Audio 1>, etc.).",
-            ),
+            io.Audio.Input("reference_video_audio", tooltip="Audio track paired with reference video by matching index number (e.g. reference_video_audio_1 pairs with reference_video_1). Video soundtracks are numbered first in prompt <Audio N> tags (<Audio 1>, etc.)."),
             names=[f"reference_video_audio_{index}" for index in range(1, 33)],
             min=0,
         )
         audio_template = io.Autogrow.TemplateNames(
-            io.Audio.Input(
-                "reference_audio",
-                tooltip="Standalone reference audio track for acoustic conditioning. Numbered in prompt <Audio N> tags after all video audio soundtracks (e.g. if reference_video_audio_1 is connected, reference_audio_1 becomes <Audio 2>).",
-            ),
+            io.Audio.Input("reference_audio", tooltip="Standalone reference audio track for acoustic conditioning. Numbered in prompt <Audio N> tags after all video audio soundtracks (e.g. if reference_video_audio_1 is connected, reference_audio_1 becomes <Audio 2>)."),
             names=[f"reference_audio_{index}" for index in range(1, 33)],
             min=0,
         )
@@ -448,42 +391,17 @@ class UC_MiniMaxH3ReferenceMedia(io.ComfyNode):
             category="advanced/conditioning",
             description="Collects multiple reference videos, paired reference video audio tracks (paired by matching index, e.g. reference_video_1 with reference_video_audio_1), and standalone reference audio tracks into a media container for MiniMax H3.",
             inputs=[
+                io.Autogrow.Input("reference_videos", template=video_template, optional=True, tooltip="Connect reference video frame batches. Each video is sampled for Qwen VLM presentation and VAE-encoded into reference video latents."),
+                io.Autogrow.Input("reference_video_audios", template=video_audio_template, optional=True, tooltip="Connect audio tracks paired with reference videos (pairs with reference_video_N by index). Video soundtracks are numbered first in prompt <Audio N> tags (<Audio 1>, etc.)."),
                 io.Autogrow.Input(
-                    "reference_videos",
-                    template=video_template,
-                    optional=True,
-                    tooltip="Connect reference video frame batches. Each video is sampled for Qwen VLM presentation and VAE-encoded into reference video latents.",
-                ),
-                io.Autogrow.Input(
-                    "reference_video_audios",
-                    template=video_audio_template,
-                    optional=True,
-                    tooltip="Connect audio tracks paired with reference videos (pairs with reference_video_N by index). Video soundtracks are numbered first in prompt <Audio N> tags (<Audio 1>, etc.).",
-                ),
-                io.Autogrow.Input(
-                    "reference_audios",
-                    template=audio_template,
-                    optional=True,
-                    tooltip="Connect standalone reference audio tracks for acoustic conditioning. Numbered in prompt <Audio N> tags after all video audio soundtracks (e.g. if reference_video_audio_1 is connected, reference_audio_1 becomes <Audio 2>).",
+                    "reference_audios", template=audio_template, optional=True, tooltip="Connect standalone reference audio tracks for acoustic conditioning. Numbered in prompt <Audio N> tags after all video audio soundtracks (e.g. if reference_video_audio_1 is connected, reference_audio_1 becomes <Audio 2>)."
                 ),
             ],
-            outputs=[
-                MiniMaxH3ReferenceMedia.Output(
-                    "reference_media",
-                    display_name="Reference Media",
-                    tooltip="Bundled media container. Connect to reference_media input on 'Advanced MiniMax H3 Reference Media to Video'.",
-                )
-            ],
+            outputs=[MiniMaxH3ReferenceMedia.Output("reference_media", display_name="Reference Media", tooltip="Bundled media container. Connect to reference_media input on 'Advanced MiniMax H3 Reference Media to Video'.")],
         )
 
     @classmethod
-    def execute(
-        cls,
-        reference_videos: io.Autogrow.Type = None,
-        reference_video_audios: io.Autogrow.Type = None,
-        reference_audios: io.Autogrow.Type = None,
-        **kwargs,
-    ) -> io.NodeOutput:
+    def execute(cls, reference_videos: io.Autogrow.Type = None, reference_video_audios: io.Autogrow.Type = None, reference_audios: io.Autogrow.Type = None, **kwargs) -> io.NodeOutput:
         vids = dict(reference_videos) if isinstance(reference_videos, dict) else {}
         vid_auds = dict(reference_video_audios) if isinstance(reference_video_audios, dict) else {}
         auds = dict(reference_audios) if isinstance(reference_audios, dict) else {}
@@ -498,11 +416,7 @@ class UC_MiniMaxH3ReferenceMedia(io.ComfyNode):
             elif k.startswith("reference_audio_"):
                 auds[k] = v
 
-        return io.NodeOutput({
-            "reference_videos": vids,
-            "reference_video_audios": vid_auds,
-            "reference_audios": auds,
-        })
+        return io.NodeOutput({"reference_videos": vids, "reference_video_audios": vid_auds, "reference_audios": auds})
 
 
 class UC_AdvancedConsensusConfiguration(UC_TextConsensusBlendConfig):
@@ -519,70 +433,16 @@ class UC_AdvancedConsensusConfiguration(UC_TextConsensusBlendConfig):
         schema.node_id = "UC_AdvancedConsensusConfiguration"
         schema.is_experimental = True
         schema.display_name = "Advanced Consensus Configuration"
-        schema.inputs.append(
-            io.Int.Input(
-                "resolution_samples",
-                default=1,
-                min=1,
-                max=15,
-                step=2,
-                tooltip="Exact odd adjacent-resolution sample count used only when consensus is enabled. A value of 1 remains one resolution sample.",
-            )
-        )
-        schema.inputs.append(
-            io.Int.Input(
-                "sample_offset",
-                default=32,
-                min=32,
-                max=512,
-                step=32,
-                tooltip="Equivalent-square resolution distance between adjacent samples. Larger values create more distinct visual grids at greater scale separation.",
-            )
-        )
-        schema.outputs = [
-            AdvancedConsensusConfig.Output(
-                "advanced_consensus_config",
-                display_name="Advanced Consensus Config",
-            )
-        ]
+        schema.inputs.append(io.Int.Input("resolution_samples", default=1, min=1, max=15, step=2, tooltip="Exact odd adjacent-resolution sample count used only when consensus is enabled. A value of 1 remains one resolution sample."))
+        schema.inputs.append(io.Int.Input("sample_offset", default=32, min=32, max=512, step=32, tooltip="Equivalent-square resolution distance between adjacent samples. Larger values create more distinct visual grids at greater scale separation."))
+        schema.outputs = [AdvancedConsensusConfig.Output("advanced_consensus_config", display_name="Advanced Consensus Config")]
         return schema
 
     @classmethod
     def execute(
-        cls,
-        blend_preset,
-        blend_method,
-        consensus_type,
-        alignment_method,
-        alignment_threshold,
-        similarity_threshold,
-        power_alpha,
-        diversity_beta,
-        rescale_norm,
-        global_scale,
-        dynamic_similarity_contrast,
-        soft_comfort_bandpass,
-        position_weight,
-        preserve_common_prefix,
-        resolution_samples,
-        sample_offset,
+        cls, blend_preset, blend_method, consensus_type, alignment_method, alignment_threshold, similarity_threshold, power_alpha, diversity_beta, rescale_norm, global_scale, dynamic_similarity_contrast, soft_comfort_bandpass, position_weight, preserve_common_prefix, resolution_samples, sample_offset
     ) -> io.NodeOutput:
-        config = super().execute(
-            blend_preset,
-            blend_method,
-            consensus_type,
-            alignment_method,
-            alignment_threshold,
-            similarity_threshold,
-            power_alpha,
-            diversity_beta,
-            rescale_norm,
-            global_scale,
-            dynamic_similarity_contrast,
-            soft_comfort_bandpass,
-            position_weight,
-            preserve_common_prefix,
-        ).args[0]
+        config = super().execute(blend_preset, blend_method, consensus_type, alignment_method, alignment_threshold, similarity_threshold, power_alpha, diversity_beta, rescale_norm, global_scale, dynamic_similarity_contrast, soft_comfort_bandpass, position_weight, preserve_common_prefix).args[0]
         config["resolution_samples"] = resolution_samples
         config["sample_offset"] = sample_offset
         return io.NodeOutput(config)
@@ -596,44 +456,23 @@ class UC_VisualConsensusConfiguration(io.ComfyNode):
             display_name="Visual Consensus Configuration",
             category="advanced/conditioning",
             inputs=[
-                VisualFusionConfig.Input(
-                    "visual_fusion_config",
-                    display_name="Visual Fusion Configuration",
-                    tooltip="Complete visual-stage configuration from Visual Component Fusion Configurator. Its method is authoritative; off disables spatial fusion.",
-                ),
-                AdvancedConsensusConfig.Input(
-                    "consensus_config",
-                    display_name="Consensus Configuration",
-                    tooltip="Complete consensus configuration from Advanced Consensus Configuration. Its preset is authoritative; off disables cross-resolution consensus.",
-                ),
+                VisualFusionConfig.Input("visual_fusion_config", display_name="Visual Fusion Configuration", tooltip="Complete visual-stage configuration from Visual Component Fusion Configurator. Its method is authoritative; off disables spatial fusion."),
+                AdvancedConsensusConfig.Input("consensus_config", display_name="Consensus Configuration", tooltip="Complete consensus configuration from Advanced Consensus Configuration. Its preset is authoritative; off disables cross-resolution consensus."),
             ],
-            outputs=[
-                VisualConsensusConfig.Output("visual_consensus_config", display_name="Visual Consensus Config"),
-            ],
+            outputs=[VisualConsensusConfig.Output("visual_consensus_config", display_name="Visual Consensus Config")],
         )
 
     @classmethod
-    def execute(
-        cls,
-        visual_fusion_config,
-        consensus_config,
-    ) -> io.NodeOutput:
+    def execute(cls, visual_fusion_config, consensus_config) -> io.NodeOutput:
         visual = dict(visual_fusion_config)
         consensus = dict(consensus_config)
-        return io.NodeOutput({
-            "enable_spatial_fusion": visual.get("visual_fusion_method") != "off",
-            "enable_consensus": consensus.get("blend_preset") != "off",
-            "visual": visual,
-            "consensus": consensus,
-        })
+        return io.NodeOutput({"enable_spatial_fusion": visual.get("visual_fusion_method") != "off", "enable_consensus": consensus.get("blend_preset") != "off", "visual": visual, "consensus": consensus})
+
 
 class UC_ConditioningConsensusBlend(io.ComfyNode):
     @classmethod
     def define_schema(cls) -> io.Schema:
-        autogrow_template = io.Autogrow.TemplatePrefix(
-            io.Conditioning.Input("conditioning", optional=True),
-            prefix="conditioning_"
-        )
+        autogrow_template = io.Autogrow.TemplatePrefix(io.Conditioning.Input("conditioning", optional=True), prefix="conditioning_")
         return io.Schema(
             node_id="UC_ConditioningConsensusBlend",
             display_name="Conditioning Consensus",
@@ -642,9 +481,7 @@ class UC_ConditioningConsensusBlend(io.ComfyNode):
                 TextBlendConfig.Input("text_blend_config", display_name="Blend Config", optional=True, tooltip="Optional configuration from UC_TextConsensusBlendConfig. Defaults to baseline CWB if disconnected."),
                 io.Autogrow.Input("conditioning_inputs", template=autogrow_template, tooltip="Conditionings are blended in ascending socket order; disconnected sockets are ignored."),
             ],
-            outputs=[
-                io.Conditioning.Output("conditioning")
-            ],
+            outputs=[io.Conditioning.Output("conditioning")],
         )
 
     @classmethod
@@ -657,7 +494,7 @@ class UC_ConditioningConsensusBlend(io.ComfyNode):
 
         active_conds = []
         if conditioning_inputs is not None:
-            for k in sorted(conditioning_inputs.keys(), key=lambda x: int(''.join(filter(str.isdigit, x)) or 0)):
+            for k in sorted(conditioning_inputs.keys(), key=lambda x: int("".join(filter(str.isdigit, x)) or 0)):
                 v = conditioning_inputs[k]
                 if v is not None:
                     active_conds.append(v)
@@ -706,18 +543,13 @@ class UC_ConditioningConsensusBlend(io.ComfyNode):
                 sequence_tensors[key] = tensor
                 pooled = metadata.get("pooled_output") if metadata else None
                 pooled_tensors[key] = pooled
-            C_blended, P_blended = blend_text_vectors(
-                sequence_tensors,
-                text_blend_config,
-                pooled_tensors=pooled_tensors,
-                device=device,
-                compute_dtype=compute_dtype,
-            )
+            C_blended, P_blended = blend_text_vectors(sequence_tensors, text_blend_config, pooled_tensors=pooled_tensors, device=device, compute_dtype=compute_dtype)
             metadata = compatible_metadata([entry[1] for entry in entries])
             if P_blended is not None:
                 metadata["pooled_output"] = P_blended
             blended_conditioning.append([C_blended, metadata])
         return io.NodeOutput(blended_conditioning)
+
 
 class UC_ScaledBiasTextEncodeFlux2SystemPrompt(io.ComfyNode):
     @classmethod
@@ -726,14 +558,8 @@ class UC_ScaledBiasTextEncodeFlux2SystemPrompt(io.ComfyNode):
             node_id="UC_ScaledBiasTextEncodeFlux2SystemPrompt",
             category="advanced/conditioning",
             display_name="Text Encode with Flux2 dev System Prompt (Scaled Bias)",
-            inputs=[
-                io.Clip.Input("clip"),
-                io.String.Input("prompt", multiline=True, dynamic_prompts=True),
-                io.String.Input("system_prompt", multiline=True, dynamic_prompts=True),
-            ],
-            outputs=[
-                io.Conditioning.Output(),
-            ],
+            inputs=[io.Clip.Input("clip"), io.String.Input("prompt", multiline=True, dynamic_prompts=True), io.String.Input("system_prompt", multiline=True, dynamic_prompts=True)],
+            outputs=[io.Conditioning.Output()],
             is_experimental=True,
         )
 
@@ -761,33 +587,18 @@ class UC_ScaledBiasTextEncodeKleinSystemPrompt(io.ComfyNode):
                 io.Clip.Input("clip"),
                 io.String.Input("prompt", multiline=True, dynamic_prompts=True),
                 io.String.Input("system_prompt", multiline=True, dynamic_prompts=True, default=""),
-                io.String.Input(
-                    "thinking_content",
-                    multiline=True,
-                    dynamic_prompts=True,
-                    default="",
-                    tooltip="Custom thinking content to inject. Leave empty for default.",
-                ),
+                io.String.Input("thinking_content", multiline=True, dynamic_prompts=True, default="", tooltip="Custom thinking content to inject. Leave empty for default."),
             ],
-            outputs=[
-                io.Conditioning.Output(),
-            ],
+            outputs=[io.Conditioning.Output()],
         )
 
     @classmethod
     def execute(cls, clip, prompt, system_prompt="", thinking_content="") -> io.NodeOutput:
         # Build template with string concat (ComfyUI pattern)
         if len(system_prompt) > 0:
-            llama_template = (
-                "<|im_start|>system\n" + system_prompt + "<|im_end|>\n" +
-                "<|im_start|>user\n{}<|im_end|>\n" +
-                "<|im_start|>assistant\n<think>\n" + thinking_content + "\n</think>\n\n"
-            )
+            llama_template = "<|im_start|>system\n" + system_prompt + "<|im_end|>\n" + "<|im_start|>user\n{}<|im_end|>\n" + "<|im_start|>assistant\n<think>\n" + thinking_content + "\n</think>\n\n"
         else:
-            llama_template = (
-                "<|im_start|>user\n{}<|im_end|>\n" +
-                "<|im_start|>assistant\n<think>\n" + thinking_content + "\n</think>\n\n"
-            )
+            llama_template = "<|im_start|>user\n{}<|im_end|>\n" + "<|im_start|>assistant\n<think>\n" + thinking_content + "\n</think>\n\n"
 
         conditioning = encode_embedding_scaled_bias(clip, prompt, llama_template=llama_template, skip_template=True)
         return io.NodeOutput(conditioning)
@@ -804,14 +615,7 @@ class UC_ScaledBiasTextEncodeLtxv2SystemPrompt(io.ComfyNode):
                 io.Clip.Input("clip"),
                 io.String.Input("prompt", multiline=True, dynamic_prompts=True),
                 io.String.Input("system_prompt", multiline=True, dynamic_prompts=True, default=""),
-                io.Int.Input(
-                    "vae_resolution",
-                    default=1024,
-                    min=0,
-                    max=16384,
-                    step=32,
-                    tooltip="Resolution of the reference latent encoded by the VAE (0 = original resolution). Aligned to vae_dimension_multiple.",
-                ),
+                io.Int.Input("vae_resolution", default=1024, min=0, max=16384, step=32, tooltip="Resolution of the reference latent encoded by the VAE (0 = original resolution). Aligned to vae_dimension_multiple."),
                 io.Combo.Input(
                     "ref_latent_mode",
                     options=["off", "single", "multi", "parallel-single", "parallel-multi"],
@@ -822,28 +626,18 @@ class UC_ScaledBiasTextEncodeLtxv2SystemPrompt(io.ComfyNode):
                 io.Image.Input("image", optional=True),
                 io.Int.Input("vae_dimension_multiple", default=8, min=4, max=256, step=4, advanced=True, tooltip="Pixel multiple used to align reference images before VAE encoding."),
             ],
-            outputs=[
-                io.Conditioning.Output(),
-            ],
+            outputs=[io.Conditioning.Output()],
         )
 
     @classmethod
     def execute(cls, clip, prompt, system_prompt="", vae_resolution=1024, ref_latent_mode="off", vae=None, image=None, vae_dimension_multiple=8) -> io.NodeOutput:
         # Build template with string concat (ComfyUI pattern)
         if image is not None:
-            llama_template = (
-                "<start_of_turn>system\n" + system_prompt + "<end_of_turn>\n" +
-                "<start_of_turn>user\n\n<image_soft_token>{}<end_of_turn>\n\n<start_of_turn>model\n"
-            )
+            llama_template = "<start_of_turn>system\n" + system_prompt + "<end_of_turn>\n" + "<start_of_turn>user\n\n<image_soft_token>{}<end_of_turn>\n\n<start_of_turn>model\n"
         elif len(system_prompt) > 0:
-            llama_template = (
-                "<start_of_turn>system\n" + system_prompt + "<end_of_turn>\n" +
-                "<start_of_turn>user\n{}<end_of_turn>\n<start_of_turn>model\n"
-            )
+            llama_template = "<start_of_turn>system\n" + system_prompt + "<end_of_turn>\n" + "<start_of_turn>user\n{}<end_of_turn>\n<start_of_turn>model\n"
         else:
-            llama_template = (
-                "<start_of_turn>system\nYou are a helpful assistant.<end_of_turn>\n<start_of_turn>user\n{}<end_of_turn>\n<start_of_turn>model\n"
-            )
+            llama_template = "<start_of_turn>system\nYou are a helpful assistant.<end_of_turn>\n<start_of_turn>user\n{}<end_of_turn>\n<start_of_turn>model\n"
 
         conditioning = encode_embedding_scaled_bias(clip, prompt, llama_template=llama_template, image=image)
 
@@ -866,23 +660,15 @@ class UC_ScaledBiasTextEncodeZITSystemPrompt(io.ComfyNode):
             node_id="UC_ScaledBiasTextEncodeZITSystemPrompt",
             category="advanced/conditioning",
             display_name="Text Encode with Z-Image System Prompt (Scaled Bias)",
-            inputs=[
-                io.Clip.Input("clip"),
-                io.String.Input("prompt", multiline=True, dynamic_prompts=True),
-                io.String.Input("system_prompt", multiline=True, dynamic_prompts=True),
-            ],
-            outputs=[
-                io.Conditioning.Output(),
-            ],
+            inputs=[io.Clip.Input("clip"), io.String.Input("prompt", multiline=True, dynamic_prompts=True), io.String.Input("system_prompt", multiline=True, dynamic_prompts=True)],
+            outputs=[io.Conditioning.Output()],
         )
 
     @classmethod
     def execute(cls, clip, prompt, system_prompt=None) -> io.NodeOutput:
         if len(system_prompt) > 0:
             template_prefix = "<|im_start|>system\n"
-            template_suffix = (
-                "<|im_end|>\n<|im_start|>user\n{}<|im_end|>\n<|im_start|>assistant\n"
-            )
+            template_suffix = "<|im_end|>\n<|im_start|>user\n{}<|im_end|>\n<|im_start|>assistant\n"
             llama_template = f"{template_prefix}{system_prompt}{template_suffix}"
             conditioning = encode_embedding_scaled_bias(clip, prompt, llama_template=llama_template)
         else:
@@ -898,14 +684,8 @@ class UC_ScaledBiasTextEncodeZImageThinkPrompt(io.ComfyNode):
             node_id="UC_ScaledBiasTextEncodeZImageThinkPrompt",
             category="advanced/conditioning",
             display_name="Text Encode with Z-Image Thinking Prompt (Scaled Bias)",
-            inputs=[
-                io.Clip.Input("clip"),
-                io.String.Input("prompt", multiline=True, dynamic_prompts=True),
-                io.String.Input("thinking", multiline=True, dynamic_prompts=True),
-            ],
-            outputs=[
-                io.Conditioning.Output(),
-            ],
+            inputs=[io.Clip.Input("clip"), io.String.Input("prompt", multiline=True, dynamic_prompts=True), io.String.Input("thinking", multiline=True, dynamic_prompts=True)],
+            outputs=[io.Conditioning.Output()],
         )
 
     @classmethod
@@ -930,25 +710,12 @@ class UC_ScaledBiasTextEncodeSystemPrompt(io.ComfyNode):
             display_name="Text Encode System Prompt (Scaled Bias)",
             inputs=[
                 io.Clip.Input("clip"),
-                io.Combo.Input(
-                    "model_type",
-                    options=["flux2dev", "klein", "z-image"],
-                    default="flux2dev",
-                    tooltip="Select the model type to use the correct template format.",
-                ),
+                io.Combo.Input("model_type", options=["flux2dev", "klein", "z-image"], default="flux2dev", tooltip="Select the model type to use the correct template format."),
                 io.String.Input("prompt", multiline=True, dynamic_prompts=True),
                 io.String.Input("system_prompt", multiline=True, dynamic_prompts=True, default=""),
-                io.String.Input(
-                    "thinking_content",
-                    multiline=True,
-                    dynamic_prompts=True,
-                    default="",
-                    tooltip="(Klein only) Custom thinking content to inject. Leave empty for default.",
-                ),
+                io.String.Input("thinking_content", multiline=True, dynamic_prompts=True, default="", tooltip="(Klein only) Custom thinking content to inject. Leave empty for default."),
             ],
-            outputs=[
-                io.Conditioning.Output(),
-            ],
+            outputs=[io.Conditioning.Output()],
         )
 
     @classmethod
@@ -957,21 +724,14 @@ class UC_ScaledBiasTextEncodeSystemPrompt(io.ComfyNode):
         if model_type == "klein" and len(thinking_content) > 0:
             # Klein with custom thinking content
             if len(system_prompt) > 0:
-                llama_template = (
-                    f"<|im_start|>system\n{system_prompt}<|im_end|>\n" +
-                    f"<|im_start|>user\n{{}}<|im_end|>\n" +
-                    f"<|im_start|>assistant\n<think>\n{thinking_content}\n</think>\n\n"
-                )
+                llama_template = f"<|im_start|>system\n{system_prompt}<|im_end|>\n" + f"<|im_start|>user\n{{}}<|im_end|>\n" + f"<|im_start|>assistant\n<think>\n{thinking_content}\n</think>\n\n"
             else:
-                llama_template = (
-                    "<|im_start|>user\n{}<|im_end|>\n" +
-                    f"<|im_start|>assistant\n<think>\n{thinking_content}\n</think>\n\n"
-                )
+                llama_template = "<|im_start|>user\n{}<|im_end|>\n" + f"<|im_start|>assistant\n<think>\n{thinking_content}\n</think>\n\n"
             skip_template = True
         elif len(system_prompt) > 0:
             template = SYSTEM_PROMPT_TEMPLATES.get(model_type, SYSTEM_PROMPT_TEMPLATES["flux2dev"])
             llama_template = f"{template['prefix']}{system_prompt}{template['suffix']}"
-            skip_template = (model_type == "klein")
+            skip_template = model_type == "klein"
         else:
             llama_template = None
 
@@ -986,14 +746,8 @@ class UC_TextEncodeFlux2SystemPrompt(io.ComfyNode):
             node_id="UC_TextEncodeFlux2SystemPrompt",
             category="advanced/conditioning",
             display_name="Text Encode with Flux2 dev System Prompt",
-            inputs=[
-                io.Clip.Input("clip"),
-                io.String.Input("prompt", multiline=True, dynamic_prompts=True),
-                io.String.Input("system_prompt", multiline=True, dynamic_prompts=True),
-            ],
-            outputs=[
-                io.Conditioning.Output(),
-            ],
+            inputs=[io.Clip.Input("clip"), io.String.Input("prompt", multiline=True, dynamic_prompts=True), io.String.Input("system_prompt", multiline=True, dynamic_prompts=True)],
+            outputs=[io.Conditioning.Output()],
         )
 
     @classmethod
@@ -1021,33 +775,18 @@ class UC_TextEncodeKleinSystemPrompt(io.ComfyNode):
                 io.Clip.Input("clip"),
                 io.String.Input("prompt", multiline=True, dynamic_prompts=True),
                 io.String.Input("system_prompt", multiline=True, dynamic_prompts=True, default=""),
-                io.String.Input(
-                    "thinking_content",
-                    multiline=True,
-                    dynamic_prompts=True,
-                    default="",
-                    tooltip="Custom thinking content to inject. Leave empty for default.",
-                ),
+                io.String.Input("thinking_content", multiline=True, dynamic_prompts=True, default="", tooltip="Custom thinking content to inject. Leave empty for default."),
             ],
-            outputs=[
-                io.Conditioning.Output(),
-            ],
+            outputs=[io.Conditioning.Output()],
         )
 
     @classmethod
     def execute(cls, clip, prompt, system_prompt="", thinking_content="") -> io.NodeOutput:
         # Build template with string concat (ComfyUI pattern)
         if len(system_prompt) > 0:
-            llama_template = (
-                "<|im_start|>system\n" + system_prompt + "<|im_end|>\n" +
-                "<|im_start|>user\n{}<|im_end|>\n" +
-                "<|im_start|>assistant\n<think>\n" + thinking_content + "\n</think>\n\n"
-            )
+            llama_template = "<|im_start|>system\n" + system_prompt + "<|im_end|>\n" + "<|im_start|>user\n{}<|im_end|>\n" + "<|im_start|>assistant\n<think>\n" + thinking_content + "\n</think>\n\n"
         else:
-            llama_template = (
-                "<|im_start|>user\n{}<|im_end|>\n" +
-                "<|im_start|>assistant\n<think>\n" + thinking_content + "\n</think>\n\n"
-            )
+            llama_template = "<|im_start|>user\n{}<|im_end|>\n" + "<|im_start|>assistant\n<think>\n" + thinking_content + "\n</think>\n\n"
 
         tokens = clip.tokenize(prompt, llama_template=llama_template, skip_template=True)
         conditioning = clip.encode_from_tokens_scheduled(tokens)
@@ -1061,31 +800,17 @@ class UC_TextEncodeKrea2SystemPrompt(io.ComfyNode):
             node_id="UC_TextEncodeKrea2SystemPrompt",
             category="advanced/conditioning",
             display_name="Text Encode with Krea2 System Prompt",
-            inputs=[
-                io.Clip.Input("clip"),
-                io.String.Input("prompt", multiline=True, dynamic_prompts=True),
-                io.String.Input("system_prompt", multiline=True, dynamic_prompts=True, default=""),
-            ],
-            outputs=[
-                io.Conditioning.Output(),
-            ],
+            inputs=[io.Clip.Input("clip"), io.String.Input("prompt", multiline=True, dynamic_prompts=True), io.String.Input("system_prompt", multiline=True, dynamic_prompts=True, default="")],
+            outputs=[io.Conditioning.Output()],
         )
 
     @classmethod
     def execute(cls, clip, prompt, system_prompt="") -> io.NodeOutput:
         # Build template with string concat (ComfyUI pattern)
         if len(system_prompt) > 0:
-            llama_template = (
-                "<|im_start|>system\n" + system_prompt + "<|im_end|>\n" +
-                "<|im_start|>user\n{}<|im_end|>\n" +
-                "<|im_start|>assistant\n"
-            )
+            llama_template = "<|im_start|>system\n" + system_prompt + "<|im_end|>\n" + "<|im_start|>user\n{}<|im_end|>\n" + "<|im_start|>assistant\n"
         else:
-            llama_template = (
-                "<|im_start|>system\nDescribe the image by detailing the color, shape, size, texture, quantity, text, spatial relationships of the objects and background:<|im_end|>\n" +
-                "<|im_start|>user\n{}<|im_end|>\n" +
-                "<|im_start|>assistant\n"
-            )
+            llama_template = "<|im_start|>system\nDescribe the image by detailing the color, shape, size, texture, quantity, text, spatial relationships of the objects and background:<|im_end|>\n" + "<|im_start|>user\n{}<|im_end|>\n" + "<|im_start|>assistant\n"
 
         tokens = clip.tokenize(prompt, llama_template=llama_template)
         conditioning = clip.encode_from_tokens_scheduled(tokens)
@@ -1109,19 +834,9 @@ class TextEncodeSystemEditPlus(io.ComfyNode):
                     default="Fast (384)",
                     tooltip="Resolution of the image passed to the VLM (semantic path). 'Fast' = 384x384, 'Balanced' = 512x512, 'Detailed' = 768x768, 'Large' = 1024x1024, 'X-Large' = 1280x1280, 'Original' uses native resolution.",
                 ),
-                io.Int.Input(
-                    "vae_resolution",
-                    default=1024,
-                    min=0,
-                    max=16384,
-                    step=32,
-                    tooltip="Resolution of the reference latent encoded by the VAE (0 = original resolution). Aligned to vae_dimension_multiple.",
-                ),
+                io.Int.Input("vae_resolution", default=1024, min=0, max=16384, step=32, tooltip="Resolution of the reference latent encoded by the VAE (0 = original resolution). Aligned to vae_dimension_multiple."),
                 io.Combo.Input(
-                    "ref_latent_mode",
-                    options=["off", "single", "multi", "parallel-single", "parallel-multi"],
-                    default="off",
-                    tooltip="Reference latent encoding mode. 'single'/'multi' append latents; 'parallel-single'/'parallel-multi' run them in a separate conditioning stream to prevent semantic override.",
+                    "ref_latent_mode", options=["off", "single", "multi", "parallel-single", "parallel-multi"], default="off", tooltip="Reference latent encoding mode. 'single'/'multi' append latents; 'parallel-single'/'parallel-multi' run them in a separate conditioning stream to prevent semantic override."
                 ),
                 io.Vae.Input("vae", optional=True),
                 io.Image.Input("image1", optional=True),
@@ -1129,9 +844,7 @@ class TextEncodeSystemEditPlus(io.ComfyNode):
                 io.Image.Input("image3", optional=True),
                 io.Int.Input("vae_dimension_multiple", default=8, min=4, max=256, step=4, advanced=True, tooltip="Pixel multiple used to align reference images before VAE encoding."),
             ],
-            outputs=[
-                io.Conditioning.Output(),
-            ],
+            outputs=[io.Conditioning.Output()],
         )
 
     @classmethod
@@ -1141,14 +854,7 @@ class TextEncodeSystemEditPlus(io.ComfyNode):
         images_vl = []
         image_prompt = ""
 
-        VLM_RESOLUTIONS = {
-            "Fast (384)": 384,
-            "Balanced (512)": 512,
-            "Detailed (768)": 768,
-            "Large (1024)": 1024,
-            "X-Large (1280)": 1280,
-            "XX-Large (1536)": 1536
-        }
+        VLM_RESOLUTIONS = {"Fast (384)": 384, "Balanced (512)": 512, "Detailed (768)": 768, "Large (1024)": 1024, "X-Large (1280)": 1280, "XX-Large (1536)": 1536}
 
         for i, image in enumerate(images):
             if image is not None:
@@ -1178,17 +884,9 @@ class TextEncodeSystemEditPlus(io.ComfyNode):
 
         # Construct the complete template string via safe concatenation to prevent formatting errors
         if len(system_prompt) > 0:
-            full_prompt = (
-                "<|im_start|>system\n" + system_prompt + "<|im_end|>\n" +
-                "<|im_start|>user\n" + image_prompt + prompt + "<|im_end|>\n" +
-                "<|im_start|>assistant\n"
-            )
+            full_prompt = "<|im_start|>system\n" + system_prompt + "<|im_end|>\n" + "<|im_start|>user\n" + image_prompt + prompt + "<|im_end|>\n" + "<|im_start|>assistant\n"
         else:
-            full_prompt = (
-                "<|im_start|>system\nDescribe the image by detailing the color, shape, size, texture, quantity, text, spatial relationships of the objects and background:<|im_end|>\n" +
-                "<|im_start|>user\n" + image_prompt + prompt + "<|im_end|>\n" +
-                "<|im_start|>assistant\n"
-            )
+            full_prompt = "<|im_start|>system\nDescribe the image by detailing the color, shape, size, texture, quantity, text, spatial relationships of the objects and background:<|im_end|>\n" + "<|im_start|>user\n" + image_prompt + prompt + "<|im_end|>\n" + "<|im_start|>assistant\n"
 
         # Pass skip_template=True so the tokenizer doesn't try to wrap or append extra blocks
         tokens = clip.tokenize(full_prompt, images=images_vl, skip_template=True)
@@ -1200,12 +898,7 @@ class TextEncodeSystemEditPlus(io.ComfyNode):
 class TextEncodeSystemEditPlusAdvanced(io.ComfyNode):
     @classmethod
     def define_schema(cls):
-        autogrow_template = io.Autogrow.TemplatePrefix(
-            io.Image.Input("image", optional=True),
-            prefix="image",
-            min=1,
-            max=16
-        )
+        autogrow_template = io.Autogrow.TemplatePrefix(io.Image.Input("image", optional=True), prefix="image", min=1, max=16)
         return io.Schema(
             node_id="TextEncodeSystemEditPlusAdvanced",
             display_name="TextEncodeSystemEditPlusAdvanced",
@@ -1220,27 +913,15 @@ class TextEncodeSystemEditPlusAdvanced(io.ComfyNode):
                     default="Fast (384)",
                     tooltip="Resolution of the image passed to the VLM (semantic path). 'Fast' = 384x384, 'Balanced' = 512x512, 'Detailed' = 768x768, 'Large' = 1024x1024, 'X-Large' = 1280x1280, 'XX-Large' = 1536x1536, 'Original' uses native resolution.",
                 ),
-                io.Int.Input(
-                    "vae_resolution",
-                    default=1024,
-                    min=0,
-                    max=16384,
-                    step=32,
-                    tooltip="Resolution of the reference latent encoded by the VAE (0 = original resolution). Aligned to vae_dimension_multiple.",
-                ),
+                io.Int.Input("vae_resolution", default=1024, min=0, max=16384, step=32, tooltip="Resolution of the reference latent encoded by the VAE (0 = original resolution). Aligned to vae_dimension_multiple."),
                 io.Combo.Input(
-                    "ref_latent_mode",
-                    options=["off", "single", "multi", "parallel-single", "parallel-multi"],
-                    default="off",
-                    tooltip="Reference latent encoding mode. 'single'/'multi' append latents; 'parallel-single'/'parallel-multi' run them in a separate conditioning stream to prevent semantic override.",
+                    "ref_latent_mode", options=["off", "single", "multi", "parallel-single", "parallel-multi"], default="off", tooltip="Reference latent encoding mode. 'single'/'multi' append latents; 'parallel-single'/'parallel-multi' run them in a separate conditioning stream to prevent semantic override."
                 ),
                 io.Vae.Input("vae", optional=True),
                 io.Int.Input("vae_dimension_multiple", default=8, min=4, max=256, step=4, advanced=True, tooltip="Pixel multiple used to align reference images before VAE encoding."),
                 io.Autogrow.Input("image_inputs", template=autogrow_template, tooltip="Images are flattened in ascending socket order; every image in a connected batch becomes the next sequential image input."),
             ],
-            outputs=[
-                io.Conditioning.Output(),
-            ],
+            outputs=[io.Conditioning.Output()],
         )
 
     @classmethod
@@ -1249,21 +930,14 @@ class TextEncodeSystemEditPlusAdvanced(io.ComfyNode):
         raw_images, flat_images, is_zero_indexed = extract_and_flatten_images(image_inputs)
 
         # Check if the prompt has any image_input_ keyword matches (case-insensitive)
-        pattern = re.compile(r'image_input_(\d+)', re.IGNORECASE)
+        pattern = re.compile(r"image_input_(\d+)", re.IGNORECASE)
 
         images_vl = []
 
         def process_vlm_image(image, res):
             if image is None:
                 return None
-            VLM_RESOLUTIONS = {
-                "Fast (384)": 384,
-                "Balanced (512)": 512,
-                "Detailed (768)": 768,
-                "Large (1024)": 1024,
-                "X-Large (1280)": 1280,
-                "XX-Large (1536)": 1536
-            }
+            VLM_RESOLUTIONS = {"Fast (384)": 384, "Balanced (512)": 512, "Detailed (768)": 768, "Large (1024)": 1024, "X-Large (1280)": 1280, "XX-Large (1536)": 1536}
             samples = image.movedim(-1, 1)
             if res == "Original":
                 return image
@@ -1323,19 +997,9 @@ class TextEncodeSystemEditPlusAdvanced(io.ComfyNode):
 
         # Construct the complete template string via safe concatenation
         if len(system_prompt) > 0:
-            full_prompt = (
-                "<|im_start|>user\n" + "<|im_end|>\n" +
-                "<|im_start|>system\n" + system_prompt + "<|im_end|>\n" +
-                "<|im_start|>user\n" + modified_prompt + "<|im_end|>\n" +
-                "<|im_start|>assistant\n"
-            )
+            full_prompt = "<|im_start|>user\n" + "<|im_end|>\n" + "<|im_start|>system\n" + system_prompt + "<|im_end|>\n" + "<|im_start|>user\n" + modified_prompt + "<|im_end|>\n" + "<|im_start|>assistant\n"
         else:
-            full_prompt = (
-                "<|im_start|>user\n" + "<|im_end|>\n" +
-                "<|im_start|>system\nDescribe the image by detailing the color, shape, size, texture, quantity, text, spatial relationships of the objects and background:<|im_end|>\n" +
-                "<|im_start|>user\n" + modified_prompt + "<|im_end|>\n" +
-                "<|im_start|>assistant\n"
-            )
+            full_prompt = "<|im_start|>user\n" + "<|im_end|>\n" + "<|im_start|>system\nDescribe the image by detailing the color, shape, size, texture, quantity, text, spatial relationships of the objects and background:<|im_end|>\n" + "<|im_start|>user\n" + modified_prompt + "<|im_end|>\n" + "<|im_start|>assistant\n"
 
         # Pass skip_template=True so the tokenizer doesn't try to wrap or append extra blocks
         tokens = clip.tokenize(full_prompt, images=images_vl, skip_template=True)
@@ -1361,12 +1025,7 @@ class TextEncodeSystemEditPlusAdvanced(io.ComfyNode):
 class TextEncodeKrea2SystemEditPlusAdvanced(io.ComfyNode):
     @classmethod
     def define_schema(cls):
-        autogrow_template = io.Autogrow.TemplatePrefix(
-            io.Image.Input("image", optional=True),
-            prefix="image",
-            min=1,
-            max=16
-        )
+        autogrow_template = io.Autogrow.TemplatePrefix(io.Image.Input("image", optional=True), prefix="image", min=1, max=16)
         return io.Schema(
             node_id="TextEncodeKrea2SystemEditPlusAdvanced",
             display_name="TextEncodeKrea2SystemEditPlusAdvanced",
@@ -1390,27 +1049,15 @@ class TextEncodeKrea2SystemEditPlusAdvanced(io.ComfyNode):
                     default="Fast (384)",
                     tooltip="Resolution of the image passed to the VLM (semantic path). 'Fast' = 384x384, 'Balanced' = 512x512, 'Detailed' = 768x768, 'Large' = 1024x1024, 'X-Large' = 1280x1280, 'XX-Large' = 1536x1536, 'Original' uses native resolution.",
                 ),
-                io.Int.Input(
-                    "vae_resolution",
-                    default=1024,
-                    min=0,
-                    max=16384,
-                    step=32,
-                    tooltip="Resolution of the reference latent encoded by the VAE (0 = original resolution). Aligned to vae_dimension_multiple.",
-                ),
+                io.Int.Input("vae_resolution", default=1024, min=0, max=16384, step=32, tooltip="Resolution of the reference latent encoded by the VAE (0 = original resolution). Aligned to vae_dimension_multiple."),
                 io.Combo.Input(
-                    "ref_latent_mode",
-                    options=["off", "single", "multi", "parallel-single", "parallel-multi"],
-                    default="off",
-                    tooltip="Reference latent encoding mode. 'single'/'multi' append latents; 'parallel-single'/'parallel-multi' run them in a separate conditioning stream to prevent semantic override.",
+                    "ref_latent_mode", options=["off", "single", "multi", "parallel-single", "parallel-multi"], default="off", tooltip="Reference latent encoding mode. 'single'/'multi' append latents; 'parallel-single'/'parallel-multi' run them in a separate conditioning stream to prevent semantic override."
                 ),
                 io.Vae.Input("vae", optional=True),
                 io.Int.Input("vae_dimension_multiple", default=8, min=4, max=256, step=4, advanced=True, tooltip="Pixel multiple used to align reference images before VAE encoding."),
                 io.Autogrow.Input("image_inputs", template=autogrow_template, tooltip="Images are flattened in ascending socket order; every image in a connected batch becomes the next sequential image input."),
             ],
-            outputs=[
-                io.Conditioning.Output(),
-            ],
+            outputs=[io.Conditioning.Output()],
         )
 
     @classmethod
@@ -1419,21 +1066,14 @@ class TextEncodeKrea2SystemEditPlusAdvanced(io.ComfyNode):
         raw_images, flat_images, is_zero_indexed = extract_and_flatten_images(image_inputs)
 
         # Check if the prompt has any image_input_ keyword matches (case-insensitive)
-        pattern = re.compile(r'image_input_(\d+)', re.IGNORECASE)
+        pattern = re.compile(r"image_input_(\d+)", re.IGNORECASE)
 
         images_vl = []
 
         def process_vlm_image(image, res):
             if image is None:
                 return None
-            VLM_RESOLUTIONS = {
-                "Fast (384)": 384,
-                "Balanced (512)": 512,
-                "Detailed (768)": 768,
-                "Large (1024)": 1024,
-                "X-Large (1280)": 1280,
-                "XX-Large (1536)": 1536
-            }
+            VLM_RESOLUTIONS = {"Fast (384)": 384, "Balanced (512)": 512, "Detailed (768)": 768, "Large (1024)": 1024, "X-Large (1280)": 1280, "XX-Large (1536)": 1536}
             samples = image.movedim(-1, 1)
             if res == "Original":
                 return image
@@ -1493,19 +1133,9 @@ class TextEncodeKrea2SystemEditPlusAdvanced(io.ComfyNode):
 
         # Construct the complete template string via safe concatenation
         if len(system_prompt) > 0:
-            full_prompt = (
-                "<|im_start|>user\n" + "<|im_end|>\n" +
-                "<|im_start|>system\n" + system_prompt + "<|im_end|>\n" +
-                "<|im_start|>user\n" + modified_prompt + "<|im_end|>\n" +
-                "<|im_start|>assistant\n"
-            )
+            full_prompt = "<|im_start|>user\n" + "<|im_end|>\n" + "<|im_start|>system\n" + system_prompt + "<|im_end|>\n" + "<|im_start|>user\n" + modified_prompt + "<|im_end|>\n" + "<|im_start|>assistant\n"
         else:
-            full_prompt = (
-                "<|im_start|>user\n" + "<|im_end|>\n" +
-                "<|im_start|>system\nDescribe the image by detailing the color, shape, size, texture, quantity, text, spatial relationships of the objects and background:<|im_end|>\n" +
-                "<|im_start|>user\n" + modified_prompt + "<|im_end|>\n" +
-                "<|im_start|>assistant\n"
-            )
+            full_prompt = "<|im_start|>user\n" + "<|im_end|>\n" + "<|im_start|>system\nDescribe the image by detailing the color, shape, size, texture, quantity, text, spatial relationships of the objects and background:<|im_end|>\n" + "<|im_start|>user\n" + modified_prompt + "<|im_end|>\n" + "<|im_start|>assistant\n"
 
         # Pass skip_template=True so the tokenizer doesn't try to wrap or append extra blocks
         tokens = clip.tokenize(full_prompt, images=images_vl, skip_template=True)
@@ -1531,12 +1161,7 @@ class TextEncodeKrea2SystemEditPlusAdvanced(io.ComfyNode):
 class TextEncodeEditPlusAdvanced(io.ComfyNode):
     @classmethod
     def define_schema(cls):
-        autogrow_template = io.Autogrow.TemplatePrefix(
-            io.Image.Input("image", optional=True),
-            prefix="image",
-            min=1,
-            max=16
-        )
+        autogrow_template = io.Autogrow.TemplatePrefix(io.Image.Input("image", optional=True), prefix="image", min=1, max=16)
         return io.Schema(
             node_id="TextEncodeEditPlusAdvanced",
             display_name="TextEncodeEditPlusAdvanced",
@@ -1559,27 +1184,15 @@ class TextEncodeEditPlusAdvanced(io.ComfyNode):
                     default="Fast (384)",
                     tooltip="Resolution of the image passed to the VLM (semantic path). 'Fast' = 384x384, 'Balanced' = 512x512, 'Detailed' = 768x768, 'Large' = 1024x1024, 'X-Large' = 1280x1280, 'XX-Large' = 1536x1536, 'Original' uses native resolution.",
                 ),
-                io.Int.Input(
-                    "vae_resolution",
-                    default=1024,
-                    min=0,
-                    max=16384,
-                    step=32,
-                    tooltip="Resolution of the reference latent encoded by the VAE (0 = original resolution). Aligned to vae_dimension_multiple.",
-                ),
+                io.Int.Input("vae_resolution", default=1024, min=0, max=16384, step=32, tooltip="Resolution of the reference latent encoded by the VAE (0 = original resolution). Aligned to vae_dimension_multiple."),
                 io.Combo.Input(
-                    "ref_latent_mode",
-                    options=["off", "single", "multi", "parallel-single", "parallel-multi"],
-                    default="off",
-                    tooltip="Reference latent encoding mode. 'single'/'multi' append latents; 'parallel-single'/'parallel-multi' run them in a separate conditioning stream to prevent semantic override.",
+                    "ref_latent_mode", options=["off", "single", "multi", "parallel-single", "parallel-multi"], default="off", tooltip="Reference latent encoding mode. 'single'/'multi' append latents; 'parallel-single'/'parallel-multi' run them in a separate conditioning stream to prevent semantic override."
                 ),
                 io.Vae.Input("vae", optional=True),
                 io.Int.Input("vae_dimension_multiple", default=8, min=4, max=256, step=4, advanced=True, tooltip="Pixel multiple used to align reference images before VAE encoding."),
                 io.Autogrow.Input("image_inputs", template=autogrow_template),
             ],
-            outputs=[
-                io.Conditioning.Output(),
-            ],
+            outputs=[io.Conditioning.Output()],
         )
 
     @classmethod
@@ -1588,21 +1201,14 @@ class TextEncodeEditPlusAdvanced(io.ComfyNode):
         raw_images, flat_images, is_zero_indexed = extract_and_flatten_images(image_inputs)
 
         # Check if the prompt has any image_input_ keyword matches (case-insensitive)
-        pattern = re.compile(r'image_input_(\d+)', re.IGNORECASE)
+        pattern = re.compile(r"image_input_(\d+)", re.IGNORECASE)
 
         images_vl = []
 
         def process_vlm_image(image, res):
             if image is None:
                 return None
-            VLM_RESOLUTIONS = {
-                "Fast (384)": 384,
-                "Balanced (512)": 512,
-                "Detailed (768)": 768,
-                "Large (1024)": 1024,
-                "X-Large (1280)": 1280,
-                "XX-Large (1536)": 1536
-            }
+            VLM_RESOLUTIONS = {"Fast (384)": 384, "Balanced (512)": 512, "Detailed (768)": 768, "Large (1024)": 1024, "X-Large (1280)": 1280, "XX-Large (1536)": 1536}
             samples = image.movedim(-1, 1)
             if res == "Original":
                 return image
@@ -1684,12 +1290,7 @@ class TextEncodeEditPlusAdvanced(io.ComfyNode):
 class TextEncodeGemmaSystemEditPlusAdvanced(io.ComfyNode):
     @classmethod
     def define_schema(cls):
-        autogrow_template = io.Autogrow.TemplatePrefix(
-            io.Image.Input("image", optional=True),
-            prefix="image",
-            min=1,
-            max=16
-        )
+        autogrow_template = io.Autogrow.TemplatePrefix(io.Image.Input("image", optional=True), prefix="image", min=1, max=16)
         return io.Schema(
             node_id="TextEncodeGemmaSystemEditPlusAdvanced",
             display_name="TextEncodeGemmaSystemEditPlusAdvanced",
@@ -1704,27 +1305,15 @@ class TextEncodeGemmaSystemEditPlusAdvanced(io.ComfyNode):
                     default="Fast (384)",
                     tooltip="Resolution of the image passed to the VLM (semantic path). 'Fast' = 384x384, 'Balanced' = 512x512, 'Detailed' = 768x768, 'Large' = 1024x1024, 'X-Large' = 1280x1280, 'XX-Large' = 1536x1536, 'Original' uses native resolution.",
                 ),
-                io.Int.Input(
-                    "vae_resolution",
-                    default=1024,
-                    min=0,
-                    max=16384,
-                    step=32,
-                    tooltip="Resolution of the reference latent encoded by the VAE (0 = original resolution). Aligned to vae_dimension_multiple.",
-                ),
+                io.Int.Input("vae_resolution", default=1024, min=0, max=16384, step=32, tooltip="Resolution of the reference latent encoded by the VAE (0 = original resolution). Aligned to vae_dimension_multiple."),
                 io.Combo.Input(
-                    "ref_latent_mode",
-                    options=["off", "single", "multi", "parallel-single", "parallel-multi"],
-                    default="off",
-                    tooltip="Reference latent encoding mode. 'single'/'multi' append latents; 'parallel-single'/'parallel-multi' run them in a separate conditioning stream to prevent semantic override.",
+                    "ref_latent_mode", options=["off", "single", "multi", "parallel-single", "parallel-multi"], default="off", tooltip="Reference latent encoding mode. 'single'/'multi' append latents; 'parallel-single'/'parallel-multi' run them in a separate conditioning stream to prevent semantic override."
                 ),
                 io.Vae.Input("vae", optional=True),
                 io.Int.Input("vae_dimension_multiple", default=8, min=4, max=256, step=4, advanced=True, tooltip="Pixel multiple used to align reference images before VAE encoding."),
                 io.Autogrow.Input("image_inputs", template=autogrow_template, tooltip="Images are flattened in ascending socket order; every image in a connected batch becomes the next sequential image input."),
             ],
-            outputs=[
-                io.Conditioning.Output(),
-            ],
+            outputs=[io.Conditioning.Output()],
         )
 
     @classmethod
@@ -1733,7 +1322,7 @@ class TextEncodeGemmaSystemEditPlusAdvanced(io.ComfyNode):
         raw_images, flat_images, is_zero_indexed = extract_and_flatten_images(image_inputs)
 
         # Check if the prompt has any image_input_ keyword matches (case-insensitive)
-        pattern = re.compile(r'image_input_(\d+)', re.IGNORECASE)
+        pattern = re.compile(r"image_input_(\d+)", re.IGNORECASE)
         has_keywords = bool(pattern.search(prompt))
 
         images_vl_raw = []
@@ -1763,15 +1352,9 @@ class TextEncodeGemmaSystemEditPlusAdvanced(io.ComfyNode):
 
         # Construct the complete template string via safe concatenation
         if len(system_prompt) > 0:
-            full_prompt = (
-                "<start_of_turn>system\n" + system_prompt + "<end_of_turn>\n" +
-                "<start_of_turn>user\n" + modified_prompt + "<end_of_turn>\n<start_of_turn>model\n"
-            )
+            full_prompt = "<start_of_turn>system\n" + system_prompt + "<end_of_turn>\n" + "<start_of_turn>user\n" + modified_prompt + "<end_of_turn>\n<start_of_turn>model\n"
         else:
-            full_prompt = (
-                "<start_of_turn>system\nYou are a helpful assistant.<end_of_turn>\n" +
-                "<start_of_turn>user\n" + modified_prompt + "<end_of_turn>\n<start_of_turn>model\n"
-            )
+            full_prompt = "<start_of_turn>system\nYou are a helpful assistant.<end_of_turn>\n" + "<start_of_turn>user\n" + modified_prompt + "<end_of_turn>\n<start_of_turn>model\n"
 
         # 1. First tokenize the text without passing images, getting raw 262144 token IDs
         tokens = clip.tokenize(full_prompt, skip_template=True)
@@ -1782,14 +1365,7 @@ class TextEncodeGemmaSystemEditPlusAdvanced(io.ComfyNode):
                 return None
             if res == "Original":
                 return image[:, :, :, :3]
-            VLM_RESOLUTIONS = {
-                "Fast (384)": 384,
-                "Balanced (512)": 512,
-                "Detailed (768)": 768,
-                "Large (1024)": 1024,
-                "X-Large (1280)": 1280,
-                "XX-Large (1536)": 1536
-            }
+            VLM_RESOLUTIONS = {"Fast (384)": 384, "Balanced (512)": 512, "Detailed (768)": 768, "Large (1024)": 1024, "X-Large (1280)": 1280, "XX-Large (1536)": 1536}
             samples = image.movedim(-1, 1)
             vlm_size = VLM_RESOLUTIONS[res]
             total_vlm = vlm_size * vlm_size
@@ -1847,46 +1423,26 @@ class UC_TextEncodeLtxv2SystemPrompt(io.ComfyNode):
                 io.Clip.Input("clip"),
                 io.String.Input("prompt", multiline=True, dynamic_prompts=True),
                 io.String.Input("system_prompt", multiline=True, dynamic_prompts=True, default=""),
-                io.Int.Input(
-                    "vae_resolution",
-                    default=1024,
-                    min=0,
-                    max=16384,
-                    step=32,
-                    tooltip="Resolution of the reference latent encoded by the VAE (0 = original resolution). Aligned to vae_dimension_multiple.",
-                ),
+                io.Int.Input("vae_resolution", default=1024, min=0, max=16384, step=32, tooltip="Resolution of the reference latent encoded by the VAE (0 = original resolution). Aligned to vae_dimension_multiple."),
                 io.Combo.Input(
-                    "ref_latent_mode",
-                    options=["off", "single", "multi", "parallel-single", "parallel-multi"],
-                    default="off",
-                    tooltip="Reference latent encoding mode. 'single'/'multi' append latents; 'parallel-single'/'parallel-multi' run them in a separate conditioning stream to prevent semantic override.",
+                    "ref_latent_mode", options=["off", "single", "multi", "parallel-single", "parallel-multi"], default="off", tooltip="Reference latent encoding mode. 'single'/'multi' append latents; 'parallel-single'/'parallel-multi' run them in a separate conditioning stream to prevent semantic override."
                 ),
                 io.Vae.Input("vae", optional=True),
                 io.Image.Input("image", optional=True),
                 io.Int.Input("vae_dimension_multiple", default=8, min=4, max=256, step=4, advanced=True, tooltip="Pixel multiple used to align reference images before VAE encoding."),
             ],
-            outputs=[
-                io.Conditioning.Output(),
-            ],
+            outputs=[io.Conditioning.Output()],
         )
 
     @classmethod
     def execute(cls, clip, prompt, system_prompt="", vae_resolution=1024, ref_latent_mode="off", vae=None, image=None, vae_dimension_multiple=8) -> io.NodeOutput:
         # Build template with string concat (ComfyUI pattern)
         if image is not None:
-            llama_template = (
-                "<start_of_turn>system\n" + system_prompt + "<end_of_turn>\n" +
-                "<start_of_turn>user\n\n<image_soft_token>{}<end_of_turn>\n\n<start_of_turn>model\n"
-            )
+            llama_template = "<start_of_turn>system\n" + system_prompt + "<end_of_turn>\n" + "<start_of_turn>user\n\n<image_soft_token>{}<end_of_turn>\n\n<start_of_turn>model\n"
         elif len(system_prompt) > 0:
-            llama_template = (
-                "<start_of_turn>system\n" + system_prompt + "<end_of_turn>\n" +
-                "<start_of_turn>user\n{}<end_of_turn>\n<start_of_turn>model\n"
-            )
+            llama_template = "<start_of_turn>system\n" + system_prompt + "<end_of_turn>\n" + "<start_of_turn>user\n{}<end_of_turn>\n<start_of_turn>model\n"
         else:
-            llama_template = (
-                "<start_of_turn>system\nYou are a helpful assistant.<end_of_turn>\n<start_of_turn>user\n{}<end_of_turn>\n<start_of_turn>model\n"
-            )
+            llama_template = "<start_of_turn>system\nYou are a helpful assistant.<end_of_turn>\n<start_of_turn>user\n{}<end_of_turn>\n<start_of_turn>model\n"
 
         if image is not None:
             tokens = clip.tokenize(prompt, llama_template=llama_template, image=image)
@@ -1913,23 +1469,15 @@ class UC_TextEncodeZITSystemPrompt(io.ComfyNode):
             node_id="UC_TextEncodeZITSystemPrompt",
             category="advanced/conditioning",
             display_name="Text Encode with Z-Image System Prompt",
-            inputs=[
-                io.Clip.Input("clip"),
-                io.String.Input("prompt", multiline=True, dynamic_prompts=True),
-                io.String.Input("system_prompt", multiline=True, dynamic_prompts=True),
-            ],
-            outputs=[
-                io.Conditioning.Output(),
-            ],
+            inputs=[io.Clip.Input("clip"), io.String.Input("prompt", multiline=True, dynamic_prompts=True), io.String.Input("system_prompt", multiline=True, dynamic_prompts=True)],
+            outputs=[io.Conditioning.Output()],
         )
 
     @classmethod
     def execute(cls, clip, prompt, system_prompt=None) -> io.NodeOutput:
         if len(system_prompt) > 0:
             template_prefix = "<|im_start|>system\n"
-            template_suffix = (
-                "<|im_end|>\n<|im_start|>user\n{}<|im_end|>\n<|im_start|>assistant\n"
-            )
+            template_suffix = "<|im_end|>\n<|im_start|>user\n{}<|im_end|>\n<|im_start|>assistant\n"
             llama_template = f"{template_prefix}{system_prompt}{template_suffix}"
             tokens = clip.tokenize(prompt, llama_template=llama_template)
         else:
@@ -1946,14 +1494,8 @@ class UC_TextEncodeZImageThinkPrompt(io.ComfyNode):
             node_id="UC_TextEncodeZImageThinkPrompt",
             category="advanced/conditioning",
             display_name="Text Encode with Z-Image Thinking Prompt",
-            inputs=[
-                io.Clip.Input("clip"),
-                io.String.Input("prompt", multiline=True, dynamic_prompts=True),
-                io.String.Input("thinking", multiline=True, dynamic_prompts=True),
-            ],
-            outputs=[
-                io.Conditioning.Output(),
-            ],
+            inputs=[io.Clip.Input("clip"), io.String.Input("prompt", multiline=True, dynamic_prompts=True), io.String.Input("thinking", multiline=True, dynamic_prompts=True)],
+            outputs=[io.Conditioning.Output()],
         )
 
     @classmethod
@@ -1972,44 +1514,21 @@ class UC_TextEncodeZImageThinkPrompt(io.ComfyNode):
 
 # Template definitions for unified node
 SYSTEM_PROMPT_TEMPLATES = {
-    "flux2dev": {
-        "prefix": r"[SYSTEM_PROMPT]",
-        "suffix": r"[/SYSTEM_PROMPT][INST]{}[/INST]",
-    },
-    "klein": {
-        "prefix": "<|im_start|>system\n",
-        "suffix": "<|im_end|>\n<|im_start|>user\n{}<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\n",
-    },
-    "z-image": {
-        "prefix": "<|im_start|>system\n",
-        "suffix": "<|im_end|>\n<|im_start|>user\n{}<|im_end|>\n<|im_start|>assistant\n",
-    },
-    "krea2": {
-        "prefix": "<|im_start|>system\n",
-        "suffix": "<|im_end|>\n<|im_start|>user\n{}<|im_end|>\n<|im_start|>assistant\n",
-    },
+    "flux2dev": {"prefix": r"[SYSTEM_PROMPT]", "suffix": r"[/SYSTEM_PROMPT][INST]{}[/INST]"},
+    "klein": {"prefix": "<|im_start|>system\n", "suffix": "<|im_end|>\n<|im_start|>user\n{}<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\n"},
+    "z-image": {"prefix": "<|im_start|>system\n", "suffix": "<|im_end|>\n<|im_start|>user\n{}<|im_end|>\n<|im_start|>assistant\n"},
+    "krea2": {"prefix": "<|im_start|>system\n", "suffix": "<|im_end|>\n<|im_start|>user\n{}<|im_end|>\n<|im_start|>assistant\n"},
 }
 
 
 def system_prompt_template(model_type, system_prompt, thinking_content=""):
     if model_type == "klein" and thinking_content:
         if system_prompt:
-            return (
-                f"<|im_start|>system\n{system_prompt}<|im_end|>\n"
-                "<|im_start|>user\n{}<|im_end|>\n"
-                f"<|im_start|>assistant\n<think>\n{thinking_content}\n</think>\n\n"
-            ), True
-        return (
-            "<|im_start|>user\n{}<|im_end|>\n"
-            f"<|im_start|>assistant\n<think>\n{thinking_content}\n</think>\n\n"
-        ), True
+            return (f"<|im_start|>system\n{system_prompt}<|im_end|>\n<|im_start|>user\n{{}}<|im_end|>\n<|im_start|>assistant\n<think>\n{thinking_content}\n</think>\n\n"), True
+        return (f"<|im_start|>user\n{{}}<|im_end|>\n<|im_start|>assistant\n<think>\n{thinking_content}\n</think>\n\n"), True
     if model_type == "z-image-thinking" and thinking_content:
         system_block = f"<|im_start|>system\n{system_prompt}<|im_end|>\n" if system_prompt else ""
-        return (
-            system_block
-            + "<|im_start|>user\n{}<|im_end|>\n<|im_start|>assistant\n<think>\n"
-            + f"{thinking_content}\n</think>\n\n"
-        ), False
+        return (system_block + "<|im_start|>user\n{}<|im_end|>\n<|im_start|>assistant\n<think>\n" + f"{thinking_content}\n</think>\n\n"), False
     if system_prompt:
         template_key = "z-image" if model_type == "z-image-thinking" else model_type
         template = SYSTEM_PROMPT_TEMPLATES.get(template_key, SYSTEM_PROMPT_TEMPLATES["flux2dev"])
@@ -2026,25 +1545,12 @@ class UC_TextEncodeSystemPrompt(io.ComfyNode):
             category="advanced/conditioning",
             inputs=[
                 io.Clip.Input("clip"),
-                io.Combo.Input(
-                    "model_type",
-                    options=["flux2dev", "klein", "krea2", "z-image", "z-image-thinking"],
-                    default="flux2dev",
-                    tooltip="Select the model type to use the correct template format.",
-                ),
+                io.Combo.Input("model_type", options=["flux2dev", "klein", "krea2", "z-image", "z-image-thinking"], default="flux2dev", tooltip="Select the model type to use the correct template format."),
                 io.String.Input("prompt", multiline=True, dynamic_prompts=True),
                 io.String.Input("system_prompt", multiline=True, dynamic_prompts=True, default=""),
-                io.String.Input(
-                    "thinking_content",
-                    multiline=True,
-                    dynamic_prompts=True,
-                    default="",
-                    tooltip="Custom thinking content for Klein or the z-image-thinking profile. Leave empty for the model default.",
-                ),
+                io.String.Input("thinking_content", multiline=True, dynamic_prompts=True, default="", tooltip="Custom thinking content for Klein or the z-image-thinking profile. Leave empty for the model default."),
             ],
-            outputs=[
-                io.Conditioning.Output(),
-            ],
+            outputs=[io.Conditioning.Output()],
         )
 
     @classmethod
@@ -2068,11 +1574,7 @@ class UC_WeightedTextEncodeSystemPrompt(io.ComfyNode):
             category="advanced/conditioning",
             inputs=[
                 io.Clip.Input("clip"),
-                io.Combo.Input(
-                    "model_type",
-                    options=["flux2dev", "klein", "krea2", "z-image", "z-image-thinking"],
-                    default="flux2dev",
-                ),
+                io.Combo.Input("model_type", options=["flux2dev", "klein", "krea2", "z-image", "z-image-thinking"], default="flux2dev"),
                 io.String.Input("prompt", multiline=True, dynamic_prompts=True),
                 io.String.Input("system_prompt", multiline=True, dynamic_prompts=True, default=""),
                 io.String.Input("thinking_content", multiline=True, dynamic_prompts=True, default=""),
@@ -2084,15 +1586,8 @@ class UC_WeightedTextEncodeSystemPrompt(io.ComfyNode):
     @classmethod
     def execute(cls, clip, model_type, prompt, system_prompt="", thinking_content="", multiplier=1.0):
         llama_template, skip_template = system_prompt_template(model_type, system_prompt, thinking_content)
-        conditioning = encode_embedding_classical_scaled_bias(
-            clip,
-            prompt,
-            llama_template=llama_template,
-            skip_template=skip_template,
-        )
+        conditioning = encode_embedding_classical_scaled_bias(clip, prompt, llama_template=llama_template, skip_template=skip_template)
         return io.NodeOutput(multiply_conditioning(conditioning, multiplier))
-
-
 
 
 class UC_AdvancedVisualConditioningEncode(io.ComfyNode):
@@ -2100,12 +1595,7 @@ class UC_AdvancedVisualConditioningEncode(io.ComfyNode):
 
     @classmethod
     def define_schema(cls):
-        autogrow_template = io.Autogrow.TemplatePrefix(
-            io.Image.Input("image", optional=True),
-            prefix="image",
-            min=1,
-            max=16
-        )
+        autogrow_template = io.Autogrow.TemplatePrefix(io.Image.Input("image", optional=True), prefix="image", min=1, max=16)
         return io.Schema(
             node_id="UC_AdvancedVisualConditioningEncode",
             display_name="Advanced Visual Conditioning Encode",
@@ -2114,78 +1604,30 @@ class UC_AdvancedVisualConditioningEncode(io.ComfyNode):
             inputs=[
                 # --- Primary Inputs ---
                 io.Clip.Input("clip", tooltip="CLIP/T5 dual text encoder reference."),
-                io.String.Input(
-                    "prompt",
-                    multiline=True,
-                    dynamic_prompts=True,
-                    tooltip="Main prompt. With fusion off, image_input_N places active image N inline. With fusion on, use image_input_fusion (image_input_1 is accepted as an alias).",
-                ),
+                io.String.Input("prompt", multiline=True, dynamic_prompts=True, tooltip="Main prompt. With fusion off, image_input_N places active image N inline. With fusion on, use image_input_fusion (image_input_1 is accepted as an alias)."),
                 io.String.Input("system_prompt", multiline=True, dynamic_prompts=True, default="", tooltip="System prompt injected prior to user description."),
-                io.Int.Input(
-                    "vlm_resolution",
-                    default=384,
-                    min=0,
-                    max=4096,
-                    step=32,
-                    tooltip="Equivalent-square VLM target from 256 to 4096. Values outside that range preserve original resolution.",
-                ),
-
+                io.Int.Input("vlm_resolution", default=384, min=0, max=4096, step=32, tooltip="Equivalent-square VLM target from 256 to 4096. Values outside that range preserve original resolution."),
                 # --- Modular Configurations ---
                 VisualFusionConfig.Input("visual_fusion_config", display_name="Fusion Config", optional=True, tooltip="Optional spatial visual fusion configuration from UC_VisualFusionConfig. Blends isolated visual blocks without coordinate blur."),
-
                 # --- Fallback Controls ---
-                io.String.Input(
-                    "formula",
-                    default="",
-                    multiline=False,
-                    tooltip="Optional formula used only with fusion off when no numbered inline placeholders are present. Empty selects the first image pass.",
-                ),
+                io.String.Input("formula", default="", multiline=False, tooltip="Optional formula used only with fusion off when no numbered inline placeholders are present. Empty selects the first image pass."),
+                io.Combo.Input("padding_method", options=["zero-pad", "interpolate"], default="zero-pad", tooltip="Alignment method for images with different aspect ratios/resolutions. Active ONLY if visual_fusion_config is disconnected or set to 'off'."),
+                io.Int.Input("vae_resolution", default=1024, min=0, max=16384, step=32, tooltip="Resolution of the reference latent encoded by the VAE (0 = original resolution). Aligned to vae_dimension_multiple."),
                 io.Combo.Input(
-                    "padding_method",
-                    options=["zero-pad", "interpolate"],
-                    default="zero-pad",
-                    tooltip="Alignment method for images with different aspect ratios/resolutions. Active ONLY if visual_fusion_config is disconnected or set to 'off'.",
-                ),
-                io.Int.Input(
-                    "vae_resolution",
-                    default=1024,
-                    min=0,
-                    max=16384,
-                    step=32,
-                    tooltip="Resolution of the reference latent encoded by the VAE (0 = original resolution). Aligned to vae_dimension_multiple.",
-                ),
-                io.Combo.Input(
-                    "ref_latent_mode",
-                    options=["off", "single", "multi", "parallel-single", "parallel-multi"],
-                    default="off",
-                    tooltip="Reference latent encoding mode. 'single'/'multi' append latents; 'parallel-single'/'parallel-multi' run them in a separate conditioning stream to prevent semantic override.",
+                    "ref_latent_mode", options=["off", "single", "multi", "parallel-single", "parallel-multi"], default="off", tooltip="Reference latent encoding mode. 'single'/'multi' append latents; 'parallel-single'/'parallel-multi' run them in a separate conditioning stream to prevent semantic override."
                 ),
                 io.Vae.Input("vae", optional=True),
                 io.Float.Input("multiplier", default=1.0, min=-1000.0, max=1000.0, step=0.1, tooltip="Overall multiplier applied to the final conditioning vector."),
-                io.Float.Input(
-                    "image_strength",
-                    default=1.0,
-                    min=0.0,
-                    max=100.0,
-                    step=0.05,
-                    advanced=True,
-                    tooltip="Scales attention allocated to visual tokens encoded for reference image(s) via context_attention_bias (e.g. MOSS-Image): 0 ignores them, 1 is unchanged, above 1 emphasizes them.",
-                ),
+                io.Float.Input("image_strength", default=1.0, min=0.0, max=100.0, step=0.05, advanced=True, tooltip="Scales attention allocated to visual tokens encoded for reference image(s) via context_attention_bias (e.g. MOSS-Image): 0 ignores them, 1 is unchanged, above 1 emphasizes them."),
                 io.Int.Input("vae_dimension_multiple", default=8, min=4, max=256, step=4, advanced=True, tooltip="Pixel multiple used to align reference images before VAE encoding."),
                 VisualFusionImages.Input(
-                    "fusion_images",
-                    display_name="Fusion Images",
-                    optional=True,
-                    tooltip="Optional Visual Fusion Images container (from UC_VisualFusionImages) for visual component fusion. When connected, visual component fusion operates on these images while image_inputs supplies the native reference images.",
+                    "fusion_images", display_name="Fusion Images", optional=True, tooltip="Optional Visual Fusion Images container (from UC_VisualFusionImages) for visual component fusion. When connected, visual component fusion operates on these images while image_inputs supplies the native reference images."
                 ),
                 io.Boolean.Input("semantic_anchor", default=False, tooltip="Prefixes each encoded visual slot with its numbered <Picture N>: semantic anchor."),
                 io.Autogrow.Input("image_inputs", template=autogrow_template, tooltip="Multimodal images. Maps active inputs sequentially to variables (a, b, c, ...)."),
                 io.Combo.Input("fusion_method", options=["conds_fusion", "token_fusion", "disabled", "off"], default=cls.DEFAULT_FUSION_METHOD, optional=True, tooltip="Fuse visual conditioning after encoding, or visual features and DeepStack before joint encoding. Off/no-image behavior remains unchanged."),
             ],
-            outputs=[
-                io.Conditioning.Output(id="conditioning", display_name="conditioning", is_output_list=True),
-                io.Latent.Output(id="latent", display_name="latent", is_output_list=True, tooltip="VAE reference latent encoded from input images (None if VAE or images disconnected)."),
-            ],
+            outputs=[io.Conditioning.Output(id="conditioning", display_name="conditioning", is_output_list=True), io.Latent.Output(id="latent", display_name="latent", is_output_list=True, tooltip="VAE reference latent encoded from input images (None if VAE or images disconnected).")],
         )
 
     @classmethod
@@ -2280,9 +1722,7 @@ class UC_AdvancedVisualConditioningEncode(io.ComfyNode):
         moss_image = is_moss_image_text_encoder(clip)
         qwen_image21 = is_qwen_image21_text_encoder(clip)
         if minimax_h3 and ref_latent_mode != "off":
-            raise ValueError(
-                "MiniMax H3 reference latents require Core's MiniMax H3 reference conditioning node. Set ref_latent_mode to off."
-            )
+            raise ValueError("MiniMax H3 reference latents require Core's MiniMax H3 reference conditioning node. Set ref_latent_mode to off.")
 
         def format_krea_prompt(user_prompt):
             if qwen_image21:
@@ -2296,17 +1736,8 @@ class UC_AdvancedVisualConditioningEncode(io.ComfyNode):
             if klein_vl and not system_prompt:
                 return user_prompt
             if system_prompt or active_images:
-                return (
-                    "<|im_start|>user\n<|im_end|>\n"
-                    f"<|im_start|>system\n{system_prompt}<|im_end|>\n"
-                    f"<|im_start|>user\n{user_prompt}<|im_end|>\n"
-                    "<|im_start|>assistant\n"
-                )
-            return (
-                "<|im_start|>system\nDescribe the image by detailing the color, shape, size, texture, quantity, text, spatial relationships of the objects and background:<|im_end|>\n"
-                f"<|im_start|>user\n{user_prompt}<|im_end|>\n"
-                "<|im_start|>assistant\n"
-            )
+                return f"<|im_start|>user\n<|im_end|>\n<|im_start|>system\n{system_prompt}<|im_end|>\n<|im_start|>user\n{user_prompt}<|im_end|>\n<|im_start|>assistant\n"
+            return f"<|im_start|>system\nDescribe the image by detailing the color, shape, size, texture, quantity, text, spatial relationships of the objects and background:<|im_end|>\n<|im_start|>user\n{user_prompt}<|im_end|>\n<|im_start|>assistant\n"
 
         def add_semantic_anchors(user_prompt, picture_numbers):
             if not semantic_anchor or minimax_h3:
@@ -2315,9 +1746,7 @@ class UC_AdvancedVisualConditioningEncode(io.ComfyNode):
             anchored_prompt = [prompt_segments[0]]
             for index, segment in enumerate(prompt_segments[1:]):
                 if index < len(picture_numbers):
-                    anchored_prompt.append(
-                        f"<Picture {picture_numbers[index]}>: {VISION_BLOCK}"
-                    )
+                    anchored_prompt.append(f"<Picture {picture_numbers[index]}>: {VISION_BLOCK}")
                 else:
                     anchored_prompt.append(VISION_BLOCK)
                 anchored_prompt.append(segment)
@@ -2326,17 +1755,9 @@ class UC_AdvancedVisualConditioningEncode(io.ComfyNode):
         if not active_images and not active_fusion:
             # Fallback if no images are connected: encode prompt as plain text
             logging.warning("AdvancedVisualConditioning: no images are connected; encoding the prompt as text only.")
-            clean_prompt, _ = prepare_image_placeholder_prompt(
-                prompt,
-                image_count=0,
-                fusion_active=False,
-                context="AdvancedVisualConditioning",
-            )
+            clean_prompt, _ = prepare_image_placeholder_prompt(prompt, image_count=0, fusion_active=False, context="AdvancedVisualConditioning")
             full_prompt = format_krea_prompt(clean_prompt)
-            conditioning = multiply_conditioning(
-                encode_embedding_classical_scaled_bias(clip, full_prompt, skip_template=True),
-                multiplier,
-            )
+            conditioning = multiply_conditioning(encode_embedding_classical_scaled_bias(clip, full_prompt, skip_template=True), multiplier)
             return io.NodeOutput(conditioning, None)
 
         # Map active images sequentially to letter variables (a, b, c, ...) and encode each pass
@@ -2352,28 +1773,19 @@ class UC_AdvancedVisualConditioningEncode(io.ComfyNode):
             visual_fusion_config = {"visual_fusion_method": "off"}
         visual_method = visual_fusion_config.get("visual_fusion_method", "off")
         visual_encoder_path = visual_fusion_config.get("visual_encoder_path", "grid-deepstack")
-        save_visual_embedding = bool(
-            visual_fusion_config.get("save_blended_embeds", False)
-        )
+        save_visual_embedding = bool(visual_fusion_config.get("save_blended_embeds", False))
 
         qwen_vae_images = None
         if qwen_image21:
             qwen_res = max(0, int(vae_resolution))
-            qwen_keep_vision = (vae is None or ref_latent_mode == "off")
+            qwen_keep_vision = vae is None or ref_latent_mode == "off"
             qwen_pairs = [prepare_qwen_image21_image(image, qwen_res) for image in active_images]
             processed_active_images = [p[0] for p in qwen_pairs]
             qwen_vae_images = [p[1] for p in qwen_pairs]
         else:
             qwen_keep_vision = True
-            processed_active_images = [
-                prepare_vlm_image(image, vlm_resolution) for image in active_images
-            ]
-        prepared_prompt, inline_numbers = prepare_image_placeholder_prompt(
-            prompt,
-            image_count=len(processed_active_images),
-            fusion_active=visual_method != "off",
-            context="AdvancedVisualConditioning",
-        )
+            processed_active_images = [prepare_vlm_image(image, vlm_resolution) for image in active_images]
+        prepared_prompt, inline_numbers = prepare_image_placeholder_prompt(prompt, image_count=len(processed_active_images), fusion_active=visual_method != "off", context="AdvancedVisualConditioning")
         if klein_vl:
             prepared_prompt = prepared_prompt.replace(VISION_BLOCK, "")
 
@@ -2391,28 +1803,17 @@ class UC_AdvancedVisualConditioningEncode(io.ComfyNode):
                         anchored_prompt.append(segment)
                     inline_prompt = format_krea_prompt("".join(anchored_prompt))
                 else:
-                    inline_prompt = format_krea_prompt(
-                        add_semantic_anchors(prepared_prompt, inline_numbers)
-                    )
+                    inline_prompt = format_krea_prompt(add_semantic_anchors(prepared_prompt, inline_numbers))
             else:
                 inline_images = processed_active_images
                 inline_vae_source = qwen_vae_images
                 refs = " ".join(f"<image{i + 1}>{VISION_BLOCK}" for i in range(len(processed_active_images)))
                 inline_prompt = format_krea_prompt(f"{refs} {prepared_prompt}".strip())
             if strip_contextual_weight_syntax(inline_prompt) != inline_prompt:
-                logging.warning(
-                    "AdvancedVisualConditioning: custom contextual vector scaling is disabled for native multi-image inline encoding."
-                )
+                logging.warning("AdvancedVisualConditioning: custom contextual vector scaling is disabled for native multi-image inline encoding.")
             try:
                 with qwen3vl_visual_encoder_path(clip, visual_encoder_path):
-                    inline_tokens = (
-                        tokenize_minimax_h3_prompt(clip, inline_prompt, inline_images)
-                        if minimax_h3
-                        else clip.tokenize(
-                            inline_prompt, images=inline_images, skip_template=True,
-                            **({"keep_vision": qwen_keep_vision} if qwen_image21 else {}),
-                        )
-                    )
+                    inline_tokens = tokenize_minimax_h3_prompt(clip, inline_prompt, inline_images) if minimax_h3 else clip.tokenize(inline_prompt, images=inline_images, skip_template=True, **({"keep_vision": qwen_keep_vision} if qwen_image21 else {}))
                     inline_cond = clip.encode_from_tokens_scheduled(inline_tokens)
                 if len(inline_cond) != 1:
                     raise ValueError("Inline image encoding requires a single conditioning schedule entry.")
@@ -2425,16 +1826,8 @@ class UC_AdvancedVisualConditioningEncode(io.ComfyNode):
                     ref_latents = ref_latents_qwen
                     inline_cond = apply_parallel_ref_latents(clip, inline_cond, ref_latents_qwen, ref_latent_mode)
             except (TypeError, ValueError) as exc:
-                logging.warning(
-                    "AdvancedVisualConditioning: inline placeholder encoding failed (%s); falling back to per-image formula encoding.",
-                    exc,
-                )
-                prepared_prompt, _ = prepare_image_placeholder_prompt(
-                    prompt,
-                    image_count=0,
-                    fusion_active=False,
-                    context="AdvancedVisualConditioning fallback",
-                )
+                logging.warning("AdvancedVisualConditioning: inline placeholder encoding failed (%s); falling back to per-image formula encoding.", exc)
+                prepared_prompt, _ = prepare_image_placeholder_prompt(prompt, image_count=0, fusion_active=False, context="AdvancedVisualConditioning fallback")
             except Exception:
                 logging.exception("AdvancedVisualConditioning: inline image encoding failed and cannot be safely recovered.")
                 raise
@@ -2447,16 +1840,9 @@ class UC_AdvancedVisualConditioningEncode(io.ComfyNode):
                 reference_cond_dict = inline_cond[0][1]
                 if save_visual_embedding or image_strength != 1.0:
                     tokens_dict["a"] = inline_tokens
-                    visual_ranges["a"] = find_visual_token_range(
-                        inline_tokens,
-                        sequence_tensors["a"],
-                        qwen_image21=qwen_image21,
-                    )
+                    visual_ranges["a"] = find_visual_token_range(inline_tokens, sequence_tensors["a"], qwen_image21=qwen_image21)
                 if formula.strip() not in {"", "a"}:
-                    logging.warning(
-                        "AdvancedVisualConditioning: numbered inline placeholders encode one native multimodal sequence; formula '%s' was ignored.",
-                        formula,
-                    )
+                    logging.warning("AdvancedVisualConditioning: numbered inline placeholders encode one native multimodal sequence; formula '%s' was ignored.", formula)
                 formula = "a"
 
         multipass_images = [] if inline_mode else (active_fusion or active_images)
@@ -2468,9 +1854,7 @@ class UC_AdvancedVisualConditioningEncode(io.ComfyNode):
             if not klein_vl and not any(tag in modified_prompt for tag in ["<|image_pad|>", "<|image|>", "<|vision_start|>"]):
                 modified_prompt = VISION_BLOCK + modified_prompt
             picture_number = 1 if visual_method != "off" else idx + 1
-            modified_prompt = add_semantic_anchors(
-                modified_prompt, (picture_number,)
-            )
+            modified_prompt = add_semantic_anchors(modified_prompt, (picture_number,))
             full_prompt = format_krea_prompt(modified_prompt)
 
             if qwen_image21:
@@ -2482,58 +1866,24 @@ class UC_AdvancedVisualConditioningEncode(io.ComfyNode):
             if not klein_vl:
                 encode_kwargs["skip_template"] = True
             if minimax_h3:
-                tokenize_callback = lambda text, image=processed_img: (
-                    tokenize_minimax_h3_prompt(clip, text, [image])
-                )
+                tokenize_callback = lambda text, image=processed_img: tokenize_minimax_h3_prompt(clip, text, [image])
                 encode_kwargs = {}
-            cond_X = encode_embedding_classical_scaled_bias(
-                clip,
-                full_prompt,
-                tokenize_callback=tokenize_callback,
-                visual_encoder_path=(
-                    visual_encoder_path
-                    if visual_method != "off"
-                    else "grid-deepstack"
-                ),
-                **encode_kwargs,
-            )
+            cond_X = encode_embedding_classical_scaled_bias(clip, full_prompt, tokenize_callback=tokenize_callback, visual_encoder_path=(visual_encoder_path if visual_method != "off" else "grid-deepstack"), **encode_kwargs)
             if len(cond_X) != 1:
-                raise ValueError(
-                    "Advanced visual fusion requires a single conditioning schedule entry."
-                )
+                raise ValueError("Advanced visual fusion requires a single conditioning schedule entry.")
             C_X = cond_X[0][0]
             P_X = cond_X[0][1].get("pooled_output")
             cond_metadata = cond_X[0][1]
 
             if visual_method != "off" or save_visual_embedding or image_strength != 1.0:
                 try:
-                    tokens = (
-                        tokenize_minimax_h3_prompt(clip, full_prompt, [processed_img])
-                        if minimax_h3
-                        else clip.tokenize(
-                            full_prompt, images=[processed_img], skip_template=True, **({"keep_vision": qwen_keep_vision} if qwen_image21 else {})
-                        )
-                    )
+                    tokens = tokenize_minimax_h3_prompt(clip, full_prompt, [processed_img]) if minimax_h3 else clip.tokenize(full_prompt, images=[processed_img], skip_template=True, **({"keep_vision": qwen_keep_vision} if qwen_image21 else {}))
                     tokens_dict[letter] = tokens
-                    visual_ranges[letter] = find_visual_token_range(
-                        tokens,
-                        C_X,
-                        legacy_krea_spatial=(
-                            visual_method != "off"
-                            and visual_encoder_path == "legacy-flat"
-                        ),
-                        qwen_image21=qwen_image21,
-                    )
+                    visual_ranges[letter] = find_visual_token_range(tokens, C_X, legacy_krea_spatial=(visual_method != "off" and visual_encoder_path == "legacy-flat"), qwen_image21=qwen_image21)
                     if visual_method != "off":
-                        visual_grids[letter] = visual_fusion_grid(
-                            processed_img,
-                            visual_ranges[letter][1] - visual_ranges[letter][0],
-                            visual_encoder_path == "legacy-flat",
-                        )
+                        visual_grids[letter] = visual_fusion_grid(processed_img, visual_ranges[letter][1] - visual_ranges[letter][0], visual_encoder_path == "legacy-flat")
                 except Exception as exc:
-                    raise ValueError(
-                        f"Could not locate the visual token range for image {idx + 1}: {exc}"
-                    ) from exc
+                    raise ValueError(f"Could not locate the visual token range for image {idx + 1}: {exc}") from exc
 
             sequence_tensors[letter] = C_X
             if P_X is not None:
@@ -2551,34 +1901,15 @@ class UC_AdvancedVisualConditioningEncode(io.ComfyNode):
             if "tokens" in locals() and tokens:
                 key_name = next(iter(tokens.keys()))
 
-            C_blended, P_blended = evaluate_conditioning_consensus_blend(
-                sequence_tensors,
-                pooled_tensors,
-                visual_fusion_config=visual_fusion_config,
-                device=device,
-                visual_ranges=visual_ranges,
-                embedding_key=key_name,
-                clip=clip,
-                tokens_dict=tokens_dict,
-                mask_cache=fusion_mask_cache,
-                visual_grids=visual_grids,
-            )
+            C_blended, P_blended = evaluate_conditioning_consensus_blend(sequence_tensors, pooled_tensors, visual_fusion_config=visual_fusion_config, device=device, visual_ranges=visual_ranges, embedding_key=key_name, clip=clip, tokens_dict=tokens_dict, mask_cache=fusion_mask_cache, visual_grids=visual_grids)
         else:
             C_blended, P_blended = evaluate_conditioning_formula(formula.strip() or "a", sequence_tensors, pooled_tensors, padding_method=padding_method)
             if save_visual_embedding:
                 default_key = "a"
                 source_tokens = tokens_dict.get(default_key)
                 if source_tokens is None or default_key not in visual_ranges:
-                    raise ValueError(
-                        "Saving an unfused visual embedding requires the default visual input."
-                    )
-                save_source_visual_embeddings(
-                    clip,
-                    source_tokens,
-                    visual_fusion_config,
-                    next(iter(source_tokens.keys())),
-                    comfy.model_management.get_torch_device(),
-                )
+                    raise ValueError("Saving an unfused visual embedding requires the default visual input.")
+                save_source_visual_embeddings(clip, source_tokens, visual_fusion_config, next(iter(source_tokens.keys())), comfy.model_management.get_torch_device())
 
         # Build final conditioning dictionary
         final_cond_dict = reference_cond_dict.copy()
@@ -2589,13 +1920,8 @@ class UC_AdvancedVisualConditioningEncode(io.ComfyNode):
         if P_blended is not None:
             final_cond_dict["pooled_output"] = P_blended
         minimax_tags = final_cond_dict.get("minimax_token_tags")
-        if minimax_h3 and (
-            not torch.is_tensor(minimax_tags)
-            or minimax_tags.numel() != C_blended.shape[1]
-        ):
-            raise ValueError(
-                "MiniMax H3 modality tags do not match the fused conditioning sequence length."
-            )
+        if minimax_h3 and (not torch.is_tensor(minimax_tags) or minimax_tags.numel() != C_blended.shape[1]):
+            raise ValueError("MiniMax H3 modality tags do not match the fused conditioning sequence length.")
 
         if multiplier != 1.0:
             C_blended *= multiplier
@@ -2604,12 +1930,7 @@ class UC_AdvancedVisualConditioningEncode(io.ComfyNode):
 
         if image_strength != 1.0 and active_images:
             source_tokens = inline_tokens if inline_mode else tokens_dict.get("a")
-            ctx_bias = build_context_attention_bias(
-                source_tokens,
-                C_blended,
-                image_strength=image_strength,
-                visual_ranges=visual_ranges,
-            )
+            ctx_bias = build_context_attention_bias(source_tokens, C_blended, image_strength=image_strength, visual_ranges=visual_ranges)
             if ctx_bias is not None:
                 final_cond_dict["context_attention_bias"] = ctx_bias
 
@@ -2637,27 +1958,9 @@ class UC_AdvancedVisualConditioningEncode(io.ComfyNode):
             conditioning = apply_parallel_ref_latents(clip, conditioning, ref_latents, ref_latent_mode)
         return io.NodeOutput(conditioning, resolve_reference_latent_output(ref_latents))
 
-
     @classmethod
     def _execute_token_fusion(
-        cls,
-        clip,
-        prompt,
-        vlm_resolution,
-        image_inputs=None,
-        fusion_images=None,
-        visual_fusion_config=None,
-        formula="",
-        padding_method="zero-pad",
-        vae_resolution=1024,
-        ref_latent_mode="off",
-        vae=None,
-        multiplier=1.0,
-        image_strength=1.0,
-        vae_dimension_multiple=8,
-        semantic_anchor=False,
-        system_prompt="",
-        **kwargs,
+        cls, clip, prompt, vlm_resolution, image_inputs=None, fusion_images=None, visual_fusion_config=None, formula="", padding_method="zero-pad", vae_resolution=1024, ref_latent_mode="off", vae=None, multiplier=1.0, image_strength=1.0, vae_dimension_multiple=8, semantic_anchor=False, system_prompt="", **kwargs
     ):
         config = visual_fusion_config or {"visual_fusion_method": "off"}
         if config.get("visual_fusion_method", "off") == "off":
@@ -2705,29 +2008,14 @@ class UC_AdvancedVisualConditioningEncode(io.ComfyNode):
             kwargs["system_prompt"] = system_prompt
             return cls._execute_conds_fusion(**kwargs)
         if is_minimax_h3_text_encoder(clip) and ref_latent_mode != "off":
-            raise ValueError(
-                "MiniMax H3 reference latents require Core's MiniMax H3 reference conditioning node; set ref_latent_mode to off."
-            )
-        conditioning, token_sources = execute_token_fusion_visual_conditioning(
-            clip,
-            prompt,
-            token_sources,
-            config,
-            vlm_resolution,
-            system_prompt,
-            multiplier,
-            True,
-        )
+            raise ValueError("MiniMax H3 reference latents require Core's MiniMax H3 reference conditioning node; set ref_latent_mode to off.")
+        conditioning, token_sources = execute_token_fusion_visual_conditioning(clip, prompt, token_sources, config, vlm_resolution, system_prompt, multiplier, True)
         if image_strength != 1.0 and token_sources:
             t_src = token_sources[0] if token_sources else None
             for item in conditioning:
                 c_tensor = item[0]
                 c_meta = item[1]
-                ctx_bias = build_context_attention_bias(
-                    t_src,
-                    c_tensor,
-                    image_strength=image_strength,
-                )
+                ctx_bias = build_context_attention_bias(t_src, c_tensor, image_strength=image_strength)
                 if ctx_bias is not None:
                     c_meta["context_attention_bias"] = ctx_bias
         ref_latents = []
@@ -2745,22 +2033,13 @@ class UC_AdvancedVisualConditioningEncode(io.ComfyNode):
                     samples = image.movedim(-1, 1)
                     prepared = prepare_vae_reference_image(samples, target, vae_dimension_multiple)
                     ref_latents.append(vae.encode(prepared.movedim(1, -1)[:, :, :, :3]))
-        return io.NodeOutput(
-            apply_parallel_ref_latents(clip, conditioning, ref_latents, ref_latent_mode),
-            resolve_reference_latent_output(ref_latents),
-        )
-
+        return io.NodeOutput(apply_parallel_ref_latents(clip, conditioning, ref_latents, ref_latent_mode), resolve_reference_latent_output(ref_latents))
 
 
 class TextEncodeEditScaledAdv(io.ComfyNode):
     @classmethod
     def define_schema(cls):
-        autogrow_template = io.Autogrow.TemplatePrefix(
-            io.Image.Input("image", optional=True),
-            prefix="image",
-            min=1,
-            max=16
-        )
+        autogrow_template = io.Autogrow.TemplatePrefix(io.Image.Input("image", optional=True), prefix="image", min=1, max=16)
         return io.Schema(
             node_id="TextEncodeEditScaledAdv",
             display_name="Text Scaled Encoder (Advanced)",
@@ -2768,59 +2047,23 @@ class TextEncodeEditScaledAdv(io.ComfyNode):
             inputs=[
                 # --- Primary Inputs ---
                 io.Clip.Input("clip", tooltip="CLIP/T5 dual text encoder reference."),
-                io.String.Input(
-                    "prompt",
-                    multiline=True,
-                    dynamic_prompts=True,
-                    tooltip="Main user text prompt. Supports classical weight syntax: (prompt:weight), e.g. (sunset:1.2).",
-                ),
-                io.Int.Input(
-                    "vlm_resolution",
-                    default=384,
-                    min=0,
-                    max=4096,
-                    step=32,
-                    tooltip="Equivalent-square VLM target from 256 to 4096. Values outside that range preserve original resolution.",
-                ),
-
+                io.String.Input("prompt", multiline=True, dynamic_prompts=True, tooltip="Main user text prompt. Supports classical weight syntax: (prompt:weight), e.g. (sunset:1.2)."),
+                io.Int.Input("vlm_resolution", default=384, min=0, max=4096, step=32, tooltip="Equivalent-square VLM target from 256 to 4096. Values outside that range preserve original resolution."),
                 # --- Modular Configurations ---
                 VisualFusionConfig.Input("visual_fusion_config", display_name="Fusion Config", optional=True, tooltip="Optional spatial visual fusion configuration from UC_VisualFusionConfig. Blends isolated visual blocks without coordinate blur."),
-
                 # --- Fallback Controls ---
-                io.String.Input(
-                    "formula",
-                    default="",
-                    multiline=False,
-                    tooltip="Optional conditioning formula used only when visual fusion is off. Empty selects the first image pass.",
-                ),
+                io.String.Input("formula", default="", multiline=False, tooltip="Optional conditioning formula used only when visual fusion is off. Empty selects the first image pass."),
+                io.Combo.Input("padding_method", options=["zero-pad", "interpolate"], default="zero-pad", tooltip="Alignment method for images with different aspect ratios/resolutions. Active ONLY if visual_fusion_config is disconnected or set to 'off'."),
+                io.Int.Input("vae_resolution", default=1024, min=0, max=16384, step=32, tooltip="Resolution of the reference latent encoded by the VAE (0 = original resolution). Aligned to vae_dimension_multiple."),
                 io.Combo.Input(
-                    "padding_method",
-                    options=["zero-pad", "interpolate"],
-                    default="zero-pad",
-                    tooltip="Alignment method for images with different aspect ratios/resolutions. Active ONLY if visual_fusion_config is disconnected or set to 'off'.",
-                ),
-                io.Int.Input(
-                    "vae_resolution",
-                    default=1024,
-                    min=0,
-                    max=16384,
-                    step=32,
-                    tooltip="Resolution of the reference latent encoded by the VAE (0 = original resolution). Aligned to vae_dimension_multiple.",
-                ),
-                io.Combo.Input(
-                    "ref_latent_mode",
-                    options=["off", "single", "multi", "parallel-single", "parallel-multi"],
-                    default="off",
-                    tooltip="Reference latent encoding mode. 'single'/'multi' append latents; 'parallel-single'/'parallel-multi' run them in a separate conditioning stream to prevent semantic override.",
+                    "ref_latent_mode", options=["off", "single", "multi", "parallel-single", "parallel-multi"], default="off", tooltip="Reference latent encoding mode. 'single'/'multi' append latents; 'parallel-single'/'parallel-multi' run them in a separate conditioning stream to prevent semantic override."
                 ),
                 io.Vae.Input("vae", optional=True),
                 io.Float.Input("multiplier", default=1.0, min=-1000.0, max=1000.0, step=0.1, tooltip="Overall multiplier applied to the final conditioning vector."),
                 io.Int.Input("vae_dimension_multiple", default=8, min=4, max=256, step=4, advanced=True, tooltip="Pixel multiple used to align reference images before VAE encoding."),
                 io.Autogrow.Input("image_inputs", template=autogrow_template, tooltip="Multimodal images. Maps active inputs sequentially to variables (a, b, c, ...)."),
             ],
-            outputs=[
-                io.Conditioning.Output(),
-            ],
+            outputs=[io.Conditioning.Output()],
         )
 
     @classmethod
@@ -2855,44 +2098,21 @@ class TextEncodeEditScaledAdv(io.ComfyNode):
                 modified_prompt = "<|vision_start|><|image_pad|><|vision_end|>" + modified_prompt
 
             processed_img = prepare_vlm_image(img, vlm_resolution)
-            cond_X = encode_embedding_classical_scaled_bias(
-                clip,
-                modified_prompt,
-                images=[processed_img],
-                visual_encoder_path=(
-                    visual_encoder_path
-                    if visual_method != "off"
-                    else "grid-deepstack"
-                ),
-            )
+            cond_X = encode_embedding_classical_scaled_bias(clip, modified_prompt, images=[processed_img], visual_encoder_path=(visual_encoder_path if visual_method != "off" else "grid-deepstack"))
             if len(cond_X) != 1:
-                raise ValueError(
-                    "Advanced visual fusion requires a single conditioning schedule entry."
-                )
+                raise ValueError("Advanced visual fusion requires a single conditioning schedule entry.")
             C_X = cond_X[0][0]
             P_X = cond_X[0][1].get("pooled_output")
             cond_metadata = cond_X[0][1]
 
             if visual_method != "off":
                 try:
-                    tokens = clip.tokenize(
-                        modified_prompt, images=[processed_img], skip_template=True
-                    )
+                    tokens = clip.tokenize(modified_prompt, images=[processed_img], skip_template=True)
                     tokens_dict[letter] = tokens
-                    visual_ranges[letter] = find_visual_token_range(
-                        tokens,
-                        C_X,
-                        legacy_krea_spatial=visual_encoder_path == "legacy-flat",
-                    )
-                    visual_grids[letter] = visual_fusion_grid(
-                        processed_img,
-                        visual_ranges[letter][1] - visual_ranges[letter][0],
-                        visual_encoder_path == "legacy-flat",
-                    )
+                    visual_ranges[letter] = find_visual_token_range(tokens, C_X, legacy_krea_spatial=visual_encoder_path == "legacy-flat")
+                    visual_grids[letter] = visual_fusion_grid(processed_img, visual_ranges[letter][1] - visual_ranges[letter][0], visual_encoder_path == "legacy-flat")
                 except Exception as exc:
-                    raise ValueError(
-                        f"Could not locate the visual token range for image {idx + 1}: {exc}"
-                    ) from exc
+                    raise ValueError(f"Could not locate the visual token range for image {idx + 1}: {exc}") from exc
 
             sequence_tensors[letter] = C_X
             if P_X is not None:
@@ -2910,18 +2130,7 @@ class TextEncodeEditScaledAdv(io.ComfyNode):
             if "tokens" in locals() and tokens:
                 key_name = next(iter(tokens.keys()))
 
-            C_blended, P_blended = evaluate_conditioning_consensus_blend(
-                sequence_tensors,
-                pooled_tensors,
-                visual_fusion_config=visual_fusion_config,
-                device=device,
-                visual_ranges=visual_ranges,
-                embedding_key=key_name,
-                clip=clip,
-                tokens_dict=tokens_dict,
-                mask_cache=fusion_mask_cache,
-                visual_grids=visual_grids,
-            )
+            C_blended, P_blended = evaluate_conditioning_consensus_blend(sequence_tensors, pooled_tensors, visual_fusion_config=visual_fusion_config, device=device, visual_ranges=visual_ranges, embedding_key=key_name, clip=clip, tokens_dict=tokens_dict, mask_cache=fusion_mask_cache, visual_grids=visual_grids)
         else:
             C_blended, P_blended = evaluate_conditioning_formula(formula.strip() or "a", sequence_tensors, pooled_tensors, padding_method=padding_method)
 
@@ -2968,25 +2177,11 @@ class UC_Krea2InputEmbeds(io.ComfyNode):
                 io.Clip.Input("clip"),
                 io.String.Input("prompt", multiline=True, default="", tooltip="Input text prompt. Important: skips any template wrapping."),
                 io.String.Input("image_paths", multiline=True, default="", placeholder="C:/paths/to/image1.png\nC:/paths/to/image2.png", tooltip="Line-separated list of paths to image files. Must map 1-to-1 with file_names."),
-                io.Int.Input(
-                    "vlm_resolution",
-                    default=384,
-                    min=0,
-                    max=4096,
-                    step=32,
-                    tooltip="Equivalent-square VLM target from 256 to 4096. Values outside that range preserve original resolution.",
-                ),
+                io.Int.Input("vlm_resolution", default=384, min=0, max=4096, step=32, tooltip="Equivalent-square VLM target from 256 to 4096. Values outside that range preserve original resolution."),
                 io.String.Input("file_names", multiline=True, default="", placeholder="bulbasaur\nivysaur", tooltip="Line-separated list of file names to save as (without .safetensors). Can include nested subfolders. Must map 1-to-1 with image_paths."),
-                io.Boolean.Input(
-                    "slice_visual_tokens",
-                    default=False,
-                    tooltip="If True, extracts only the interior visual token span (stripping <|vision_start|>, <|vision_end|>, and text tokens). If False, preserves the full sequence.",
-                ),
+                io.Boolean.Input("slice_visual_tokens", default=False, tooltip="If True, extracts only the interior visual token span (stripping <|vision_start|>, <|vision_end|>, and text tokens). If False, preserves the full sequence."),
             ],
-            outputs=[
-                io.AnyType.Output("state_dict", display_name="State Dict", tooltip="Dictionary structure: {'qwen3vl_4b': tensor_2d} of shape [num_tokens, 2560]"),
-                io.AnyType.Output("tensor_2d", display_name="Embeddings", tooltip="Raw PyTorch 2D tensor of shape [num_tokens, 2560]"),
-            ]
+            outputs=[io.AnyType.Output("state_dict", display_name="State Dict", tooltip="Dictionary structure: {'qwen3vl_4b': tensor_2d} of shape [num_tokens, 2560]"), io.AnyType.Output("tensor_2d", display_name="Embeddings", tooltip="Raw PyTorch 2D tensor of shape [num_tokens, 2560]")],
         )
 
     @classmethod
@@ -3012,15 +2207,12 @@ class UC_Krea2InputEmbeds(io.ComfyNode):
         # 2. Pre-Execution Path Validation
         for path in img_paths_list:
             if path is not None:
-                normalized_path = path.strip().replace('\\', '/')
+                normalized_path = path.strip().replace("\\", "/")
                 normalized_path = os.path.normpath(normalized_path)
                 if not os.path.isabs(normalized_path):
                     normalized_path = os.path.abspath(normalized_path)
                 if not os.path.isfile(normalized_path):
-                    raise FileNotFoundError(
-                        f"Validation aborted: Image file does not exist: '{path}' (resolved to: '{normalized_path}'). "
-                        "No processing has started, ensuring safe memory state."
-                    )
+                    raise FileNotFoundError(f"Validation aborted: Image file does not exist: '{path}' (resolved to: '{normalized_path}'). No processing has started, ensuring safe memory state.")
 
         # 3. Call clip.load_model() once to register the model as active for comfy-aimdo
         clip.load_model()
@@ -3038,7 +2230,6 @@ class UC_Krea2InputEmbeds(io.ComfyNode):
 
         if clip_model is None or not hasattr(clip_model, "process_tokens"):
             raise AttributeError("Could not locate underlying model wrapper with 'process_tokens' method in cond_stage_model.")
-
 
         # Locate ComfyUI embeddings directory
         try:
@@ -3089,11 +2280,7 @@ class UC_Krea2InputEmbeds(io.ComfyNode):
                 embeds, _, _, embeds_info = clip_model.process_tokens(tokens_only, device)
 
                 if slice_visual_tokens:
-                    image_spans = [
-                        (int(entry["index"]), int(entry["index"]) + int(entry["size"]))
-                        for entry in (embeds_info or ())
-                        if isinstance(entry, dict) and entry.get("type") == "image" and int(entry.get("size", 0)) > 0
-                    ]
+                    image_spans = [(int(entry["index"]), int(entry["index"]) + int(entry["size"])) for entry in (embeds_info or ()) if isinstance(entry, dict) and entry.get("type") == "image" and int(entry.get("size", 0)) > 0]
                     if image_spans:
                         embeds_sliced = torch.cat([embeds[:, s:e, :] for s, e in image_spans], dim=1)
                     else:
@@ -3135,25 +2322,11 @@ class UC_Qwen3VLInputEmbeds(io.ComfyNode):
                 io.Clip.Input("clip"),
                 io.String.Input("prompt", multiline=True, default="", tooltip="Input text prompt. Important: skips any template wrapping."),
                 io.String.Input("image_paths", multiline=True, default="", placeholder="C:/paths/to/image1.png\nC:/paths/to/image2.png", tooltip="Line-separated list of paths to image files. Must map 1-to-1 with file_names."),
-                io.Int.Input(
-                    "vlm_resolution",
-                    default=384,
-                    min=0,
-                    max=4096,
-                    step=32,
-                    tooltip="Equivalent-square VLM target from 256 to 4096. Values outside that range preserve original resolution.",
-                ),
+                io.Int.Input("vlm_resolution", default=384, min=0, max=4096, step=32, tooltip="Equivalent-square VLM target from 256 to 4096. Values outside that range preserve original resolution."),
                 io.String.Input("file_names", multiline=True, default="", placeholder="bulbasaur\nivysaur", tooltip="Line-separated list of file names to save as (without .safetensors). Can include nested subfolders. Must map 1-to-1 with image_paths."),
-                io.Boolean.Input(
-                    "slice_visual_tokens",
-                    default=False,
-                    tooltip="If True, extracts only the interior visual token span (stripping <|vision_start|>, <|vision_end|>, and text tokens). If False, preserves the full sequence.",
-                ),
+                io.Boolean.Input("slice_visual_tokens", default=False, tooltip="If True, extracts only the interior visual token span (stripping <|vision_start|>, <|vision_end|>, and text tokens). If False, preserves the full sequence."),
             ],
-            outputs=[
-                io.AnyType.Output("state_dict", display_name="State Dict", tooltip="Dictionary structure: {key_name: tensor_2d} of shape [num_tokens, hidden_size]"),
-                io.AnyType.Output("tensor_2d", display_name="Embeddings", tooltip="Raw PyTorch 2D tensor of shape [num_tokens, hidden_size]"),
-            ]
+            outputs=[io.AnyType.Output("state_dict", display_name="State Dict", tooltip="Dictionary structure: {key_name: tensor_2d} of shape [num_tokens, hidden_size]"), io.AnyType.Output("tensor_2d", display_name="Embeddings", tooltip="Raw PyTorch 2D tensor of shape [num_tokens, hidden_size]")],
         )
 
     @classmethod
@@ -3179,15 +2352,12 @@ class UC_Qwen3VLInputEmbeds(io.ComfyNode):
         # 2. Pre-Execution Path Validation
         for path in img_paths_list:
             if path is not None:
-                normalized_path = path.strip().replace('\\', '/')
+                normalized_path = path.strip().replace("\\", "/")
                 normalized_path = os.path.normpath(normalized_path)
                 if not os.path.isabs(normalized_path):
                     normalized_path = os.path.abspath(normalized_path)
                 if not os.path.isfile(normalized_path):
-                    raise FileNotFoundError(
-                        f"Validation aborted: Image file does not exist: '{path}' (resolved to: '{normalized_path}'). "
-                        "No processing has started, ensuring safe memory state."
-                    )
+                    raise FileNotFoundError(f"Validation aborted: Image file does not exist: '{path}' (resolved to: '{normalized_path}'). No processing has started, ensuring safe memory state.")
 
         # 3. Call clip.load_model() once to register the model as active for comfy-aimdo
         clip.load_model()
@@ -3205,7 +2375,6 @@ class UC_Qwen3VLInputEmbeds(io.ComfyNode):
 
         if clip_model is None or not hasattr(clip_model, "process_tokens"):
             raise AttributeError("Could not locate underlying model wrapper with 'process_tokens' method in cond_stage_model.")
-
 
         # Locate ComfyUI embeddings directory
         try:
@@ -3259,11 +2428,7 @@ class UC_Qwen3VLInputEmbeds(io.ComfyNode):
                 embeds, _, _, embeds_info = clip_model.process_tokens(tokens_only, device)
 
                 if slice_visual_tokens:
-                    image_spans = [
-                        (int(entry["index"]), int(entry["index"]) + int(entry["size"]))
-                        for entry in (embeds_info or ())
-                        if isinstance(entry, dict) and entry.get("type") == "image" and int(entry.get("size", 0)) > 0
-                    ]
+                    image_spans = [(int(entry["index"]), int(entry["index"]) + int(entry["size"])) for entry in (embeds_info or ()) if isinstance(entry, dict) and entry.get("type") == "image" and int(entry.get("size", 0)) > 0]
                     if image_spans:
                         embeds_sliced = torch.cat([embeds[:, s:e, :] for s, e in image_spans], dim=1)
                     else:
@@ -3294,24 +2459,20 @@ class UC_Qwen3VLInputEmbeds(io.ComfyNode):
         return io.NodeOutput(state_dict, tensor_2d)
 
 
-
 _QWEN_IM_START, _QWEN_USER, _QWEN_NL, _QWEN_IM_END = 151644, 872, 198, 151645
+
 
 class Krea2WeightPatch:
     def __get__(self, obj, objtype=None):
         return types.MethodType(krea2_attn_forward_weight, obj)
+
 
 class UC_Krea2TokenAttentionWeight(io.ComfyNode):
     DEFAULT_FUSION_METHOD = "conds_fusion"
 
     @classmethod
     def define_schema(cls):
-        autogrow_template = io.Autogrow.TemplatePrefix(
-            io.Image.Input("image", optional=True),
-            prefix="image",
-            min=1,
-            max=16
-        )
+        autogrow_template = io.Autogrow.TemplatePrefix(io.Image.Input("image", optional=True), prefix="image", min=1, max=16)
         return io.Schema(
             node_id="UC_Krea2TokenAttentionWeight",
             display_name="Krea2 Token Attention Weight",
@@ -3320,58 +2481,19 @@ class UC_Krea2TokenAttentionWeight(io.ComfyNode):
                 # --- Primary Inputs ---
                 io.Model.Input("model", tooltip="Diffusion model to apply the attention monkeypatch to."),
                 io.Clip.Input("clip", tooltip="CLIP/T5 dual text encoder reference."),
-                io.String.Input(
-                    "prompt",
-                    multiline=True,
-                    dynamic_prompts=True,
-                    tooltip="Main prompt. Fusion accepts image_input_fusion or image_input_1 for its single visual slot. Numbered multi-image inline placement is intentionally unavailable in this attention node.",
-                ),
+                io.String.Input("prompt", multiline=True, dynamic_prompts=True, tooltip="Main prompt. Fusion accepts image_input_fusion or image_input_1 for its single visual slot. Numbered multi-image inline placement is intentionally unavailable in this attention node."),
                 io.String.Input("system_prompt", multiline=True, dynamic_prompts=True, default="", tooltip="System prompt injected prior to user description."),
-                io.String.Input(
-                    "attention_weights",
-                    multiline=False,
-                    default="",
-                    tooltip="Space-separated non-negative attention odds weights. Example: (arms:1.5) (painting:0) (photo:2)",
-                ),
-                io.Int.Input(
-                    "vlm_resolution",
-                    default=384,
-                    min=0,
-                    max=4096,
-                    step=32,
-                    tooltip="Equivalent-square VLM target from 256 to 4096. Values outside that range preserve original resolution.",
-                ),
+                io.String.Input("attention_weights", multiline=False, default="", tooltip="Space-separated non-negative attention odds weights. Example: (arms:1.5) (painting:0) (photo:2)"),
+                io.Int.Input("vlm_resolution", default=384, min=0, max=4096, step=32, tooltip="Equivalent-square VLM target from 256 to 4096. Values outside that range preserve original resolution."),
                 io.Float.Input("strength", default=1.0, min=0.0, max=4.0, step=0.05, tooltip="Global multiplier on the weighting effect. Effect compounds over all blocks."),
-
                 # --- Modular Configurations ---
                 VisualFusionConfig.Input("visual_fusion_config", display_name="Fusion Config", optional=True, tooltip="Optional spatial visual fusion configuration from UC_VisualFusionConfig. Blends isolated visual blocks without coordinate blur."),
-
                 # --- Fallback Controls ---
-                io.String.Input(
-                    "formula",
-                    default="",
-                    multiline=False,
-                    tooltip="Optional conditioning formula used only when visual fusion is off. Empty selects the first image pass.",
-                ),
+                io.String.Input("formula", default="", multiline=False, tooltip="Optional conditioning formula used only when visual fusion is off. Empty selects the first image pass."),
+                io.Combo.Input("padding_method", options=["zero-pad", "interpolate"], default="zero-pad", tooltip="Alignment method for images with different aspect ratios/resolutions. Active ONLY if visual_fusion_config is disconnected or set to 'off'."),
+                io.Int.Input("vae_resolution", default=1024, min=0, max=16384, step=32, tooltip="Resolution of the reference latent encoded by the VAE (0 = original resolution). Aligned to vae_dimension_multiple."),
                 io.Combo.Input(
-                    "padding_method",
-                    options=["zero-pad", "interpolate"],
-                    default="zero-pad",
-                    tooltip="Alignment method for images with different aspect ratios/resolutions. Active ONLY if visual_fusion_config is disconnected or set to 'off'.",
-                ),
-                io.Int.Input(
-                    "vae_resolution",
-                    default=1024,
-                    min=0,
-                    max=16384,
-                    step=32,
-                    tooltip="Resolution of the reference latent encoded by the VAE (0 = original resolution). Aligned to vae_dimension_multiple.",
-                ),
-                io.Combo.Input(
-                    "ref_latent_mode",
-                    options=["off", "single", "multi", "parallel-single", "parallel-multi"],
-                    default="off",
-                    tooltip="Reference latent encoding mode. 'single'/'multi' append latents; 'parallel-single'/'parallel-multi' run them in a separate conditioning stream to prevent semantic override.",
+                    "ref_latent_mode", options=["off", "single", "multi", "parallel-single", "parallel-multi"], default="off", tooltip="Reference latent encoding mode. 'single'/'multi' append latents; 'parallel-single'/'parallel-multi' run them in a separate conditioning stream to prevent semantic override."
                 ),
                 io.Vae.Input("vae", optional=True),
                 io.Float.Input("multiplier", default=1.0, min=-1000.0, max=1000.0, step=0.1, tooltip="Overall multiplier applied to the final conditioning vector."),
@@ -3379,15 +2501,31 @@ class UC_Krea2TokenAttentionWeight(io.ComfyNode):
                 io.Autogrow.Input("image_inputs", template=autogrow_template, tooltip="Multimodal images. Maps active inputs sequentially to variables (a, b, c, ...)."),
                 io.Combo.Input("fusion_method", options=["conds_fusion", "token_fusion", "disabled", "off"], default=cls.DEFAULT_FUSION_METHOD, optional=True, tooltip="Select pre- or post-encoding visual fusion. Experimental attention weighting and off/no-image behavior remain unchanged."),
             ],
-            outputs=[
-                io.Model.Output(),
-                io.Conditioning.Output(),
-            ],
+            outputs=[io.Model.Output(), io.Conditioning.Output()],
             is_experimental=True,
         )
 
     @classmethod
-    def execute(cls, model, clip, prompt, system_prompt, attention_weights, image_inputs: io.Autogrow.Type, vlm_resolution: int, visual_fusion_config: dict = None, formula: str = "", padding_method: str = "zero-pad", vae_resolution=1024, ref_latent_mode="off", vae=None, multiplier: float = 1.0, strength: float = 1.0, vae_dimension_multiple=8, fusion_method=None) -> io.NodeOutput:
+    def execute(
+        cls,
+        model,
+        clip,
+        prompt,
+        system_prompt,
+        attention_weights,
+        image_inputs: io.Autogrow.Type,
+        vlm_resolution: int,
+        visual_fusion_config: dict = None,
+        formula: str = "",
+        padding_method: str = "zero-pad",
+        vae_resolution=1024,
+        ref_latent_mode="off",
+        vae=None,
+        multiplier: float = 1.0,
+        strength: float = 1.0,
+        vae_dimension_multiple=8,
+        fusion_method=None,
+    ) -> io.NodeOutput:
         method = normalize_visual_fusion_method(fusion_method, default=cls.DEFAULT_FUSION_METHOD)
         execute = cls._execute_token_fusion if method == "token_fusion" else cls._execute_conds_fusion
         return execute(
@@ -3410,7 +2548,25 @@ class UC_Krea2TokenAttentionWeight(io.ComfyNode):
         )
 
     @classmethod
-    def _execute_conds_fusion(cls, model, clip, prompt, system_prompt, attention_weights, image_inputs: io.Autogrow.Type, vlm_resolution: int, visual_fusion_config: dict = None, formula: str = "", padding_method: str = "zero-pad", vae_resolution=1024, ref_latent_mode="off", vae=None, multiplier: float = 1.0, strength: float = 1.0, vae_dimension_multiple=8) -> io.NodeOutput:
+    def _execute_conds_fusion(
+        cls,
+        model,
+        clip,
+        prompt,
+        system_prompt,
+        attention_weights,
+        image_inputs: io.Autogrow.Type,
+        vlm_resolution: int,
+        visual_fusion_config: dict = None,
+        formula: str = "",
+        padding_method: str = "zero-pad",
+        vae_resolution=1024,
+        ref_latent_mode="off",
+        vae=None,
+        multiplier: float = 1.0,
+        strength: float = 1.0,
+        vae_dimension_multiple=8,
+    ) -> io.NodeOutput:
         # Collect, extract, and parse all active (non-null) connected images sequentially (including batched images)
         _, active_images, _ = extract_and_flatten_images(image_inputs)
 
@@ -3425,18 +2581,8 @@ class UC_Krea2TokenAttentionWeight(io.ComfyNode):
 
         def format_krea_prompt(user_text, system_text):
             if system_text:
-                return (
-                    "<|im_start|>user\n<|im_end|>\n"
-                    f"<|im_start|>system\n{system_text}<|im_end|>\n"
-                    f"<|im_start|>user\n{user_text}<|im_end|>\n"
-                    "<|im_start|>assistant\n"
-                )
-            return (
-                "<|im_start|>user\n<|im_end|>\n"
-                "<|im_start|>system\nDescribe the image by detailing the color, shape, size, texture, quantity, text, spatial relationships of the objects and background:<|im_end|>\n"
-                f"<|im_start|>user\n{user_text}<|im_end|>\n"
-                "<|im_start|>assistant\n"
-            )
+                return f"<|im_start|>user\n<|im_end|>\n<|im_start|>system\n{system_text}<|im_end|>\n<|im_start|>user\n{user_text}<|im_end|>\n<|im_start|>assistant\n"
+            return f"<|im_start|>user\n<|im_end|>\n<|im_start|>system\nDescribe the image by detailing the color, shape, size, texture, quantity, text, spatial relationships of the objects and background:<|im_end|>\n<|im_start|>user\n{user_text}<|im_end|>\n<|im_start|>assistant\n"
 
         def add_image_marker(user_text):
             if any(tag in user_text for tag in ["<|image_pad|>", "<|image|>", "<|vision_start|>", "image_input_"]):
@@ -3449,22 +2595,10 @@ class UC_Krea2TokenAttentionWeight(io.ComfyNode):
         visual_encoder_path = visual_fusion_config.get("visual_encoder_path", "grid-deepstack")
 
         if active_images and visual_method != "off":
-            weighted_prompt, _ = prepare_image_placeholder_prompt(
-                weighted_prompt,
-                image_count=len(active_images),
-                fusion_active=True,
-                context="Krea2TokenAttentionWeight",
-            )
+            weighted_prompt, _ = prepare_image_placeholder_prompt(weighted_prompt, image_count=len(active_images), fusion_active=True, context="Krea2TokenAttentionWeight")
         elif re.search(r"\bimage_input_(?:fusion|\d+)\b", weighted_prompt, re.IGNORECASE):
-            logging.warning(
-                "Krea2TokenAttentionWeight: numbered inline images are not supported because attention positions cannot be mapped safely across multiple visual spans; using the existing per-image path."
-            )
-            weighted_prompt, _ = prepare_image_placeholder_prompt(
-                weighted_prompt,
-                image_count=0,
-                fusion_active=False,
-                context="Krea2TokenAttentionWeight",
-            )
+            logging.warning("Krea2TokenAttentionWeight: numbered inline images are not supported because attention positions cannot be mapped safely across multiple visual spans; using the existing per-image path.")
+            weighted_prompt, _ = prepare_image_placeholder_prompt(weighted_prompt, image_count=0, fusion_active=False, context="Krea2TokenAttentionWeight")
 
         clean_prompt = strip_contextual_weight_syntax(weighted_prompt)
         clean_system_prompt = strip_contextual_weight_syntax(weighted_system_prompt)
@@ -3553,43 +2687,21 @@ class UC_Krea2TokenAttentionWeight(io.ComfyNode):
                 weighted_pass_prompt = format_krea_prompt(add_image_marker(weighted_prompt), weighted_system_prompt)
 
                 processed_img = prepare_vlm_image(img, vlm_resolution)
-                cond_X = encode_embedding_classical_scaled_bias(
-                    clip,
-                    weighted_pass_prompt,
-                    images=[processed_img],
-                    skip_template=True,
-                    visual_encoder_path=visual_encoder_path,
-                )
+                cond_X = encode_embedding_classical_scaled_bias(clip, weighted_pass_prompt, images=[processed_img], skip_template=True, visual_encoder_path=visual_encoder_path)
                 if len(cond_X) != 1:
-                    raise ValueError(
-                        "Krea2 attention visual fusion requires a single conditioning schedule entry."
-                    )
+                    raise ValueError("Krea2 attention visual fusion requires a single conditioning schedule entry.")
                 C_X = cond_X[0][0]
                 P_X = cond_X[0][1].get("pooled_output")
                 cond_metadata = cond_X[0][1]
 
                 if visual_method != "off":
                     try:
-                        tokens = clip.tokenize(
-                            clean_pass_prompt,
-                            images=[processed_img],
-                            skip_template=True,
-                        )
+                        tokens = clip.tokenize(clean_pass_prompt, images=[processed_img], skip_template=True)
                         tokens_dict[letter] = tokens
-                        visual_ranges[letter] = find_visual_token_range(
-                            tokens,
-                            C_X,
-                            legacy_krea_spatial=visual_encoder_path == "legacy-flat",
-                        )
-                        visual_grids[letter] = visual_fusion_grid(
-                            processed_img,
-                            visual_ranges[letter][1] - visual_ranges[letter][0],
-                            visual_encoder_path == "legacy-flat",
-                        )
+                        visual_ranges[letter] = find_visual_token_range(tokens, C_X, legacy_krea_spatial=visual_encoder_path == "legacy-flat")
+                        visual_grids[letter] = visual_fusion_grid(processed_img, visual_ranges[letter][1] - visual_ranges[letter][0], visual_encoder_path == "legacy-flat")
                     except Exception as exc:
-                        raise ValueError(
-                            f"Could not locate the visual token range for image {idx + 1}: {exc}"
-                        ) from exc
+                        raise ValueError(f"Could not locate the visual token range for image {idx + 1}: {exc}") from exc
 
                 sequence_tensors[letter] = C_X
                 if P_X is not None:
@@ -3606,18 +2718,7 @@ class UC_Krea2TokenAttentionWeight(io.ComfyNode):
                 if "tokens" in locals() and tokens:
                     key_name = next(iter(tokens.keys()))
 
-                C_blended, P_blended = evaluate_conditioning_consensus_blend(
-                    sequence_tensors,
-                    pooled_tensors,
-                    visual_fusion_config=visual_fusion_config,
-                    device=device,
-                    visual_ranges=visual_ranges,
-                    embedding_key=key_name,
-                    clip=clip,
-                    tokens_dict=tokens_dict,
-                    mask_cache=fusion_mask_cache,
-                    visual_grids=visual_grids,
-                )
+                C_blended, P_blended = evaluate_conditioning_consensus_blend(sequence_tensors, pooled_tensors, visual_fusion_config=visual_fusion_config, device=device, visual_ranges=visual_ranges, embedding_key=key_name, clip=clip, tokens_dict=tokens_dict, mask_cache=fusion_mask_cache, visual_grids=visual_grids)
             else:
                 C_blended, P_blended = evaluate_conditioning_formula(formula.strip() or "a", sequence_tensors, pooled_tensors, padding_method=padding_method)
 
@@ -3660,46 +2761,20 @@ class UC_Krea2TokenAttentionWeight(io.ComfyNode):
 
         return io.NodeOutput(model_clone, conditioning)
 
-
     @classmethod
-    def _execute_token_fusion(
-        cls, model, clip, prompt, system_prompt, attention_weights, image_inputs,
-        vlm_resolution, visual_fusion_config=None, formula="",
-        padding_method="zero-pad", vae_resolution=1024,
-        ref_latent_mode="off", vae=None, multiplier=1.0, strength=1.0,
-        vae_dimension_multiple=8,
-    ):
+    def _execute_token_fusion(cls, model, clip, prompt, system_prompt, attention_weights, image_inputs, vlm_resolution, visual_fusion_config=None, formula="", padding_method="zero-pad", vae_resolution=1024, ref_latent_mode="off", vae=None, multiplier=1.0, strength=1.0, vae_dimension_multiple=8):
         config = visual_fusion_config or {"visual_fusion_method": "off"}
         if config.get("visual_fusion_method", "off") == "off":
-            return cls._execute_conds_fusion(
-                model, clip, prompt, system_prompt, attention_weights, image_inputs,
-                vlm_resolution, visual_fusion_config, formula, padding_method,
-                vae_resolution, ref_latent_mode, vae, multiplier, strength,
-                vae_dimension_multiple,
-            )
+            return cls._execute_conds_fusion(model, clip, prompt, system_prompt, attention_weights, image_inputs, vlm_resolution, visual_fusion_config, formula, padding_method, vae_resolution, ref_latent_mode, vae, multiplier, strength, vae_dimension_multiple)
         _, active_images, _ = extract_and_flatten_images(image_inputs)
         if not active_images:
-            return cls._execute_conds_fusion(
-                model, clip, prompt, system_prompt, attention_weights, image_inputs,
-                vlm_resolution, visual_fusion_config, formula, padding_method,
-                vae_resolution, ref_latent_mode, vae, multiplier, strength,
-                vae_dimension_multiple,
-            )
-        terms = [
-            (match.group(1).strip(), float(match.group(2)))
-            for match in re.finditer(r"\(([^():]+):(-?\d*\.?\d+)\)", attention_weights)
-        ]
+            return cls._execute_conds_fusion(model, clip, prompt, system_prompt, attention_weights, image_inputs, vlm_resolution, visual_fusion_config, formula, padding_method, vae_resolution, ref_latent_mode, vae, multiplier, strength, vae_dimension_multiple)
+        terms = [(match.group(1).strip(), float(match.group(2))) for match in re.finditer(r"\(([^():]+):(-?\d*\.?\d+)\)", attention_weights)]
         if any(not math.isfinite(weight) or weight < 0 for _, weight in terms):
             raise ValueError("Krea2 attention weights must be finite and non-negative.")
-        conditioning, token_sources = execute_token_fusion_visual_conditioning(
-            clip, prompt, active_images, config, vlm_resolution, system_prompt, multiplier, True
-        )
+        conditioning, token_sources = execute_token_fusion_visual_conditioning(clip, prompt, active_images, config, vlm_resolution, system_prompt, multiplier, True)
         token_list = token_sources[0][next(iter(token_sources[0]))][0]
-        ids = [
-            -1 if isinstance(token, dict)
-            else int(token[0] if isinstance(token, tuple) else token)
-            for token in token_list
-        ]
+        ids = [-1 if isinstance(token, dict) else int(token[0] if isinstance(token, tuple) else token) for token in token_list]
         mapping = build_token_to_conditioning_map(token_list, conditioning[0][0])
         weight_pairs = []
         for phrase, weight in terms:
@@ -3736,9 +2811,7 @@ class UC_Krea2TokenAttentionWeight(io.ComfyNode):
                 samples = image.movedim(-1, 1)
                 prepared = prepare_vae_reference_image(samples, target, vae_dimension_multiple)
                 ref_latents.append(vae.encode(prepared.movedim(1, -1)[:, :, :, :3]))
-        conditioning = apply_parallel_ref_latents(
-            clip, conditioning, ref_latents, ref_latent_mode
-        )
+        conditioning = apply_parallel_ref_latents(clip, conditioning, ref_latents, ref_latent_mode)
         return io.NodeOutput(model_clone, conditioning)
 
 
@@ -3778,8 +2851,10 @@ class UC_MiniMaxH3MediaConfig(io.ComfyNode):
     @classmethod
     def define_schema(cls):
         return io.Schema(
-            node_id="UC_MiniMaxH3MediaConfig", display_name="MiniMax H3 Media Configurator",
-            category="advanced/conditioning", is_input_list=True,
+            node_id="UC_MiniMaxH3MediaConfig",
+            display_name="MiniMax H3 Media Configurator",
+            category="advanced/conditioning",
+            is_input_list=True,
             description="Sets Qwen Video sampling and Video motion-guidance memory use for the Advanced MiniMax H3 nodes.",
             inputs=[
                 io.Int.Input(
@@ -3791,16 +2866,7 @@ class UC_MiniMaxH3MediaConfig(io.ComfyNode):
                     optional=True,
                     tooltip="Equivalent-square resolution in pixels for the reference area (e.g. 128, 256, 384, 512) for pooled/refined modes. Matches vlm_resolution equivalent-square scaling. Default 256px.",
                 ),
-                io.Float.Input(
-                    "video_latent_fps",
-                    display_name="Video reference FPS",
-                    default=24.0,
-                    min=0.1,
-                    max=24.0,
-                    step=0.1,
-                    optional=True,
-                    tooltip="Sampling rate in FPS for the video reference on the latent side (used in 'pooled' mode). E.g. 1.0, 2.0, 4.0 FPS. Lower FPS saves substantial VRAM.",
-                ),
+                io.Float.Input("video_latent_fps", display_name="Video reference FPS", default=24.0, min=0.1, max=24.0, step=0.1, optional=True, tooltip="Sampling rate in FPS for the video reference on the latent side (used in 'pooled' mode). E.g. 1.0, 2.0, 4.0 FPS. Lower FPS saves substantial VRAM."),
                 io.Int.Input("video_fps", default=2, min=1, max=24, step=1, tooltip="VLM presentation sampling rate for the 24 fps Video input. Latent video usage is unchanged."),
                 io.Combo.Input(
                     "video_latent_mode",
@@ -3808,15 +2874,7 @@ class UC_MiniMaxH3MediaConfig(io.ComfyNode):
                     default="full video",
                     tooltip="Controls Video motion guidance. Full Video uses uncompressed reference memory. Pooled compresses video references spatially and temporally on the latent side to save VRAM. Refined optimizes the compressed latent to preserve sharper features. Off sends Video only to Qwen.",
                 ),
-                io.Int.Input(
-                    "refine_steps",
-                    default=200,
-                    min=1,
-                    max=1000,
-                    step=1,
-                    optional=True,
-                    tooltip="Optimization steps for 'refined' mode. Trains the small reference latent to match source features.",
-                ),
+                io.Int.Input("refine_steps", default=200, min=1, max=1000, step=1, optional=True, tooltip="Optimization steps for 'refined' mode. Trains the small reference latent to match source features."),
                 io.Int.Input("temporal_density", default=1, min=1, max=24, step=1, tooltip="Offset sample density used only by the experimental temporal encoders."),
                 io.Combo.Input("temporal_fusion_method", options=["consensus", "spatial"], default="consensus", tooltip="Video-block fusion used only by the experimental temporal encoders."),
             ],
@@ -3824,41 +2882,22 @@ class UC_MiniMaxH3MediaConfig(io.ComfyNode):
         )
 
     @classmethod
-    def execute(
-        cls,
-        timestamps=None,
-        timestamp_format="0.0s",
-        structure=MINIMAX_H3_MEDIA_STRUCTURE,
-        video_fps=2,
-        video_latent_mode="full video",
-        temporal_density=1,
-        temporal_fusion_method="consensus",
-        video_reference_resolution=256,
-        video_latent_fps=2.0,
-        refine_steps=100,
-        **kwargs,
-    ):
-        return io.NodeOutput(build_minimax_h3_media_config(
-            timestamps,
-            timestamp_format,
-            structure,
-            video_fps,
-            video_latent_mode,
-            temporal_density=temporal_density,
-            temporal_fusion_method=temporal_fusion_method,
-            video_reference_resolution=video_reference_resolution,
-            video_latent_fps=video_latent_fps,
-            refine_steps=refine_steps,
-            **kwargs,
-        ))
+    def execute(cls, timestamps=None, timestamp_format="0.0s", structure=MINIMAX_H3_MEDIA_STRUCTURE, video_fps=2, video_latent_mode="full video", temporal_density=1, temporal_fusion_method="consensus", video_reference_resolution=256, video_latent_fps=2.0, refine_steps=100, **kwargs):
+        return io.NodeOutput(
+            build_minimax_h3_media_config(
+                timestamps, timestamp_format, structure, video_fps, video_latent_mode, temporal_density=temporal_density, temporal_fusion_method=temporal_fusion_method, video_reference_resolution=video_reference_resolution, video_latent_fps=video_latent_fps, refine_steps=refine_steps, **kwargs
+            )
+        )
 
 
 class UC_MiniMaxH3VLMGuide(io.ComfyNode):
     @classmethod
     def define_schema(cls):
         return io.Schema(
-            node_id="UC_MiniMaxH3VLMGuide", display_name="MiniMax H3 VLM Guide",
-            category="advanced/conditioning", is_experimental=True,
+            node_id="UC_MiniMaxH3VLMGuide",
+            display_name="MiniMax H3 VLM Guide",
+            category="advanced/conditioning",
+            is_experimental=True,
             inputs=[
                 io.Conditioning.Input("conditioning"),
                 io.Clip.Input("clip"),
@@ -3885,23 +2924,8 @@ class UC_MiniMaxH3VLMFrameGuide(UC_MiniMaxH3VLMGuide):
         new_inputs = []
         for inp in schema.inputs:
             if inp.id == "timestamp":
-                new_inputs.append(
-                    io.Int.Input(
-                        "frame_index",
-                        default=0,
-                        min=-9999,
-                        max=9999,
-                        step=1,
-                        tooltip="Guide target frame index (0 is first frame, 1 is second frame, -1 is last frame). Negative values count backward from the end.",
-                    )
-                )
-                new_inputs.append(
-                    io.Latent.Input(
-                        "latent",
-                        optional=True,
-                        tooltip="Optional MiniMax H3 AV latent to resolve negative frame indices when conditioning lacks frame count metadata.",
-                    )
-                )
+                new_inputs.append(io.Int.Input("frame_index", default=0, min=-9999, max=9999, step=1, tooltip="Guide target frame index (0 is first frame, 1 is second frame, -1 is last frame). Negative values count backward from the end."))
+                new_inputs.append(io.Latent.Input("latent", optional=True, tooltip="Optional MiniMax H3 AV latent to resolve negative frame indices when conditioning lacks frame count metadata."))
             else:
                 new_inputs.append(inp)
         schema.inputs = new_inputs
@@ -3922,17 +2946,7 @@ class UC_MiniMaxH3VLMFrameGuide(UC_MiniMaxH3VLMGuide):
 
     @classmethod
     def execute(cls, conditioning, clip, image, frame_index, latent=None, vlm_resolution=384, enable_caching="all"):
-        return io.NodeOutput(
-            execute_minimax_h3_vlm_frame_guide(
-                conditioning,
-                clip,
-                image,
-                frame_index,
-                latent=latent,
-                vlm_resolution=vlm_resolution,
-                enable_caching=enable_caching,
-            )
-        )
+        return io.NodeOutput(execute_minimax_h3_vlm_frame_guide(conditioning, clip, image, frame_index, latent=latent, vlm_resolution=vlm_resolution, enable_caching=enable_caching))
 
 
 class UC_AdvancedMiniMaxH3ImageToVideo(io.ComfyNode):
@@ -3940,78 +2954,31 @@ class UC_AdvancedMiniMaxH3ImageToVideo(io.ComfyNode):
 
     @classmethod
     def define_schema(cls):
-        reference_template = io.Autogrow.TemplateNames(
-            io.Image.Input(
-                "reference_image",
-                tooltip="Ordered native H3 image reference and separately numbered Qwen picture.",
-            ),
-            names=[f"reference_image_{index}" for index in range(1, 33)],
-            min=0,
-        )
+        reference_template = io.Autogrow.TemplateNames(io.Image.Input("reference_image", tooltip="Ordered native H3 image reference and separately numbered Qwen picture."), names=[f"reference_image_{index}" for index in range(1, 33)], min=0)
         return io.Schema(
             node_id="UC_AdvancedMiniMaxH3ImageToVideo",
             display_name="Advanced MiniMax H3 Image to Video",
             category="advanced/conditioning",
             is_input_list=True,
             description=(
-                "Creates coordinated MiniMax H3 Qwen conditioning from independent frame, reference, and fusion "
-                "inputs together with native visual controls and the matching joint video/audio latent. Optional media "
-                    "configuration controls optional Picture timestamp syntax, Qwen Video sampling, and Video motion guidance."
+                "Creates coordinated MiniMax H3 Qwen conditioning from independent frame, reference, and fusion inputs together with native visual controls and the matching joint video/audio latent. Optional media configuration controls optional Picture timestamp syntax, Qwen Video sampling, and Video motion guidance."
             ),
             inputs=[
-                io.Clip.Input(
-                    "clip",
-                    tooltip="MiniMax H3 Qwen3-VL 32B text encoder (qwen3vl_32b).",
-                ),
-                io.Vae.Input(
-                    "vae",
-                    optional=True,
-                    tooltip="Encodes first/last frames, reference images, and a complete Video. Not required when reference image size is none.",
-                ),
-                io.Image.Input(
-                    "first_frame",
-                    optional=True,
-                    tooltip="Optional frame-zero VAE anchor and the first numbered Qwen picture.",
-                ),
-                io.Image.Input(
-                    "last_frame",
-                    optional=True,
-                    tooltip="Optional final-frame VAE anchor and the next numbered Qwen picture.",
-                ),
-                io.String.Input(
-                    "prompt",
-                    multiline=True,
-                    dynamic_prompts=True,
-                    tooltip="Raw MiniMax H3 prompt. Picture labels are supplied by Core from the connected image roles.",
-                ),
+                io.Clip.Input("clip", tooltip="MiniMax H3 Qwen3-VL 32B text encoder (qwen3vl_32b)."),
+                io.Vae.Input("vae", optional=True, tooltip="Encodes first/last frames, reference images, and a complete Video. Not required when reference image size is none."),
+                io.Image.Input("first_frame", optional=True, tooltip="Optional frame-zero VAE anchor and the first numbered Qwen picture."),
+                io.Image.Input("last_frame", optional=True, tooltip="Optional final-frame VAE anchor and the next numbered Qwen picture."),
+                io.String.Input("prompt", multiline=True, dynamic_prompts=True, tooltip="Raw MiniMax H3 prompt. Picture labels are supplied by Core from the connected image roles."),
                 io.Int.Input("width", default=1344, min=32, max=nodes.MAX_RESOLUTION, step=32),
                 io.Int.Input("height", default=768, min=32, max=nodes.MAX_RESOLUTION, step=32),
-                io.Int.Input(
-                    "length",
-                    default=124,
-                    min=5,
-                    max=3600,
-                    step=17,
-                    tooltip="Frame count at 24 fps, snapped upward to MiniMax H3's 17k+5 temporal grid.",
-                ),
+                io.Int.Input("length", default=124, min=5, max=3600, step=17, tooltip="Frame count at 24 fps, snapped upward to MiniMax H3's 17k+5 temporal grid."),
                 VisualFusionConfig.Input(
                     "visual_fusion_config",
                     display_name="Fusion Config",
                     optional=True,
-                    tooltip=(
-                        "Optional spatial method. With frame inputs, fusion_image_1 targets Picture 1 and "
-                        "fusion_image_2 targets Picture 2; disconnected or off keeps fusion images as separate "
-                        "numbered Qwen pictures outside native-reference mode. See fusion_images for the complete routing contract."
-                    ),
+                    tooltip=("Optional spatial method. With frame inputs, fusion_image_1 targets Picture 1 and fusion_image_2 targets Picture 2; disconnected or off keeps fusion images as separate numbered Qwen pictures outside native-reference mode. See fusion_images for the complete routing contract."),
                 ),
-                io.Float.Input(
-                    "multiplier",
-                    default=1.0,
-                    min=-1000.0,
-                    max=1000.0,
-                    step=0.1,
-                    tooltip="Scales the final Qwen conditioning and pooled output; does not alter VAE keyframes or the H3 latent.",
-                ),
+                io.Float.Input("multiplier", default=1.0, min=-1000.0, max=1000.0, step=0.1, tooltip="Scales the final Qwen conditioning and pooled output; does not alter VAE keyframes or the H3 latent."),
                 io.Combo.Input(
                     "ref_image_size",
                     options=["match", "max", "none"],
@@ -4023,50 +2990,26 @@ class UC_AdvancedMiniMaxH3ImageToVideo(io.ComfyNode):
                         "alignment can marginally enlarge a dimension."
                     ),
                 ),
-                io.Int.Input(
-                    "vlm_resolution",
-                    default=384,
-                    min=0,
-                    max=4096,
-                    step=32,
-                    tooltip=(
-                        "Equivalent-square Qwen3-VL target from 256 to 4096. Values outside that range preserve "
-                        "the original image resolution. This is independent of VAE frame and reference sizing."
-                    ),
+                io.Int.Input("vlm_resolution", default=384, min=0, max=4096, step=32, tooltip=("Equivalent-square Qwen3-VL target from 256 to 4096. Values outside that range preserve the original image resolution. This is independent of VAE frame and reference sizing.")),
+                io.Int.Input("vlm_video_resolution", default=384, min=0, max=4096, step=32, tooltip=("Qwen3-VL resolution for Video frames. Higher values use more visual tokens. Values outside 256 to 4096 preserve the input resolution.")),
+                io.Combo.Input(
+                    "enable_caching",
+                    options=list(H3_CACHE_MODES),
+                    default="all",
+                    tooltip="All modes preserve joint Qwen encoding. Enabled modes cache the complete encoded presentation; prompt or media changes invalidate it. Images/video modes select matching VAE outputs; all includes audio VAE outputs. Raw tokens and DeepStack are never saved.",
                 ),
-                io.Int.Input(
-                    "vlm_video_resolution",
-                    default=384,
-                    min=0,
-                    max=4096,
-                    step=32,
-                    tooltip=(
-                        "Qwen3-VL resolution for Video frames. Higher values use more visual tokens. "
-                        "Values outside 256 to 4096 preserve the input resolution."
-                    ),
-                ),
-                io.Combo.Input("enable_caching", options=list(H3_CACHE_MODES), default="all", tooltip='All modes preserve joint Qwen encoding. Enabled modes cache the complete encoded presentation; prompt or media changes invalidate it. Images/video modes select matching VAE outputs; all includes audio VAE outputs. Raw tokens and DeepStack are never saved.'),
-                MiniMaxH3MediaConfig.Input(
-                    "media_config", optional=True,
-                    tooltip="Optionally formats Picture timestamps, sets Qwen Video sampling, and controls Video motion guidance. Its default Picture constructor matches Core handling.",
-                ),
+                MiniMaxH3MediaConfig.Input("media_config", optional=True, tooltip="Optionally formats Picture timestamps, sets Qwen Video sampling, and controls Video motion guidance. Its default Picture constructor matches Core handling."),
                 io.Image.Input("video", optional=True, tooltip="Complete Video frame batch at 24 fps. The configurator controls Qwen sampling and full, spaced, or disabled VAE motion guidance."),
                 io.Audio.Input("audio", optional=True, tooltip="Optional H3 reference audio. Missing audio from a video is ignored."),
                 io.Vae.Input("audio_vae", optional=True, lazy=True, tooltip="Required only when audio is present. When audio is absent, it skips resampling and encoding."),
                 io.Combo.Input(
-                    "fusion_method", options=["conds_fusion", "token_fusion", "disabled", "off"],
-                    default=cls.DEFAULT_FUSION_METHOD, optional=True,
+                    "fusion_method",
+                    options=["conds_fusion", "token_fusion", "disabled", "off"],
+                    default=cls.DEFAULT_FUSION_METHOD,
+                    optional=True,
                     tooltip="conds_fusion blends visual conditioning after Qwen encoding. token_fusion blends visual tokens and DeepStack before a joint Qwen encode. The visual fusion config controls the blend itself.",
                 ),
-                io.Autogrow.Input(
-                    "reference_images",
-                    template=reference_template,
-                    optional=True,
-                    tooltip=(
-                        "Ordered native H3 references and numbered Qwen pictures. This mode cannot be combined with "
-                        "explicit first/last frame inputs. See fusion_images for supported reference-picture fusion."
-                    ),
-                ),
+                io.Autogrow.Input("reference_images", template=reference_template, optional=True, tooltip=("Ordered native H3 references and numbered Qwen pictures. This mode cannot be combined with explicit first/last frame inputs. See fusion_images for supported reference-picture fusion.")),
                 VisualFusionImages.Input(
                     "fusion_images",
                     display_name="Fusion Images",
@@ -4083,15 +3026,8 @@ class UC_AdvancedMiniMaxH3ImageToVideo(io.ComfyNode):
                 ),
             ],
             outputs=[
-                io.Conditioning.Output(
-                    display_name="positive",
-                    is_output_list=True,
-                    tooltip="Encoded prompt, visual, and audio guidance ready to connect to your guider or continuation sampler.",
-                ),
-                io.Latent.Output(
-                    is_output_list=True,
-                    tooltip="Blank video and audio canvas sized to your selected width, height, and frame length.",
-                ),
+                io.Conditioning.Output(display_name="positive", is_output_list=True, tooltip="Encoded prompt, visual, and audio guidance ready to connect to your guider or continuation sampler."),
+                io.Latent.Output(is_output_list=True, tooltip="Blank video and audio canvas sized to your selected width, height, and frame length."),
             ],
         )
 
@@ -4102,10 +3038,7 @@ class UC_AdvancedMiniMaxH3ImageToVideo(io.ComfyNode):
         vae_list = audio_vae if isinstance(audio_vae, (list, tuple)) else [audio_vae]
 
         has_audio = any(a is not None for a in audio_list)
-        has_cont_audio = any(
-            isinstance(c, dict) and c.get("audio") is not None and c.get("latent") is None
-            for c in cont_list
-        )
+        has_cont_audio = any(isinstance(c, dict) and c.get("audio") is not None and c.get("latent") is None for c in cont_list)
         has_vae = any(v is not None for v in vae_list)
         return ["audio_vae"] if (has_audio or has_cont_audio) and not has_vae else []
 
@@ -4197,32 +3130,13 @@ class UC_MiniMaxH3ClipContinuationEncoder(UC_AdvancedMiniMaxH3ImageToVideo):
         schema = super().define_schema()
         schema.node_id = "UC_MiniMaxH3ClipContinuationEncoder"
         schema.display_name = "MiniMax H3 Clip Continuation Encoder"
-        schema.description = (
-            "Encodes MiniMax H3 prompts and reference media while pinning a saved clip's ending "
-            "(from latent or decoded frames/audio) so motion and sound continue seamlessly across clips."
-        )
+        schema.description = "Encodes MiniMax H3 prompts and reference media while pinning a saved clip's ending (from latent or decoded frames/audio) so motion and sound continue seamlessly across clips."
         video_index = next(index for index, value in enumerate(schema.inputs) if value.id == "video")
         schema.inputs.insert(
             video_index + 1,
-            MiniMaxH3ClipContinuationMedia.Input(
-                "continuation_media",
-                optional=True,
-                tooltip=(
-                    "Optional output from MiniMax H3 Clip Continuation Load. When saved from a latent, "
-                    "pins both video and audio directly in latent space without re-encoding. Also outputs "
-                    "trim_frames for MiniMax H3 Clip Continuation Trim."
-                ),
-            ),
+            MiniMaxH3ClipContinuationMedia.Input("continuation_media", optional=True, tooltip=("Optional output from MiniMax H3 Clip Continuation Load. When saved from a latent, pins both video and audio directly in latent space without re-encoding. Also outputs trim_frames for MiniMax H3 Clip Continuation Trim.")),
         )
-        schema.outputs = [
-            *schema.outputs,
-            io.Int.Output(
-                "trim_frames",
-                display_name="trim_frames",
-                is_output_list=True,
-                tooltip="Number of leading pinned frames to remove with MiniMax H3 Clip Continuation Trim after decoding (0 when no continuation is active).",
-            ),
-        ]
+        schema.outputs = [*schema.outputs, io.Int.Output("trim_frames", display_name="trim_frames", is_output_list=True, tooltip="Number of leading pinned frames to remove with MiniMax H3 Clip Continuation Trim after decoding (0 when no continuation is active).")]
         return schema
 
     @classmethod
@@ -4285,17 +3199,8 @@ class UC_MiniMaxH3ClipContinuationEncoder(UC_AdvancedMiniMaxH3ImageToVideo):
                 token_fusion=norm_fusion_method == "token_fusion",
                 **kwargs,
             )
-            cond_meta = (
-                conditioning[0][1]
-                if conditioning and len(conditioning[0]) > 1 and isinstance(conditioning[0][1], dict)
-                else {}
-            )
-            trim_frames = int(
-                cond_meta.get(
-                    "minimax_trim_frames",
-                    cond_meta.get("uc_overlap_frames", latent.get("uc_overlap_frames", 0) if isinstance(latent, dict) else 0),
-                )
-            )
+            cond_meta = conditioning[0][1] if conditioning and len(conditioning[0]) > 1 and isinstance(conditioning[0][1], dict) else {}
+            trim_frames = int(cond_meta.get("minimax_trim_frames", cond_meta.get("uc_overlap_frames", latent.get("uc_overlap_frames", 0) if isinstance(latent, dict) else 0)))
             return io.NodeOutput(conditioning, latent, trim_frames)
 
         batch_size = get_list_batch_size(raw_args)
@@ -4338,12 +3243,7 @@ class UC_AdvancedVisConEncoder(io.ComfyNode):
 
     @classmethod
     def define_schema(cls):
-        autogrow_template = io.Autogrow.TemplatePrefix(
-            io.Image.Input("image", optional=True),
-            prefix="image",
-            min=1,
-            max=16,
-        )
+        autogrow_template = io.Autogrow.TemplatePrefix(io.Image.Input("image", optional=True), prefix="image", min=1, max=16)
         return io.Schema(
             node_id=cls.NODE_ID,
             display_name=cls.DISPLAY_NAME,
@@ -4352,91 +3252,26 @@ class UC_AdvancedVisConEncoder(io.ComfyNode):
                 io.Clip.Input("clip", tooltip="CLIP/T5 dual text encoder reference."),
                 io.String.Input("prompt", multiline=True, dynamic_prompts=True),
                 io.String.Input("system_prompt", multiline=True, dynamic_prompts=True, default=""),
-                io.Int.Input(
-                    "vlm_resolution",
-                    default=384,
-                    min=0,
-                    max=4096,
-                    step=32,
-                    tooltip="Equivalent-square VLM target. Values outside 256-4096 preserve Original resolution.",
-                ),
-                VisualConsensusConfig.Input(
-                    "visual_consensus_config",
-                    display_name="Visual Consensus Configuration",
-                    tooltip=cls.CONFIG_TOOLTIP,
-                ),
-                io.Int.Input(
-                    "vae_resolution",
-                    default=1024,
-                    min=0,
-                    max=16384,
-                    step=32,
-                    tooltip="Resolution of the reference latent encoded by the VAE (0 = original resolution). Aligned to vae_dimension_multiple.",
-                ),
-                io.Combo.Input(
-                    "ref_latent_mode",
-                    options=["off", "single", "multi", "parallel-single", "parallel-multi"],
-                    default="off",
-                    tooltip="Generic reference-latent mode. MiniMax H3 requires off and uses Core's dedicated H3 reference conditioning instead.",
-                ),
+                io.Int.Input("vlm_resolution", default=384, min=0, max=4096, step=32, tooltip="Equivalent-square VLM target. Values outside 256-4096 preserve Original resolution."),
+                VisualConsensusConfig.Input("visual_consensus_config", display_name="Visual Consensus Configuration", tooltip=cls.CONFIG_TOOLTIP),
+                io.Int.Input("vae_resolution", default=1024, min=0, max=16384, step=32, tooltip="Resolution of the reference latent encoded by the VAE (0 = original resolution). Aligned to vae_dimension_multiple."),
+                io.Combo.Input("ref_latent_mode", options=["off", "single", "multi", "parallel-single", "parallel-multi"], default="off", tooltip="Generic reference-latent mode. MiniMax H3 requires off and uses Core's dedicated H3 reference conditioning instead."),
                 io.Vae.Input("vae", optional=True),
                 io.Float.Input("multiplier", default=1.0, min=-1000.0, max=1000.0, step=0.1),
-                io.Float.Input(
-                    "image_strength",
-                    default=1.0,
-                    min=0.0,
-                    max=100.0,
-                    step=0.05,
-                    advanced=True,
-                    tooltip="Scales attention allocated to visual tokens encoded for reference image(s) via context_attention_bias (e.g. MOSS-Image): 0 ignores them, 1 is unchanged, above 1 emphasizes them.",
-                ),
+                io.Float.Input("image_strength", default=1.0, min=0.0, max=100.0, step=0.05, advanced=True, tooltip="Scales attention allocated to visual tokens encoded for reference image(s) via context_attention_bias (e.g. MOSS-Image): 0 ignores them, 1 is unchanged, above 1 emphasizes them."),
                 io.Int.Input("vae_dimension_multiple", default=8, min=4, max=256, step=4, advanced=True),
                 io.Boolean.Input("semantic_anchor", default=False, tooltip="Prefixes each encoded visual slot with its numbered <Picture N>: semantic anchor."),
                 io.Combo.Input("fusion_method", options=["conds_fusion", "token_fusion", "disabled", "off"], default=cls.DEFAULT_FUSION_METHOD, optional=True, tooltip="Select pre- or post-encoding spatial fusion at each resolution and batch lane. Subsequent complete-conditioning consensus is unchanged."),
-                io.Autogrow.Input(
-                    "image_inputs",
-                    template=autogrow_template,
-                    tooltip="One batched socket equals separate visual sources. Multiple batched sockets form index-aligned lanes; singleton sockets broadcast.",
-                ),
+                io.Autogrow.Input("image_inputs", template=autogrow_template, tooltip="One batched socket equals separate visual sources. Multiple batched sockets form index-aligned lanes; singleton sockets broadcast."),
             ],
             outputs=[io.Conditioning.Output()],
         )
 
     @classmethod
-    def execute(
-        cls,
-        clip,
-        prompt,
-        system_prompt,
-        vlm_resolution,
-        visual_consensus_config,
-        image_inputs: io.Autogrow.Type,
-        vae_resolution=1024,
-        ref_latent_mode="off",
-        vae=None,
-        multiplier=1.0,
-        image_strength=1.0,
-        vae_dimension_multiple=8,
-        semantic_anchor=False,
-        fusion_method=None,
-    ) -> io.NodeOutput:
+    def execute(cls, clip, prompt, system_prompt, vlm_resolution, visual_consensus_config, image_inputs: io.Autogrow.Type, vae_resolution=1024, ref_latent_mode="off", vae=None, multiplier=1.0, image_strength=1.0, vae_dimension_multiple=8, semantic_anchor=False, fusion_method=None) -> io.NodeOutput:
         method = normalize_visual_fusion_method(fusion_method, default=cls.DEFAULT_FUSION_METHOD)
         conditioning = execute_advanced_visual_consensus(
-            clip,
-            prompt,
-            system_prompt,
-            vlm_resolution,
-            image_inputs,
-            visual_consensus_config,
-            vae_resolution,
-            ref_latent_mode,
-            vae,
-            multiplier,
-            vae_dimension_multiple,
-            apply_parallel_ref_latents,
-            token_fusion=method == "token_fusion",
-            semantic_anchor=semantic_anchor,
-            image_strength=image_strength,
+            clip, prompt, system_prompt, vlm_resolution, image_inputs, visual_consensus_config, vae_resolution, ref_latent_mode, vae, multiplier, vae_dimension_multiple, apply_parallel_ref_latents, token_fusion=method == "token_fusion", semantic_anchor=semantic_anchor, image_strength=image_strength
         )
         return io.NodeOutput(conditioning)
 
@@ -4529,21 +3364,44 @@ class UC_AdvancedVisualConditioningEncodeTokenFusion(UC_AdvancedVisualConditioni
 
     @classmethod
     def execute(
-        cls, clip, prompt, vlm_resolution, image_inputs=None, visual_fusion_config=None,
-        formula="", padding_method="zero-pad", vae_resolution=1024,
-        ref_latent_mode="off", vae=None, multiplier=1.0, image_strength=1.0,
-        vae_dimension_multiple=8, semantic_anchor=False, system_prompt="",
-        fusion_method=None, fusion_images=None, **kwargs,
+        cls,
+        clip,
+        prompt,
+        vlm_resolution,
+        image_inputs=None,
+        visual_fusion_config=None,
+        formula="",
+        padding_method="zero-pad",
+        vae_resolution=1024,
+        ref_latent_mode="off",
+        vae=None,
+        multiplier=1.0,
+        image_strength=1.0,
+        vae_dimension_multiple=8,
+        semantic_anchor=False,
+        system_prompt="",
+        fusion_method=None,
+        fusion_images=None,
+        **kwargs,
     ):
         return super().execute(
-            clip=clip, prompt=prompt, system_prompt=system_prompt,
-            vlm_resolution=vlm_resolution, image_inputs=image_inputs,
+            clip=clip,
+            prompt=prompt,
+            system_prompt=system_prompt,
+            vlm_resolution=vlm_resolution,
+            image_inputs=image_inputs,
             fusion_images=fusion_images,
-            visual_fusion_config=visual_fusion_config, formula=formula,
-            padding_method=padding_method, vae_resolution=vae_resolution,
-            ref_latent_mode=ref_latent_mode, vae=vae, multiplier=multiplier,
-            image_strength=image_strength, vae_dimension_multiple=vae_dimension_multiple,
-            semantic_anchor=semantic_anchor, fusion_method=fusion_method,
+            visual_fusion_config=visual_fusion_config,
+            formula=formula,
+            padding_method=padding_method,
+            vae_resolution=vae_resolution,
+            ref_latent_mode=ref_latent_mode,
+            vae=vae,
+            multiplier=multiplier,
+            image_strength=image_strength,
+            vae_dimension_multiple=vae_dimension_multiple,
+            semantic_anchor=semantic_anchor,
+            fusion_method=fusion_method,
             **kwargs,
         )
 
@@ -4565,7 +3423,6 @@ class UC_Krea2TokenAttentionWeightTokenFusion(UC_Krea2TokenAttentionWeight):
         return schema
 
 
-
 class UC_AdvMiniMaxH3ImageToVideoTokenFusion(UC_AdvancedMiniMaxH3ImageToVideo):
     DEFAULT_FUSION_METHOD = "token_fusion"
 
@@ -4578,7 +3435,7 @@ class UC_AdvMiniMaxH3ImageToVideoTokenFusion(UC_AdvancedMiniMaxH3ImageToVideo):
         schema.description = "Deprecated: use Advanced MiniMax H3 Image to Video with fusion_method set to token_fusion. Existing workflows retain token_fusion by default."
         for value in schema.inputs:
             if value.id == "enable_caching":
-                value.tooltip = 'Preserves joint Qwen encoding and caches the complete post-Qwen result. Prompt or media changes invalidate it. Pre-Qwen tokens and DeepStack are never saved. VAE caching follows the selected media mode.'
+                value.tooltip = "Preserves joint Qwen encoding and caches the complete post-Qwen result. Prompt or media changes invalidate it. Pre-Qwen tokens and DeepStack are never saved. VAE caching follows the selected media mode."
         return schema
 
 
@@ -4593,7 +3450,9 @@ class UC_AdvMiniMaxH3ImageToVideoTemporalFusion(UC_AdvancedMiniMaxH3ImageToVideo
         schema.display_name = "Adv MiniMax H3 Image to Video (Temporal Fusion)"
         schema.description = "Experimentally fuses corresponding video visual blocks before or after Qwen encoding, preserving the ordinary video token budget."
         selector = next(value for value in schema.inputs if value.id == "fusion_method")
-        selector.tooltip = "Temporal fusion target: corresponding video visual blocks. conds_fusion blends their conditioning after separate Qwen encodes. token_fusion blends their features and DeepStack before one Qwen encode per schedule. Temporal density and consensus/spatial settings remain in their existing configurators."
+        selector.tooltip = (
+            "Temporal fusion target: corresponding video visual blocks. conds_fusion blends their conditioning after separate Qwen encodes. token_fusion blends their features and DeepStack before one Qwen encode per schedule. Temporal density and consensus/spatial settings remain in their existing configurators."
+        )
         autogrow = [value for value in schema.inputs if value.id == "reference_images"]
         schema.inputs = [value for value in schema.inputs if value.id not in ("fusion_images", "fusion_method", "reference_images")]
         schema.inputs.append(TextBlendConfig.Input("text_blend_config", optional=True, tooltip="Temporal consensus settings. Disconnected uses custom index consensus with norm rescaling."))
@@ -4603,24 +3462,52 @@ class UC_AdvMiniMaxH3ImageToVideoTemporalFusion(UC_AdvancedMiniMaxH3ImageToVideo
 
     @classmethod
     def execute(
-        cls, clip, vae=None, prompt=None, width=None, height=None, length=None,
-        first_frame=None, last_frame=None, reference_images=None,
-        visual_fusion_config=None, multiplier=1.0, ref_image_size="match",
-        vlm_resolution=384, vlm_video_resolution=384, media_config=None,
-        video=None, audio=None, audio_vae=None, text_blend_config=None,
+        cls,
+        clip,
+        vae=None,
+        prompt=None,
+        width=None,
+        height=None,
+        length=None,
+        first_frame=None,
+        last_frame=None,
+        reference_images=None,
+        visual_fusion_config=None,
+        multiplier=1.0,
+        ref_image_size="match",
+        vlm_resolution=384,
+        vlm_video_resolution=384,
+        media_config=None,
+        video=None,
+        audio=None,
+        audio_vae=None,
+        text_blend_config=None,
         enable_caching="all",
         fusion_method=None,
         **kwargs,
     ):
         norm_fusion_method = normalize_h3_fusion_method(fusion_method, default=cls.DEFAULT_FUSION_METHOD)
         conditioning, latent = execute_advanced_minimax_h3_image_to_video(
-            clip, vae, prompt, width, height, length,
-            first_frame=first_frame, last_frame=last_frame, reference_images=reference_images,
-            visual_fusion_config=visual_fusion_config, multiplier=multiplier,
-            ref_image_size=ref_image_size, vlm_resolution=vlm_resolution,
-            vlm_video_resolution=vlm_video_resolution, media_config=media_config,
-            video=video, audio=audio, audio_vae=audio_vae,
-            temporal_fusion=True, temporal_token_fusion=norm_fusion_method == "token_fusion",
+            clip,
+            vae,
+            prompt,
+            width,
+            height,
+            length,
+            first_frame=first_frame,
+            last_frame=last_frame,
+            reference_images=reference_images,
+            visual_fusion_config=visual_fusion_config,
+            multiplier=multiplier,
+            ref_image_size=ref_image_size,
+            vlm_resolution=vlm_resolution,
+            vlm_video_resolution=vlm_video_resolution,
+            media_config=media_config,
+            video=video,
+            audio=audio,
+            audio_vae=audio_vae,
+            temporal_fusion=True,
+            temporal_token_fusion=norm_fusion_method == "token_fusion",
             text_blend_config=text_blend_config,
             enable_caching=enable_caching,
         )
@@ -4638,7 +3525,7 @@ class UC_AdvMiniMaxH3ImageToVideoTemporalTokenFusion(UC_AdvMiniMaxH3ImageToVideo
         schema.is_deprecated = True
         for value in schema.inputs:
             if value.id == "enable_caching":
-                value.tooltip = 'Preserves joint Qwen encoding and caches the complete post-Qwen result. Prompt or media changes invalidate it. Pre-Qwen tokens and DeepStack are never saved. VAE caching follows the selected media mode.'
+                value.tooltip = "Preserves joint Qwen encoding and caches the complete post-Qwen result. Prompt or media changes invalidate it. Pre-Qwen tokens and DeepStack are never saved. VAE caching follows the selected media mode."
         schema.description = "Deprecated: use Adv MiniMax H3 Image to Video (Temporal Fusion) with fusion_method set to token_fusion. Existing workflows retain temporal token_fusion by default."
         return schema
 
@@ -4651,16 +3538,10 @@ class UC_AdvancedMiniMaxH3RefMediaImageToVideo(io.ComfyNode):
     first/last keyframe anchors, and text prompts. It coordinates Qwen3-VL VLM token presentations
     and VAE latent structures.
     """
+
     @classmethod
     def define_schema(cls):
-        reference_template = io.Autogrow.TemplateNames(
-            io.Image.Input(
-                "reference_image",
-                tooltip="Ordered native H3 image reference and separately numbered Qwen picture.",
-            ),
-            names=[f"reference_image_{index}" for index in range(1, 33)],
-            min=0,
-        )
+        reference_template = io.Autogrow.TemplateNames(io.Image.Input("reference_image", tooltip="Ordered native H3 image reference and separately numbered Qwen picture."), names=[f"reference_image_{index}" for index in range(1, 33)], min=0)
         return io.Schema(
             node_id="UC_AdvancedMiniMaxH3RefMediaImageToVideo",
             display_name="Advanced MiniMax H3 Reference Media to Video",
@@ -4684,23 +3565,11 @@ class UC_AdvancedMiniMaxH3RefMediaImageToVideo(io.ComfyNode):
                 io.Int.Input("vlm_video_resolution", default=384, min=0, max=4096, step=32),
                 io.Combo.Input("enable_caching", options=list(H3_CACHE_MODES), default="all"),
                 MiniMaxH3MediaConfig.Input("media_config", optional=True),
-                io.Autogrow.Input(
-                    "reference_images",
-                    template=reference_template,
-                    optional=True,
-                    tooltip="Ordered native H3 image references and separately numbered Qwen pictures (Picture 1, Picture 2, ...). Encoded by VAE and presented to Qwen VLM.",
-                ),
+                io.Autogrow.Input("reference_images", template=reference_template, optional=True, tooltip="Ordered native H3 image references and separately numbered Qwen pictures (Picture 1, Picture 2, ...). Encoded by VAE and presented to Qwen VLM."),
             ],
             outputs=[
-                io.Conditioning.Output(
-                    display_name="positive",
-                    is_output_list=True,
-                    tooltip="Conditioning output containing MiniMax H3 prompt, VLM visual presentations, video and audio reference latents, and layout.",
-                ),
-                io.Latent.Output(
-                    is_output_list=True,
-                    tooltip="Empty joint video/audio latent matching configured width, height, and length (at 24 fps).",
-                ),
+                io.Conditioning.Output(display_name="positive", is_output_list=True, tooltip="Conditioning output containing MiniMax H3 prompt, VLM visual presentations, video and audio reference latents, and layout."),
+                io.Latent.Output(is_output_list=True, tooltip="Empty joint video/audio latent matching configured width, height, and length (at 24 fps)."),
             ],
         )
 
@@ -4708,34 +3577,13 @@ class UC_AdvancedMiniMaxH3RefMediaImageToVideo(io.ComfyNode):
     def check_lazy_status(cls, reference_media=None, audio_vae=None, **kwargs):
         ref_list = reference_media if isinstance(reference_media, (list, tuple)) else [reference_media]
         vae_list = audio_vae if isinstance(audio_vae, (list, tuple)) else [audio_vae]
-        has_audio = any(
-            isinstance(r, dict) and bool(r.get("reference_audios") or r.get("reference_video_audios"))
-            for r in ref_list
-        )
+        has_audio = any(isinstance(r, dict) and bool(r.get("reference_audios") or r.get("reference_video_audios")) for r in ref_list)
         has_vae = any(v is not None for v in vae_list)
         return ["audio_vae"] if has_audio and not has_vae else []
 
     @classmethod
     def execute(
-        cls,
-        clip,
-        vae=None,
-        prompt="",
-        width=1344,
-        height=768,
-        length=124,
-        first_frame=None,
-        last_frame=None,
-        reference_media=None,
-        audio_vae=None,
-        multiplier=1.0,
-        ref_image_size="match",
-        vlm_resolution=384,
-        vlm_video_resolution=384,
-        enable_caching="all",
-        media_config=None,
-        reference_images=None,
-        **kwargs,
+        cls, clip, vae=None, prompt="", width=1344, height=768, length=124, first_frame=None, last_frame=None, reference_media=None, audio_vae=None, multiplier=1.0, ref_image_size="match", vlm_resolution=384, vlm_video_resolution=384, enable_caching="all", media_config=None, reference_images=None, **kwargs
     ) -> io.NodeOutput:
         raw_args = dict(locals())
         raw_args.pop("cls", None)
@@ -4749,13 +3597,7 @@ class UC_AdvancedMiniMaxH3RefMediaImageToVideo(io.ComfyNode):
 
         for entry_id in range(batch_size):
             item = slice_item_inputs(raw_args, entry_id) if is_list else raw_args
-            base_keys = {
-                "clip", "vae", "prompt", "width", "height", "length",
-                "first_frame", "last_frame", "reference_media", "audio_vae",
-                "multiplier", "ref_image_size", "vlm_resolution",
-                "vlm_video_resolution", "enable_caching", "media_config",
-                "reference_images",
-            }
+            base_keys = {"clip", "vae", "prompt", "width", "height", "length", "first_frame", "last_frame", "reference_media", "audio_vae", "multiplier", "ref_image_size", "vlm_resolution", "vlm_video_resolution", "enable_caching", "media_config", "reference_images"}
             extra_kwargs = {k: v for k, v in item.items() if k not in base_keys}
             ref_imgs = dict(item.get("reference_images")) if isinstance(item.get("reference_images"), dict) else {}
             for k, v in extra_kwargs.items():
@@ -4818,6 +3660,7 @@ class UC_AdvMiniMaxH3RefMediaImageToVideoTemporalFusion(UC_AdvancedMiniMaxH3RefM
         - visual_fusion_config (optional, from UC_VisualFusionConfig):
             Provides spatial fusion settings when temporal_fusion_method is 'spatial'.
     """
+
     _EXPERIMENTAL = None
     DEFAULT_FUSION_METHOD = "conds_fusion"
 
@@ -4830,24 +3673,17 @@ class UC_AdvMiniMaxH3RefMediaImageToVideoTemporalFusion(UC_AdvancedMiniMaxH3RefM
         schema.description = "Experimentally fuses corresponding video visual blocks from reference media before or after Qwen encoding, preserving the ordinary video token budget."
         autogrow = [value for value in schema.inputs if value.id == "reference_images"]
         schema.inputs = [value for value in schema.inputs if value.id != "reference_images"]
-        schema.inputs.append(VisualFusionConfig.Input(
-            "visual_fusion_config",
-            optional=True,
-            display_name="Fusion Config",
-            tooltip="Optional spatial visual fusion configuration from UC_VisualFusionConfig when temporal_fusion_method is spatial."
-        ))
-        schema.inputs.append(TextBlendConfig.Input(
-            "text_blend_config",
-            optional=True,
-            tooltip="Temporal consensus settings. Disconnected uses custom index consensus with norm rescaling."
-        ))
-        schema.inputs.append(io.Combo.Input(
-            "fusion_method",
-            options=["conds_fusion", "token_fusion"],
-            default=cls.DEFAULT_FUSION_METHOD,
-            optional=True,
-            tooltip="Temporal fusion target: corresponding video visual blocks. conds_fusion blends their conditioning after separate Qwen encodes. token_fusion blends their features and DeepStack before one Qwen encode per schedule. Temporal density and consensus/spatial settings remain in their existing configurators."
-        ))
+        schema.inputs.append(VisualFusionConfig.Input("visual_fusion_config", optional=True, display_name="Fusion Config", tooltip="Optional spatial visual fusion configuration from UC_VisualFusionConfig when temporal_fusion_method is spatial."))
+        schema.inputs.append(TextBlendConfig.Input("text_blend_config", optional=True, tooltip="Temporal consensus settings. Disconnected uses custom index consensus with norm rescaling."))
+        schema.inputs.append(
+            io.Combo.Input(
+                "fusion_method",
+                options=["conds_fusion", "token_fusion"],
+                default=cls.DEFAULT_FUSION_METHOD,
+                optional=True,
+                tooltip="Temporal fusion target: corresponding video visual blocks. conds_fusion blends their conditioning after separate Qwen encodes. token_fusion blends their features and DeepStack before one Qwen encode per schedule. Temporal density and consensus/spatial settings remain in their existing configurators.",
+            )
+        )
         schema.inputs.extend(autogrow)
         return schema
 
@@ -4909,5 +3745,3 @@ class UC_AdvMiniMaxH3RefMediaImageToVideoTemporalFusion(UC_AdvancedMiniMaxH3RefM
             **kwargs,
         )
         return io.NodeOutput(conditioning, latent)
-
-

@@ -18,3 +18,31 @@ PublisherId = "silveroxides"
 DisplayName = "ComfyUI-UtilsCollection"
 Icon = "https://github.com/silveroxides/ComfyUI-UtilsCollection/raw/refs/heads/main/assets/tools-icon.png"
 web = "web"
+
+[tool.ruff]
+line-length = 320
+
+[tool.ruff.lint]
+select = ["E", "F", "I"]
+
+[tool.ruff.lint.isort]
+split-on-trailing-comma = false
+
+[tool.ruff.format]
+skip-magic-trailing-comma = true
+
+[tool.isort]
+line_length = 64
+profile = "black"
+force_grid_wrap = 2
+multi_line_output = 3
+include_trailing_comma = true
+
+[tool.yapf]
+based_on_style = "pep8"
+column_limit = 128
+split_all_comma_separated_values = false
+split_before_named_assigns = false
+dedent_closing_brackets = true
+join_multiple_lines = false
+indent_width = 4

@@ -1,20 +1,20 @@
 from comfy_api.latest import io
 from nodes import MAX_RESOLUTION
-from ..helpers.image_helpers import (
-    DEPTH_ANYTHING_MULTI_VIEW_MODES,
-    DEPTH_ANYTHING_NORM_SCOPES,
-    DEPTH_ANYTHING_OUTPUT_MODES,
-    DEPTH_ANYTHING_REF_VIEW_STRATEGIES,
-    DEPTH_ANYTHING_RESIZE_METHODS,
-    VIDEO_FRAME_TIMESTAMP_FORMATS,
-    build_yolo_detectors,
-    run_depth_anything,
-    run_yolo_detect,
-)
+from ..helpers.image_helpers import DEPTH_ANYTHING_MULTI_VIEW_MODES, DEPTH_ANYTHING_NORM_SCOPES, DEPTH_ANYTHING_OUTPUT_MODES, DEPTH_ANYTHING_REF_VIEW_STRATEGIES, DEPTH_ANYTHING_RESIZE_METHODS, VIDEO_FRAME_TIMESTAMP_FORMATS, build_yolo_detectors, run_depth_anything, run_yolo_detect
 from ..helpers.model_helpers import (
-    DEPTH_ANYTHING_MODELS, depth_anything_forward, load_depth_anything_model, register_depth_anything_paths,
-    WHISPER_MODELS, WHISPER_LANGUAGES, load_whisper_model, register_whisper_paths, run_whisper,
-    YOLO_MODELS, load_yolo_model, register_yolo_paths, yolo_forward,
+    DEPTH_ANYTHING_MODELS,
+    depth_anything_forward,
+    load_depth_anything_model,
+    register_depth_anything_paths,
+    WHISPER_MODELS,
+    WHISPER_LANGUAGES,
+    load_whisper_model,
+    register_whisper_paths,
+    run_whisper,
+    YOLO_MODELS,
+    load_yolo_model,
+    register_yolo_paths,
+    yolo_forward,
     format_reference_transcript_phrases,
     apply_minimax_h3_refs_to_conditioning,
     create_minimax_h3_audio_ref,
@@ -44,7 +44,9 @@ class UC_WhisperLoader(io.ComfyNode):
     @classmethod
     def define_schema(cls):
         return io.Schema(
-            node_id="UC_WhisperLoader", display_name="Whisper Loader", category="utils/audio",
+            node_id="UC_WhisperLoader",
+            display_name="Whisper Loader",
+            category="utils/audio",
             description="Loads native Whisper safetensors through UEL and ComfyUI model management.",
             inputs=[io.Combo.Input("model_name", options=list(WHISPER_MODELS), default="base", tooltip="Uses models/whisper. Executing downloads only the selected model if missing.")],
             outputs=[WhisperModel.Output("whisper_model")],
@@ -59,10 +61,13 @@ class UC_WhisperTranscribe(io.ComfyNode):
     @classmethod
     def define_schema(cls):
         return io.Schema(
-            node_id="UC_WhisperTranscribe", display_name="Whisper Transcribe", category="utils/audio",
+            node_id="UC_WhisperTranscribe",
+            display_name="Whisper Transcribe",
+            category="utils/audio",
             description="Transcribes full recordings or translates speech to English; one aligned result per audio batch item.",
             inputs=[
-                WhisperModel.Input("whisper_model"), io.Audio.Input("audio"),
+                WhisperModel.Input("whisper_model"),
+                io.Audio.Input("audio"),
                 io.Combo.Input("task", options=["transcribe", "translate"], default="transcribe"),
                 io.Combo.Input("language", options=["auto", *WHISPER_LANGUAGES], default="auto", tooltip="Spoken language code, or automatic detection. Translation outputs English."),
                 io.Boolean.Input("word_timestamps", default=True, optional=True, tooltip="Compute cross-attention alignment. Adds words with start/end seconds and confidence to each segment; required for syllable-counted phrase lines."),
@@ -79,10 +84,7 @@ class UC_WhisperTranscribe(io.ComfyNode):
     @classmethod
     def execute(cls, whisper_model, audio, task="transcribe", language="auto", word_timestamps=True, timestamp_format="00.000s"):
         transcripts, segments, languages = run_whisper(whisper_model, audio, task, language, word_timestamps=word_timestamps)
-        formatted = [
-            format_reference_transcript_phrases(json.loads(seg), lang, timestamp_format=timestamp_format)
-            for seg, lang in zip(segments, languages)
-        ]
+        formatted = [format_reference_transcript_phrases(json.loads(seg), lang, timestamp_format=timestamp_format) for seg, lang in zip(segments, languages)]
         return io.NodeOutput(transcripts, segments, languages, formatted)
 
 
@@ -96,14 +98,28 @@ class UC_MiniMaxH3RefExtract(io.ComfyNode):
             io.DynamicCombo.Option(
                 key="pooled",
                 inputs=[
-                    io.Int.Input("reference_resolution", display_name="Reference resolution", default=256, min=32, step=32, tooltip="Compressed reference size in pixels along the longer edge. Start with 128–512 px; 256 px is the default. Higher values retain more detail but use more memory. The shorter edge follows the source shape. This does not change generation resolution or enlarge the source."),
+                    io.Int.Input(
+                        "reference_resolution",
+                        display_name="Reference resolution",
+                        default=256,
+                        min=32,
+                        step=32,
+                        tooltip="Compressed reference size in pixels along the longer edge. Start with 128–512 px; 256 px is the default. Higher values retain more detail but use more memory. The shorter edge follows the source shape. This does not change generation resolution or enlarge the source.",
+                    )
                 ],
             ),
             io.DynamicCombo.Option(key="encode", inputs=[]),
             io.DynamicCombo.Option(
                 key="refined",
                 inputs=[
-                    io.Int.Input("reference_resolution", display_name="Reference resolution", default=256, min=32, step=32, tooltip="Compressed reference size in pixels along the longer edge. Start with 128–512 px; 256 px is the default. Higher values retain more detail but use more memory. The shorter edge follows the source shape. This does not change generation resolution or enlarge the source."),
+                    io.Int.Input(
+                        "reference_resolution",
+                        display_name="Reference resolution",
+                        default=256,
+                        min=32,
+                        step=32,
+                        tooltip="Compressed reference size in pixels along the longer edge. Start with 128–512 px; 256 px is the default. Higher values retain more detail but use more memory. The shorter edge follows the source shape. This does not change generation resolution or enlarge the source.",
+                    ),
                     io.Int.Input("refine_steps", default=100, min=1, step=1, tooltip="Suggested starting range: 50–200 steps. Start at 100; use 50 for a quicker attempt, or try 200 if the compressed reference loses detail. Higher values take longer without guaranteeing an improvement."),
                 ],
             ),
@@ -113,15 +129,33 @@ class UC_MiniMaxH3RefExtract(io.ComfyNode):
             io.DynamicCombo.Option(
                 key="pooled",
                 inputs=[
-                    io.Int.Input("reference_resolution", display_name="Reference resolution", default=256, min=32, step=32, tooltip="Compressed reference size in pixels along the longer edge. Start with 128–512 px; 256 px is the default. Higher values retain more detail but use more memory. The shorter edge follows the source shape. This does not change generation resolution or enlarge the source."),
-                    io.Int.Input("temporal_density", default=16, min=1, step=1, tooltip="How densely the reference represents time across the video. Higher values keep finer motion detail; lower values blend more moments together. The full clip remains covered. Start with 4–16; try 32 or more for longer or complex clips."),
+                    io.Int.Input(
+                        "reference_resolution",
+                        display_name="Reference resolution",
+                        default=256,
+                        min=32,
+                        step=32,
+                        tooltip="Compressed reference size in pixels along the longer edge. Start with 128–512 px; 256 px is the default. Higher values retain more detail but use more memory. The shorter edge follows the source shape. This does not change generation resolution or enlarge the source.",
+                    ),
+                    io.Int.Input(
+                        "temporal_density", default=16, min=1, step=1, tooltip="How densely the reference represents time across the video. Higher values keep finer motion detail; lower values blend more moments together. The full clip remains covered. Start with 4–16; try 32 or more for longer or complex clips."
+                    ),
                 ],
             ),
             io.DynamicCombo.Option(
                 key="refined",
                 inputs=[
-                    io.Int.Input("reference_resolution", display_name="Reference resolution", default=256, min=32, step=32, tooltip="Compressed reference size in pixels along the longer edge. Start with 128–512 px; 256 px is the default. Higher values retain more detail but use more memory. The shorter edge follows the source shape. This does not change generation resolution or enlarge the source."),
-                    io.Int.Input("temporal_density", default=16, min=1, step=1, tooltip="How densely the reference represents time across the video. Higher values keep finer motion detail; lower values blend more moments together. The full clip remains covered. Start with 4–16; try 32 or more for longer or complex clips."),
+                    io.Int.Input(
+                        "reference_resolution",
+                        display_name="Reference resolution",
+                        default=256,
+                        min=32,
+                        step=32,
+                        tooltip="Compressed reference size in pixels along the longer edge. Start with 128–512 px; 256 px is the default. Higher values retain more detail but use more memory. The shorter edge follows the source shape. This does not change generation resolution or enlarge the source.",
+                    ),
+                    io.Int.Input(
+                        "temporal_density", default=16, min=1, step=1, tooltip="How densely the reference represents time across the video. Higher values keep finer motion detail; lower values blend more moments together. The full clip remains covered. Start with 4–16; try 32 or more for longer or complex clips."
+                    ),
                     io.Int.Input("refine_steps", default=100, min=1, step=1, tooltip="Suggested starting range: 50–200 steps. Start at 100; use 50 for a quicker attempt, or try 200 if the compressed reference loses detail. Higher values take longer without guaranteeing an improvement."),
                 ],
             ),
@@ -146,10 +180,7 @@ class UC_MiniMaxH3RefExtract(io.ComfyNode):
                 io.Int.Input("vlm_reference_start", default=17, min=17, step=1, optional=True, tooltip="Qwen Picture/Video number stored in this fused reference. Use distinct numbers when combining refs extracted in separate runs."),
                 io.Boolean.Input("fuse_images", default=True, optional=True, tooltip="When multiple images are provided: True fuses them into a single blended reference; False creates separate references for each image."),
             ],
-            outputs=[
-                MiniMaxH3Ref.Output("ref", display_name="ref", tooltip="Connect to Ref Save to keep these references, or Ref Apply to use them."),
-                io.String.Output("info", display_name="info", tooltip="Summary of the created references, including any video frames left out."),
-            ],
+            outputs=[MiniMaxH3Ref.Output("ref", display_name="ref", tooltip="Connect to Ref Save to keep these references, or Ref Apply to use them."), io.String.Output("info", display_name="info", tooltip="Summary of the created references, including any video frames left out.")],
         )
 
     @classmethod
@@ -179,10 +210,7 @@ class UC_MiniMaxH3AudioRefExtract(io.ComfyNode):
                 io.Vae.Input("audio_vae", display_name="audio vae", tooltip="Connect the MiniMax H3 audio VAE, not the video VAE."),
                 io.String.Input("description", default="", multiline=True, dynamic_prompts=False, tooltip="Optional notes to save with the audio reference. These notes do not change your prompt."),
             ],
-            outputs=[
-                MiniMaxH3Ref.Output("ref", display_name="ref", tooltip="Connect to Ref Save to keep this audio reference, or Ref Apply to use it."),
-                io.String.Output("info", display_name="info", tooltip="Summary of the created audio reference."),
-            ],
+            outputs=[MiniMaxH3Ref.Output("ref", display_name="ref", tooltip="Connect to Ref Save to keep this audio reference, or Ref Apply to use it."), io.String.Output("info", display_name="info", tooltip="Summary of the created audio reference.")],
         )
 
     @classmethod
@@ -200,13 +228,8 @@ class UC_MiniMaxH3RefLoad(io.ComfyNode):
             category="model/minimax_h3",
             description="Loads one reference or every member of a saved MiniMax H3 Ref bundle.",
             search_aliases=["minimax", "h3", "reference", "ref", "load"],
-            inputs=[
-                io.Combo.Input("filename", options=list_minimax_h3_refs(), tooltip="Choose a saved reference or bundle from ComfyUI/models/minimax_h3_refs or your configured reference folders."),
-            ],
-            outputs=[
-                MiniMaxH3Ref.Output("ref", display_name="ref", tooltip="Connect to Ref Apply to use this reference, or Ref Save to save another copy."),
-                io.String.Output("info", display_name="info", tooltip="Summary of the loaded reference."),
-            ],
+            inputs=[io.Combo.Input("filename", options=list_minimax_h3_refs(), tooltip="Choose a saved reference or bundle from ComfyUI/models/minimax_h3_refs or your configured reference folders.")],
+            outputs=[MiniMaxH3Ref.Output("ref", display_name="ref", tooltip="Connect to Ref Apply to use this reference, or Ref Save to save another copy."), io.String.Output("info", display_name="info", tooltip="Summary of the loaded reference.")],
         )
 
     @classmethod
@@ -233,9 +256,7 @@ class UC_MiniMaxH3RefSave(io.ComfyNode):
                 io.Autogrow.Input("refs", template=io.Autogrow.TemplatePrefix(MiniMaxH3Ref.Input("ref", optional=True), prefix="ref_", min=1, max=100), tooltip="Connect one or more references to save. Their input order is preserved in either save layout."),
                 io.Combo.Input("save_layout", options=["separate", "bundle"], default="separate", optional=True, tooltip="Separate writes one file per ref. Bundle stores all connected refs in one file, preserving their order and kinds."),
             ],
-            outputs=[
-                io.String.Output("saved_paths", display_name="saved paths", is_output_list=True, tooltip="Names of the saved files, including any subfolders."),
-            ],
+            outputs=[io.String.Output("saved_paths", display_name="saved paths", is_output_list=True, tooltip="Names of the saved files, including any subfolders.")],
             is_output_node=True,
         )
 
@@ -264,9 +285,7 @@ class UC_MiniMaxH3RefApply(io.ComfyNode):
                 io.Int.Input("max_ref_tokens", default=0, min=0, step=1, tooltip="Optional reference-size limit, measured in tokens. Includes existing references. 0 means no limit; exceeding a limit reports an error instead of removing detail."),
                 io.Autogrow.Input("refs", template=io.Autogrow.TemplatePrefix(MiniMaxH3Ref.Input("ref", optional=True), prefix="ref_", min=1, max=100), tooltip="Connect one or more references to add. Input order is preserved; references remain separate."),
             ],
-            outputs=[
-                io.Conditioning.Output("conditioning", tooltip="Connect to your sampler in place of the original conditioning."),
-            ],
+            outputs=[io.Conditioning.Output("conditioning", tooltip="Connect to your sampler in place of the original conditioning.")],
         )
 
     @classmethod
@@ -289,11 +308,12 @@ class UC_SAM3Detect(io.ComfyNode):
             description="Text detection runs centre-first on aspect-preserving SAM3 tiles along the longer image axis; emitted masks always match the input image dimensions.",
             search_aliases=["sam3", "segment anything", "open vocabulary", "text detection", "segment"],
             inputs=[
-                io.Model.Input("model", display_name="model"), io.Image.Input("image", display_name="image"),
+                io.Model.Input("model", display_name="model"),
+                io.Image.Input("image", display_name="image"),
                 io.Conditioning.Input("conditioning", display_name="conditioning", optional=True, tooltip="Text conditioning from CLIPTextEncode"),
                 io.BoundingBox.Input("bboxes", display_name="bboxes", force_input=True, optional=True, tooltip="Bounding boxes to segment within"),
-                io.String.Input("positive_coords", display_name="positive_coords", force_input=True, optional=True, tooltip="Positive point prompts as JSON [{\"x\": int, \"y\": int}, ...] (pixel coords)"),
-                io.String.Input("negative_coords", display_name="negative_coords", force_input=True, optional=True, tooltip="Negative point prompts as JSON [{\"x\": int, \"y\": int}, ...] (pixel coords)"),
+                io.String.Input("positive_coords", display_name="positive_coords", force_input=True, optional=True, tooltip='Positive point prompts as JSON [{"x": int, "y": int}, ...] (pixel coords)'),
+                io.String.Input("negative_coords", display_name="negative_coords", force_input=True, optional=True, tooltip='Negative point prompts as JSON [{"x": int, "y": int}, ...] (pixel coords)'),
                 io.Float.Input("threshold", display_name="threshold", default=0.5, min=0.0, max=1.0, step=0.01),
                 io.Int.Input("refine_iterations", display_name="refine_iterations", default=2, min=0, max=5, tooltip="SAM decoder refinement passes (0=use raw detector masks)"),
                 io.Boolean.Input("edge_padding", display_name="edge_padding", default=True, tooltip="Replicate 32px of the outer image edge before tiling, then discard it from the returned masks. Tile overlap is calculated from the image dimensions."),
@@ -311,12 +331,18 @@ class UC_YOLODetectorLoader(io.ComfyNode):
     @classmethod
     def define_schema(cls):
         return io.Schema(
-            node_id="UC_YOLODetectorLoader", display_name="YOLO Detector Loader", category="image/detection",
+            node_id="UC_YOLODetectorLoader",
+            display_name="YOLO Detector Loader",
+            category="image/detection",
             description="Loads a converted YOLOv8 or YOLO11 bounding-box or segmentation safetensors detector for YOLO Detect or detailer workflows. Missing models download on execution to models/yolo/segm or models/yolo/bbox.",
             search_aliases=["yolo", "yolov8", "yolo11", "bbox detector", "segm detector", "adetailer", "impact"],
             inputs=[
-                io.Combo.Input("model_name", options=list(YOLO_MODELS), default="segm/face_yolov8m-seg_60.safetensors",
-                               tooltip="Choose which YOLO detector model to load from models/yolo/segm or models/yolo/bbox. segm/ models produce both bounding boxes and contour masks; bbox/ models produce rectangular bounding boxes. Missing files download on execution."),
+                io.Combo.Input(
+                    "model_name",
+                    options=list(YOLO_MODELS),
+                    default="segm/face_yolov8m-seg_60.safetensors",
+                    tooltip="Choose which YOLO detector model to load from models/yolo/segm or models/yolo/bbox. segm/ models produce both bounding boxes and contour masks; bbox/ models produce rectangular bounding boxes. Missing files download on execution.",
+                )
             ],
             outputs=[
                 BBoxDetectorType.Output("bbox_detector", tooltip="Bounding-box detector for YOLO Detect, FaceDetailer, DetailerForEach, or BboxDetector nodes."),
@@ -333,7 +359,9 @@ class UC_YOLODetect(io.ComfyNode):
     @classmethod
     def define_schema(cls):
         return io.Schema(
-            node_id="UC_YOLODetect", display_name="YOLO Detect", category="image/detection",
+            node_id="UC_YOLODetect",
+            display_name="YOLO Detect",
+            category="image/detection",
             description="Detects faces, people, hands, skin, hair, or watermarks across single images or video frame batches using native safetensors YOLOv8 and YOLO11 models, returning masks and bounding boxes.",
             search_aliases=["yolo", "yolov8", "yolo11", "detect", "segment", "watermark", "face", "hand", "person", "hair", "skin"],
             inputs=[
@@ -360,15 +388,26 @@ class UC_YOLODetect(io.ComfyNode):
         )
 
     @classmethod
-    def execute(cls, image, bbox_detector=None, segm_detector=None, threshold=0.3, nms_threshold=0.45, dilation=0,
-                drop_size=10, max_detections=300, batch_size=5, individual_masks=False, labels="all",
-                temporal_filter=False, temporal_radius=2, temporal_min_support=2, temporal_match_iou=0.3):
-        return io.NodeOutput(*run_yolo_detect(
-            image, bbox_detector=bbox_detector, segm_detector=segm_detector, threshold=threshold, nms_threshold=nms_threshold,
-            dilation=dilation, drop_size=drop_size, max_detections=max_detections, batch_size=batch_size,
-            individual_masks=individual_masks, labels=labels, temporal_filter=temporal_filter, temporal_radius=temporal_radius,
-            temporal_min_support=temporal_min_support, temporal_match_iou=temporal_match_iou,
-        ))
+    def execute(cls, image, bbox_detector=None, segm_detector=None, threshold=0.3, nms_threshold=0.45, dilation=0, drop_size=10, max_detections=300, batch_size=5, individual_masks=False, labels="all", temporal_filter=False, temporal_radius=2, temporal_min_support=2, temporal_match_iou=0.3):
+        return io.NodeOutput(
+            *run_yolo_detect(
+                image,
+                bbox_detector=bbox_detector,
+                segm_detector=segm_detector,
+                threshold=threshold,
+                nms_threshold=nms_threshold,
+                dilation=dilation,
+                drop_size=drop_size,
+                max_detections=max_detections,
+                batch_size=batch_size,
+                individual_masks=individual_masks,
+                labels=labels,
+                temporal_filter=temporal_filter,
+                temporal_radius=temporal_radius,
+                temporal_min_support=temporal_min_support,
+                temporal_match_iou=temporal_match_iou,
+            )
+        )
 
 
 class UC_DepthAnythingV3Loader(io.ComfyNode):
@@ -386,14 +425,9 @@ class UC_DepthAnythingV3Loader(io.ComfyNode):
                     options=list(DEPTH_ANYTHING_MODELS),
                     default="da3_large.safetensors",
                     tooltip="Choose which Depth Anything V3 checkpoint to load from models/depthanything3. da3_small, da3_base, and da3_large support single-image and multi-view depth, confidence, and camera pose estimation; da3mono_large is specialized for single-image depth and sky detection. Missing files download on execution.",
-                ),
+                )
             ],
-            outputs=[
-                DepthAnythingModel.Output(
-                    "da3_model",
-                    tooltip="Loaded Depth Anything V3 model for the Depth Anything V3 estimation node.",
-                ),
-            ],
+            outputs=[DepthAnythingModel.Output("da3_model", tooltip="Loaded Depth Anything V3 model for the Depth Anything V3 estimation node.")],
         )
 
     @classmethod
@@ -411,22 +445,9 @@ class UC_DepthAnythingV3(io.ComfyNode):
             description="Estimates depth maps, confidence masks, sky masks, and camera poses across single images, multi-view sets, or video frame batches using Depth Anything V3, with independent lower- and upper-tail clipping for normalized depth outputs.",
             search_aliases=["depth anything", "depth anything v3", "da3", "depth map", "controlnet depth", "disparity", "camera pose", "sky mask"],
             inputs=[
-                DepthAnythingModel.Input(
-                    "da3_model",
-                    tooltip="Connect da3_model from Depth Anything V3 Loader.",
-                ),
-                io.Image.Input(
-                    "image",
-                    tooltip="Single image, multi-view image batch, or ordered video-frame batch to estimate depth from.",
-                ),
-                io.Int.Input(
-                    "process_res",
-                    default=504,
-                    min=14,
-                    max=4096,
-                    step=14,
-                    tooltip="Target processing size in pixels before rounding or cropping to a multiple of 14. 504 is the model default; raise for finer depth edges at higher memory cost, or lower for faster processing.",
-                ),
+                DepthAnythingModel.Input("da3_model", tooltip="Connect da3_model from Depth Anything V3 Loader."),
+                io.Image.Input("image", tooltip="Single image, multi-view image batch, or ordered video-frame batch to estimate depth from."),
+                io.Int.Input("process_res", default=504, min=14, max=4096, step=14, tooltip="Target processing size in pixels before rounding or cropping to a multiple of 14. 504 is the model default; raise for finer depth edges at higher memory cost, or lower for faster processing."),
                 io.Combo.Input(
                     "resize_method",
                     options=list(DEPTH_ANYTHING_RESIZE_METHODS),
@@ -458,74 +479,23 @@ class UC_DepthAnythingV3(io.ComfyNode):
                     tooltip="When scaling disparity or depth to 0–1: per_frame scales each frame independently for maximum single-image contrast; per_batch scales across the whole batch together to keep consistent brightness across video frames or multi-view sets.",
                 ),
                 io.Float.Input(
-                    "percentile_clip",
-                    default=0.0,
-                    min=0.0,
-                    max=10.0,
-                    step=0.1,
-                    tooltip="Symmetric baseline percentage clipped from each end before 0–1 scaling. 0 uses exact minimum and maximum; 2 clips the lowest and highest 2%. The lower- and upper-tail controls can increase clipping on either side independently.",
+                    "percentile_clip", default=0.0, min=0.0, max=10.0, step=0.1, tooltip="Symmetric baseline percentage clipped from each end before 0–1 scaling. 0 uses exact minimum and maximum; 2 clips the lowest and highest 2%. The lower- and upper-tail controls can increase clipping on either side independently."
                 ),
-                io.Boolean.Input(
-                    "invert_depth",
-                    default=False,
-                    tooltip="Flips 0–1 depth output so closer surfaces are black (0) and farther surfaces are white (1). Ignored in raw_depth mode.",
-                ),
-                io.Boolean.Input(
-                    "sky_fill",
-                    default=True,
-                    tooltip="On da3mono_large, clamps detected sky regions to the 99th-percentile non-sky distance so open sky does not crush foreground depth contrast.",
-                ),
-                io.Boolean.Input(
-                    "keep_model_size",
-                    default=False,
-                    tooltip="When off, resizes the output depth map, confidence mask, and sky mask back to the input image dimensions. When on, keeps the 14-pixel-aligned processing dimensions.",
-                ),
-                io.Int.Input(
-                    "batch_size",
-                    default=4,
-                    min=1,
-                    max=64,
-                    step=1,
-                    tooltip="Maximum images or video frames processed together per network call, including partial tail chunks without padding. Lower if VRAM runs out; raise in multi_view mode to share scale across more frames at once.",
-                ),
+                io.Boolean.Input("invert_depth", default=False, tooltip="Flips 0–1 depth output so closer surfaces are black (0) and farther surfaces are white (1). Ignored in raw_depth mode."),
+                io.Boolean.Input("sky_fill", default=True, tooltip="On da3mono_large, clamps detected sky regions to the 99th-percentile non-sky distance so open sky does not crush foreground depth contrast."),
+                io.Boolean.Input("keep_model_size", default=False, tooltip="When off, resizes the output depth map, confidence mask, and sky mask back to the input image dimensions. When on, keeps the 14-pixel-aligned processing dimensions."),
+                io.Int.Input("batch_size", default=4, min=1, max=64, step=1, tooltip="Maximum images or video frames processed together per network call, including partial tail chunks without padding. Lower if VRAM runs out; raise in multi_view mode to share scale across more frames at once."),
+                io.Float.Input("lower_clip_percentile", default=0.0, min=0.0, max=99.0, step=0.1, tooltip="Percentage of the lowest depth or disparity values to clip before 0–1 scaling. Effective lower-tail clipping is the larger of this value and percentile_clip. Keep at 0 to use only symmetric clipping."),
                 io.Float.Input(
-                    "lower_clip_percentile",
-                    default=0.0,
-                    min=0.0,
-                    max=99.0,
-                    step=0.1,
-                    tooltip="Percentage of the lowest depth or disparity values to clip before 0–1 scaling. Effective lower-tail clipping is the larger of this value and percentile_clip. Keep at 0 to use only symmetric clipping.",
-                ),
-                io.Float.Input(
-                    "upper_clip_percentile",
-                    default=0.0,
-                    min=0.0,
-                    max=99.0,
-                    step=0.1,
-                    tooltip="Percentage of the highest depth or disparity values to clip before 0–1 scaling. Effective upper-tail clipping is the larger of this value and percentile_clip. Combined lower and upper clipping must stay below 100%.",
+                    "upper_clip_percentile", default=0.0, min=0.0, max=99.0, step=0.1, tooltip="Percentage of the highest depth or disparity values to clip before 0–1 scaling. Effective upper-tail clipping is the larger of this value and percentile_clip. Combined lower and upper clipping must stay below 100%."
                 ),
             ],
             outputs=[
-                io.Image.Output(
-                    "depth_image",
-                    tooltip="Grayscale depth map image ready for ControlNet Depth, MOSS-Image depth control, or preview.",
-                ),
-                io.Mask.Output(
-                    "depth_mask",
-                    tooltip="Single-channel depth mask with the same values as depth_image.",
-                ),
-                io.Mask.Output(
-                    "confidence",
-                    tooltip="Normalized 0–1 per-pixel depth confidence mask from any-view models (da3_small, da3_base, da3_large); all-ones mask on da3mono_large.",
-                ),
-                io.Mask.Output(
-                    "sky_mask",
-                    tooltip="Binary sky mask where 1 marks sky pixels on da3mono_large; all-zeros mask on any-view models.",
-                ),
-                io.String.Output(
-                    "camera_poses",
-                    tooltip="JSON array of per-frame predicted camera extrinsics, intrinsics, and horizontal/vertical field of view in degrees for any-view models; empty JSON array on da3mono_large.",
-                ),
+                io.Image.Output("depth_image", tooltip="Grayscale depth map image ready for ControlNet Depth, MOSS-Image depth control, or preview."),
+                io.Mask.Output("depth_mask", tooltip="Single-channel depth mask with the same values as depth_image."),
+                io.Mask.Output("confidence", tooltip="Normalized 0–1 per-pixel depth confidence mask from any-view models (da3_small, da3_base, da3_large); all-ones mask on da3mono_large."),
+                io.Mask.Output("sky_mask", tooltip="Binary sky mask where 1 marks sky pixels on da3mono_large; all-zeros mask on any-view models."),
+                io.String.Output("camera_poses", tooltip="JSON array of per-frame predicted camera extrinsics, intrinsics, and horizontal/vertical field of view in degrees for any-view models; empty JSON array on da3mono_large."),
             ],
         )
 

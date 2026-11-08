@@ -191,37 +191,15 @@ class LamaRemover(io.ComfyNode):
             display_name="LamaRemover (Legacy)",
             category="LamaRemover",
             is_deprecated=True,
-            inputs=[
-                io.Image.Input("images"),
-                io.Mask.Input("masks"),
-                io.Int.Input("mask_threshold", default=250, min=0, max=255, step=1),
-                io.Int.Input("gaussblur_radius", default=8, min=0, max=20, step=1),
-                io.Boolean.Input("invert_mask", default=False),
-            ],
+            inputs=[io.Image.Input("images"), io.Mask.Input("masks"), io.Int.Input("mask_threshold", default=250, min=0, max=255, step=1), io.Int.Input("gaussblur_radius", default=8, min=0, max=20, step=1), io.Boolean.Input("invert_mask", default=False)],
             outputs=[io.Image.Output("images")],
         )
 
     @classmethod
-    def execute(
-        cls,
-        images,
-        masks,
-        mask_threshold=250,
-        gaussblur_radius=8,
-        invert_mask=False,
-    ) -> io.NodeOutput:
+    def execute(cls, images, masks, mask_threshold=250, gaussblur_radius=8, invert_mask=False) -> io.NodeOutput:
         model_path = folder_paths.get_full_path_or_raise("lama", "big-lama.safetensors")
         patcher = load_lama_model(model_path, "default")
-        return io.NodeOutput(
-            run_lama_inpaint(
-                patcher,
-                images,
-                masks,
-                mask_threshold,
-                gaussblur_radius,
-                invert_mask,
-            )
-        )
+        return io.NodeOutput(run_lama_inpaint(patcher, images, masks, mask_threshold, gaussblur_radius, invert_mask))
 
 
 class LamaRemoverIMG(LamaRemover):
@@ -236,21 +214,8 @@ class LamaRemoverIMG(LamaRemover):
 
     @classmethod
     @override
-    def execute(
-        cls,
-        images,
-        masks,
-        mask_threshold=250,
-        gaussblur_radius=8,
-        invert_mask=False,
-    ) -> io.NodeOutput:
-        return super().execute(
-            images,
-            image_mask_to_luma(masks),
-            mask_threshold,
-            gaussblur_radius,
-            invert_mask,
-        )
+    def execute(cls, images, masks, mask_threshold=250, gaussblur_radius=8, invert_mask=False) -> io.NodeOutput:
+        return super().execute(images, image_mask_to_luma(masks), mask_threshold, gaussblur_radius, invert_mask)
 
 
 class ImageBlendByMask(UC_ImageBlendByMask):
@@ -561,4 +526,3 @@ class ColorConvertNode(UC_ColorConvertNode):
         schema.node_id = "ColorConvertNode"
         schema.display_name = f"{schema.display_name or 'ColorConvertNode'} (Legacy)"
         return schema
-
