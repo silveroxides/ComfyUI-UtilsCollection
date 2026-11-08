@@ -517,6 +517,7 @@ Connect the MOSS-Image `model` (after `ModelSamplingAuraFlow` with `shift = 5.0`
 - `UC_DMADSchedule`
 - `UC_SigmaRescale`
 - `UC_DiscardPenultimateSigma`
+- `UC_SigmasPreview`
 - `UC_SigmoidOffsetScheduler`
 - `UC_PowerShiftScheduler`
 - `UC_RadianceShiftScheduler`

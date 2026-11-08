@@ -1,8 +1,14 @@
+from io import BytesIO
 from typing import Any, Optional
+import matplotlib
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
 import numpy
+from PIL import Image
 import torch
 from scipy.interpolate import PchipInterpolator
 
+from comfy_api.latest import io, ui
 import comfy.samplers
 
 
@@ -232,3 +238,103 @@ def register_scheduler_handlers():
             )
         if name not in comfy.samplers.SCHEDULER_NAMES:
             comfy.samplers.SCHEDULER_NAMES.append(name)
+
+
+def format_sigmas_breakdown(sigmas: torch.Tensor, print_to_console: bool = False) -> str:
+    """Format a detailed tabular breakdown of steps, sigma values, normalized progress, and step sizes."""
+    sigmas_1d = sigmas.detach().cpu().to(torch.float32).reshape(-1)
+    sigmas_list = [round(float(s), 4) for s in sigmas_1d.tolist()]
+
+    if len(sigmas_list) == 0:
+        lines = [
+            "=" * 60,
+            "SIGMAS PREVIEW - PRINT LIST (EMPTY)",
+            "=" * 60,
+        ]
+        text = "\n".join(lines)
+        if print_to_console:
+            print("\n" + text + "\n")
+        return text
+
+    min_s = min(sigmas_list)
+    max_s = max(sigmas_list)
+    span = max_s - min_s
+    if span > 0:
+        percentages = [round(float((s - min_s) / span), 4) for s in sigmas_list]
+    else:
+        percentages = [0.0] * len(sigmas_list)
+
+    lines = [
+        "=" * 60,
+        "SIGMAS PREVIEW - PRINT LIST",
+        "=" * 60,
+        f"Total sigma values: {len(sigmas_list)}",
+        f"Min sigma:   {min_s:.4f}",
+        f"Max sigma:   {max_s:.4f}",
+        "",
+        "Normalized percentages (0.0-1.0):",
+        "-" * 40,
+        "Step | Sigma    | Normalized | Step Size",
+        "-----|----------|------------|----------",
+    ]
+    for i, (sigma, pct) in enumerate(zip(sigmas_list, percentages)):
+        if i > 0:
+            step_size = f"{sigmas_list[i-1] - sigma:8.4f}"
+        else:
+            step_size = f"{'--':>8}"
+        lines.append(f"{i:4d} | {sigma:8.4f} | {pct:10.4f} | {step_size}")
+    lines.append("=" * 60)
+
+    text = "\n".join(lines)
+    if print_to_console:
+        print("\n" + text + "\n")
+    return text
+
+
+def render_sigmas_graph(sigmas: torch.Tensor, line_color: str = "blue") -> torch.Tensor:
+    """Render a 2D plot of sigma values against step index and return a normalized float32 [1, H, W, 3] tensor."""
+    sigmas_np = sigmas.detach().cpu().to(torch.float32).reshape(-1).numpy()
+
+    fig, ax = plt.subplots()
+    ax.plot(sigmas_np, marker="o", linestyle="-", color=line_color)
+    ax.set_title("Graph from Tensor")
+    ax.set_xlabel("Step Number")
+    ax.set_ylabel("Sigma Value")
+
+    with BytesIO() as buf:
+        fig.savefig(buf, format="png", bbox_inches="tight")
+        buf.seek(0)
+        image = Image.open(buf).convert("RGB").copy()
+    plt.close(fig)
+
+    numpy_image = numpy.array(image, dtype=numpy.float32) / 255.0
+    return torch.from_numpy(numpy_image).unsqueeze(0)
+
+
+def save_sigmas_preview_image(
+    images: torch.Tensor,
+    filename_prefix: str = "SigmasPreview",
+) -> list[dict[str, Any]]:
+    """Save an image batch to ComfyUI's temporary directory for frontend display."""
+    saved = ui.ImageSaveHelper.save_images(
+        images,
+        filename_prefix=filename_prefix,
+        folder_type=io.FolderType.temp,
+        cls=None,
+        compress_level=4,
+    )
+    return [dict(item) for item in saved]
+
+
+def preview_sigmas(
+    sigmas: torch.Tensor,
+    print_as_list: bool = False,
+    line_color: str = "blue",
+) -> tuple[torch.Tensor, list[dict[str, Any]]]:
+    """Inspect and render a sigma schedule, returning the output image tensor and frontend UI descriptors."""
+    if print_as_list:
+        format_sigmas_breakdown(sigmas, print_to_console=True)
+
+    images_tensor = render_sigmas_graph(sigmas, line_color=line_color)
+    ui_images = save_sigmas_preview_image(images_tensor, filename_prefix="SigmasPreview")
+    return images_tensor, ui_images

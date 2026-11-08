@@ -9,6 +9,7 @@ from ..helpers.scheduler_helpers import (
     dmad_scheduler,
     parse_float_list,
     power_shift_scheduler,
+    preview_sigmas,
     radiance_shift_scheduler,
     rescale_sigmas,
     sigma_curve_pchip_scheduler,
@@ -478,6 +479,58 @@ class UC_DMADSchedule(io.ComfyNode):
     get_sigmas = execute
 
 
+class UC_SigmasPreview(io.ComfyNode):
+    @classmethod
+    def define_schema(cls) -> io.Schema:
+        return io.Schema(
+            node_id="UC_SigmasPreview",
+            display_name="Sigmas Preview",
+            category="sampling/custom_sampling/schedulers",
+            description=(
+                "Renders a graph preview of a sigma schedule and optionally "
+                "prints a step-by-step table breakdown."
+            ),
+            is_output_node=True,
+            inputs=[
+                io.Sigmas.Input(
+                    "sigmas",
+                    tooltip="Sigma schedule to plot and preview.",
+                ),
+                io.Boolean.Input(
+                    "print_as_list",
+                    default=False,
+                    tooltip="When true, prints step numbers, sigma values, normalized progress, and step sizes to console.",
+                ),
+                io.String.Input(
+                    "line_color",
+                    default="blue",
+                    tooltip="Color of plotted curve and step points on graph (e.g. 'blue', 'red', '#1f77b4').",
+                ),
+            ],
+            outputs=[
+                io.Image.Output(
+                    "image",
+                    display_name="Image",
+                    tooltip="Plotted sigma curve preview image as a standard image tensor.",
+                ),
+            ],
+        )
+
+    @classmethod
+    def execute(
+        cls,
+        sigmas,
+        print_as_list: bool = False,
+        line_color: str = "blue",
+    ) -> io.NodeOutput:
+        images_tensor, ui_images = preview_sigmas(
+            sigmas,
+            print_as_list=print_as_list,
+            line_color=line_color,
+        )
+        return io.NodeOutput(images_tensor, ui={"images": ui_images})
+
+
 MIGRATED_SCHEDULER_NODES = [
     UC_SigmoidOffsetScheduler,
     UC_PowerShiftScheduler,
@@ -491,6 +544,7 @@ SCHEDULER_NODES = [
     UC_SigmaRescale,
     UC_DiscardPenultimateSigma,
     UC_DMADSchedule,
+    UC_SigmasPreview,
     *MIGRATED_SCHEDULER_NODES,
 ]
 

@@ -172,6 +172,7 @@ DESCRIPTIONS = {
     "Ideogram4SchedulerPreset": "Provides scheduler and sampling parameters tuned for Ideogram 4 workflows.",
     "UC_SamplerDMADReNoise": "Few-step re-noise sampler for DMAD/DMD2 distilled models (e.g. 4-step MiniMax H3).",
     "UC_DMADSchedule": "Shifted linear sigma schedule for DMAD/DMD2 distilled models (e.g. 4-step MiniMax H3).",
+    "UC_SigmasPreview": "Plots a sigma noise schedule as a graph preview image and optionally logs a step-by-step schedule breakdown.",
     "UC_SaveVideo": "Saves video with clean seekable keyframes at scene cuts so players and video editors scrub and edit smoothly without black frames or visual glitching.",
     "UC_ConcatenateVideoList": "Stitches multiple video clips together back-to-back into one continuous video with automatic audio stitching.",
     "UC_ConcatenateAudioList": "Joins multiple audio clips together back-to-back into one continuous audio track.",
@@ -260,6 +261,7 @@ EXTRA_ALIASES = {
     "UC_H3RefVideoSegments": ["minimax", "h3", "reference", "video", "segments", "list", "h3 segments"],
     "UC_CreateListOfSame": ["create list", "repeat item", "list of same", "duplicate item", "list duplicator"],
     "UC_MiniMaxH3ContextPatcher": ["minimax context", "h3 context windows", "context patcher", "sliding window", "long video patcher"],
+    "UC_SigmasPreview": ["sigmas preview", "sigma plot", "schedule preview", "graph sigmas", "sigma visualizer"],
 }
 
 

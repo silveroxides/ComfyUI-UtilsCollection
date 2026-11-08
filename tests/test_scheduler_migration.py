@@ -371,3 +371,61 @@ def test_radiance_node_compensates_before_fixed_penultimate_discard():
     )
     assert torch.equal(result, expected)
     assert len(result) == 9
+
+
+def test_sigmas_preview_is_registered_and_schema_is_complete():
+    schemas = {
+        node.define_schema().node_id: node.define_schema()
+        for node in scheduler_nodes.SCHEDULER_NODES
+    }
+    assert "UC_SigmasPreview" in schemas
+    schema = schemas["UC_SigmasPreview"]
+    assert schema.node_id == "UC_SigmasPreview"
+    assert schema.display_name == "Sigmas Preview"
+    assert schema.category == "sampling/custom_sampling/schedulers"
+    assert schema.is_output_node is True
+
+    inputs = {value.id: value for value in schema.inputs}
+    assert "sigmas" in inputs
+    assert inputs["print_as_list"].default is False
+    assert inputs["line_color"].default == "blue"
+    for inp in schema.inputs:
+        assert getattr(inp, "tooltip", None), f"Input {inp.id} missing tooltip"
+
+    assert len(schema.outputs) == 1
+    assert schema.outputs[0].id == "image"
+    assert getattr(schema.outputs[0], "tooltip", None), "Output image missing tooltip"
+
+
+def test_sigmas_preview_executes_and_returns_valid_image_and_ui():
+    sigmas = torch.tensor([1.0, 0.75, 0.5, 0.25, 0.0], dtype=torch.float32)
+    output = scheduler_nodes.UC_SigmasPreview.execute(
+        sigmas,
+        print_as_list=True,
+        line_color="red",
+    )
+    assert len(output.args) == 1
+    image_tensor = output.args[0]
+    assert isinstance(image_tensor, torch.Tensor)
+    assert image_tensor.ndim == 4
+    assert image_tensor.shape[0] == 1
+    assert image_tensor.shape[3] == 3
+    assert image_tensor.dtype == torch.float32
+    assert 0.0 <= image_tensor.min().item() <= 1.0
+    assert 0.0 <= image_tensor.max().item() <= 1.0
+
+    assert "images" in output.ui
+    ui_images = output.ui["images"]
+    assert len(ui_images) == 1
+    assert "filename" in ui_images[0]
+    assert ui_images[0]["type"] == "temp"
+
+
+def test_sigmas_preview_breakdown_handles_edge_cases():
+    empty_breakdown = scheduler_helpers.format_sigmas_breakdown(torch.tensor([]), print_to_console=False)
+    assert "EMPTY" in empty_breakdown
+
+    constant_sigmas = torch.tensor([1.0, 1.0, 1.0])
+    constant_breakdown = scheduler_helpers.format_sigmas_breakdown(constant_sigmas, print_to_console=False)
+    assert "Step" in constant_breakdown
+    assert "Normalized" in constant_breakdown
