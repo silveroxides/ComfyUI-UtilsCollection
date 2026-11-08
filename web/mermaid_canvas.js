@@ -102,10 +102,10 @@ class MermaidCanvasWidget {
 
     this.pan = { x: 0, y: 0 };
     this.zoom = 1.0;
-    this.isDragging = false;
-    this.dragStart = { x: 0, y: 0 };
 
     this.hitRegions = [];
+    this.hoveredRegion = null;
+    this.viewport = null;
     this.textEditor = null;
     this.outsidePointer = null;
     this.abort = new AbortController();
@@ -127,7 +127,6 @@ class MermaidCanvasWidget {
       const x = graphX - node.pos[0];
       const y = graphY - node.pos[1];
       if (this.hitRegions.some(region => this.contains(region, x, y))) return this.widget;
-      if (this.viewport && this.contains(this.viewport, x, y)) return this.widget;
       const found = getWidgetOnPos?.call(node, graphX, graphY, includeDisabled);
       return found === this.widget ? undefined : found;
     };
@@ -138,7 +137,7 @@ class MermaidCanvasWidget {
         passive: true,
         signal: this.abort.signal,
       });
-      canvasEl.addEventListener("pointerup", event => this.onPointerUp(event), {
+      canvasEl.addEventListener("pointerleave", () => this.clearHoveredTooltip(), {
         passive: true,
         signal: this.abort.signal,
       });
@@ -258,8 +257,8 @@ class MermaidCanvasWidget {
     return x >= rect.x && x <= rect.x + rect.w && y >= rect.y && y <= rect.y + rect.h;
   }
 
-  hit(x, y, w, h, action) {
-    this.hitRegions.push({ x, y, w, h, action });
+  hit(x, y, w, h, action, tooltip = null) {
+    this.hitRegions.push({ x, y, w, h, action, tooltip });
   }
 
   box(ctx, x, y, w, h, fill, stroke, r = 0, topRound = true, botRound = true) {
@@ -294,8 +293,8 @@ class MermaidCanvasWidget {
     ctx.restore();
   }
 
-  button(ctx, x, y, w, h, label, action, accent = false, align = "center") {
-    this.hit(x, y, w, h, action);
+  button(ctx, x, y, w, h, label, action, accent = false, align = "center", tooltip = null) {
+    this.hit(x, y, w, h, action, tooltip);
     const bg = accent ? "#2563eb" : "#242933";
     const stroke = accent ? "#3b82f6" : "#3b4252";
     const textCol = accent ? "#ffffff" : "#cbd5e1";
@@ -333,6 +332,59 @@ class MermaidCanvasWidget {
     ctx.restore();
   }
 
+  drawCanvasTooltip(ctx, region, nodeWidth, yTop, nodeHeight) {
+    if (!region?.tooltip) return;
+    const text = region.tooltip;
+    const maxWidth = Math.min(260, nodeWidth - 24);
+    const font = "11px sans-serif";
+    const lineHeight = 15;
+
+    ctx.save();
+    ctx.font = font;
+
+    const words = String(text).split(/\s+/);
+    const lines = [];
+    let currentLine = "";
+    for (let i = 0; i < words.length; i++) {
+      const testLine = currentLine ? `${currentLine} ${words[i]}` : words[i];
+      if (ctx.measureText(testLine).width > maxWidth && currentLine) {
+        lines.push(currentLine);
+        currentLine = words[i];
+      } else {
+        currentLine = testLine;
+      }
+    }
+    if (currentLine) lines.push(currentLine);
+
+    let maxMeasured = 0;
+    for (const l of lines) {
+      maxMeasured = Math.max(maxMeasured, ctx.measureText(l).width);
+    }
+
+    const paddingX = 8;
+    const paddingY = 6;
+    const boxW = Math.max(50, maxMeasured + paddingX * 2);
+    const boxH = lines.length * lineHeight + paddingY * 2;
+
+    let bx = region.x + region.w / 2 - boxW / 2;
+    bx = Math.max(8, Math.min(nodeWidth - boxW - 8, bx));
+
+    let by = region.y - boxH - 6;
+    if (by < yTop + 2) {
+      by = region.y + region.h + 6;
+    }
+
+    this.box(ctx, bx, by, boxW, boxH, "#0f172a", "#38bdf8", 4);
+
+    ctx.fillStyle = "#f8fafc";
+    ctx.textAlign = "left";
+    ctx.textBaseline = "top";
+    for (let i = 0; i < lines.length; i++) {
+      ctx.fillText(lines[i], bx + paddingX, by + paddingY + i * lineHeight);
+    }
+    ctx.restore();
+  }
+
   draw(ctx, width, y) {
     if (this.textEditor) this.positionTextEditor();
     this.hitRegions = [];
@@ -360,12 +412,12 @@ class MermaidCanvasWidget {
 
     let btnRight = width - 12;
 
-    const fitW = 34;
-    this.button(ctx, btnRight - fitW, y + 4, fitW, 20, "Fit", () => this.autoFit(), false);
+    const fitW = 30;
+    this.button(ctx, btnRight - fitW, y + 4, fitW, 20, "Fit", () => this.autoFit(), false, "center", "Auto-fit diagram to node viewport");
     btnRight -= fitW + 4;
 
-    const zoomW = 30;
-    this.button(ctx, btnRight - zoomW, y + 4, zoomW, 20, "1:1", () => {
+    const zoom1W = 28;
+    this.button(ctx, btnRight - zoom1W, y + 4, zoom1W, 20, "1:1", () => {
       this.zoom = 1.0;
       if (this.imgWidth && this.viewport) {
         this.pan = {
@@ -374,13 +426,52 @@ class MermaidCanvasWidget {
         };
       }
       this.node.setDirtyCanvas(true, true);
-    }, false);
-    btnRight -= zoomW + 4;
+    }, false, "center", "Reset zoom to 100%");
+    btnRight -= zoom1W + 4;
+
+    const zoomInW = 20;
+    this.button(ctx, btnRight - zoomInW, y + 4, zoomInW, 20, "+", () => {
+      this.zoom = Math.min(10.0, this.zoom * 1.25);
+      this.node.setDirtyCanvas(true, true);
+    }, false, "center", "Zoom in");
+    btnRight -= zoomInW + 2;
+
+    const zoomOutW = 20;
+    this.button(ctx, btnRight - zoomOutW, y + 4, zoomOutW, 20, "-", () => {
+      this.zoom = Math.max(0.05, this.zoom * 0.8);
+      this.node.setDirtyCanvas(true, true);
+    }, false, "center", "Zoom out");
+    btnRight -= zoomOutW + 4;
+
+    const panW = 18;
+    this.button(ctx, btnRight - panW, y + 4, panW, 20, "▶", () => {
+      this.pan.x -= 40;
+      this.node.setDirtyCanvas(true, true);
+    }, false, "center", "Pan right");
+    btnRight -= panW + 2;
+
+    this.button(ctx, btnRight - panW, y + 4, panW, 20, "◀", () => {
+      this.pan.x += 40;
+      this.node.setDirtyCanvas(true, true);
+    }, false, "center", "Pan left");
+    btnRight -= panW + 2;
+
+    this.button(ctx, btnRight - panW, y + 4, panW, 20, "▼", () => {
+      this.pan.y -= 40;
+      this.node.setDirtyCanvas(true, true);
+    }, false, "center", "Pan down");
+    btnRight -= panW + 2;
+
+    this.button(ctx, btnRight - panW, y + 4, panW, 20, "▲", () => {
+      this.pan.y += 40;
+      this.node.setDirtyCanvas(true, true);
+    }, false, "center", "Pan up");
+    btnRight -= panW + 6;
 
     if (this.isNote) {
-      const editW = 40;
-      this.button(ctx, btnRight - editW, y + 4, editW, 20, "Edit", () => this.openTextEditor(), true);
-      btnRight -= editW + 4;
+      const editW = 38;
+      this.button(ctx, btnRight - editW, y + 4, editW, 20, "Edit", () => this.openTextEditor(), true, "center", "Open text editor");
+      btnRight -= editW + 6;
     }
 
     ctx.save();
@@ -388,7 +479,7 @@ class MermaidCanvasWidget {
     ctx.fillStyle = "#64748b";
     ctx.textAlign = "right";
     ctx.textBaseline = "middle";
-    ctx.fillText(`${Math.round(this.zoom * 100)}%`, btnRight - 8, y + headerHeight / 2);
+    ctx.fillText(`${Math.round(this.zoom * 100)}%`, btnRight - 4, y + headerHeight / 2);
     ctx.restore();
 
     this.box(ctx, vpX, vpY, vpW, vpH, "#0d0f12", "#1f232b", 4);
@@ -422,29 +513,25 @@ class MermaidCanvasWidget {
     }
 
     ctx.restore();
+
+    if (this.hoveredRegion?.tooltip) {
+      this.drawCanvasTooltip(ctx, this.hoveredRegion, width, y, totalHeight);
+    }
   }
 
   mouse(event, position) {
-    const x = position[0];
-    const y = position[1];
-
-    if (event.type === "pointerdown" || event.type === "mousedown") {
-      const hit = this.hitRegions.find(r => this.contains(r, x, y));
-      if (hit) {
-        hit.action(event, position);
-        return true;
-      }
-      if (this.viewport && this.contains(this.viewport, x, y)) {
-        this.isDragging = true;
-        this.dragStart = { x, y };
-        return true;
-      }
-    }
+    if (event.button !== 0 || !/up$/.test(event.type)) return true;
+    this.clearHoveredTooltip();
+    const region = this.hitRegions.find(item => this.contains(item, position[0], position[1]));
+    region?.action?.(event, position);
     return true;
   }
 
   onPointerMove(event) {
-    if (!this.isDragging) return;
+    if (this.textEditor) {
+      this.clearHoveredTooltip();
+      return;
+    }
     const canvas = app.canvas;
     if (!canvas?.graph) return;
     const bounds = canvas.canvas.getBoundingClientRect();
@@ -454,23 +541,28 @@ class MermaidCanvasWidget {
     const x = graphX - this.node.pos[0];
     const y = graphY - this.node.pos[1];
 
-    const dx = x - this.dragStart.x;
-    const dy = y - this.dragStart.y;
-    this.pan.x += dx;
-    this.pan.y += dy;
-    this.dragStart = { x, y };
-    this.node.setDirtyCanvas(true, true);
+    if (x < 0 || x > (this.node.size[0] || 420) || y < 0 || y > (this.node.size[1] || 360)) {
+      this.clearHoveredTooltip();
+      return;
+    }
+
+    const matched = this.hitRegions.find(r => r.tooltip && this.contains(r, x, y));
+    if (matched !== this.hoveredRegion) {
+      this.hoveredRegion = matched || null;
+      canvas.setDirty(true, false);
+    }
   }
 
-  onPointerUp() {
-    if (this.isDragging) {
-      this.isDragging = false;
-      this.node.setDirtyCanvas(true, true);
+  clearHoveredTooltip() {
+    if (this.hoveredRegion) {
+      this.hoveredRegion = null;
+      app.canvas?.setDirty(true, false);
     }
   }
 
   onWheel(event) {
     if (this.textEditor) return;
+    this.clearHoveredTooltip();
     const canvas = app.canvas;
     if (!canvas?.graph) return;
     const bounds = canvas.canvas.getBoundingClientRect();
@@ -481,11 +573,13 @@ class MermaidCanvasWidget {
     const x = graphX - this.node.pos[0];
     const y = graphY - this.node.pos[1];
 
-    if (this.viewport && this.contains(this.viewport, x, y)) {
-      event.preventDefault();
-      event.stopPropagation();
-      event.stopImmediatePropagation();
+    if (!this.viewport || !this.contains(this.viewport, x, y)) return;
 
+    event.preventDefault();
+    event.stopPropagation();
+    event.stopImmediatePropagation();
+
+    if (event.ctrlKey || event.metaKey) {
       const factor = event.deltaY < 0 ? 1.15 : 0.85;
       const newZoom = Math.max(0.05, Math.min(10.0, this.zoom * factor));
       const relX = x - (this.viewport.x + this.pan.x);
@@ -493,8 +587,12 @@ class MermaidCanvasWidget {
       this.pan.x -= relX * (factor - 1);
       this.pan.y -= relY * (factor - 1);
       this.zoom = newZoom;
-      this.node.setDirtyCanvas(true, true);
+    } else if (event.shiftKey) {
+      this.pan.x -= event.deltaY;
+    } else {
+      this.pan.y -= event.deltaY;
     }
+    this.node.setDirtyCanvas(true, true);
   }
 
   openTextEditor() {
