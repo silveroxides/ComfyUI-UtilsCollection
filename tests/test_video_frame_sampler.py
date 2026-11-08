@@ -966,9 +966,10 @@ def test_h3_reference_components_round_seconds_and_preserve_audio_start():
     components = types.SimpleNamespace(images=frames, frame_rate=10, audio={"waveform": waveform, "sample_rate": 44100})
     video = types.SimpleNamespace(get_components=lambda: components)
     result = utils_nodes.UC_MiniMaxH3RefVid.execute(video, megapixels=0.01, duration_seconds=9.3112024)
-    prepared, audio, width, height, length, combined_video, transcript = result.result
+    prepared, audio, width, height, length, combined_video, transcript, duration = result.result
     assert transcript == ""
     assert (width, height, length) == (160, 64, 226)
+    assert duration == pytest.approx(226 / 24.0)
     assert tuple(prepared.shape) == (226, 64, 160, 3)
     assert float(prepared[24].mean()) == pytest.approx(10 / 99, abs=1e-6)
     assert float(prepared[-1].mean()) == pytest.approx(94 / 99, abs=1e-6)
@@ -977,7 +978,7 @@ def test_h3_reference_components_round_seconds_and_preserve_audio_start():
     assert torch.all(audio["waveform"][..., 0] > 0.5)
     assert torch.count_nonzero(audio["waveform"][..., 301333:]) == 0
     schema = utils_nodes.UC_MiniMaxH3RefVid.GET_SCHEMA()
-    assert [output.id for output in schema.outputs] == ["frames", "audio", "width", "height", "length", "video", "transcribed_audio"]
+    assert [output.id for output in schema.outputs] == ["frames", "audio", "width", "height", "length", "video", "transcribed_audio", "duration"]
     combined = combined_video.get_components()
     assert combined.images is prepared
     assert combined.audio is audio
@@ -986,7 +987,8 @@ def test_h3_reference_components_round_seconds_and_preserve_audio_start():
     # Positive start offsets use H3 rounding and move video and audio together.
     waveform[..., 71662] = 1.0  # round((39 / 24) * 44100)
     shifted = utils_nodes.UC_MiniMaxH3RefVid.execute(video, megapixels=0.01, duration_seconds=2.0, start_at_timestamp=1.0)
-    shifted_frames, shifted_audio, _, _, shifted_length, shifted_video, _ = shifted.result
+    shifted_frames, shifted_audio, _, _, shifted_length, shifted_video, _, shifted_duration = shifted.result
+    assert shifted_duration == pytest.approx(shifted_length / 24.0)
     assert shifted_length == 56
     assert shifted_video.get_components().images is shifted_frames
     assert float(shifted_frames[0].mean()) == pytest.approx(16 / 99, abs=1e-6)

@@ -69,6 +69,7 @@ class UC_MiniMaxH3RefVid(io.ComfyNode):
                 io.Int.Output("length", tooltip="Matching generation length in frames at 24 fps, including the H3 length adjustment."),
                 io.Video.Output("video", tooltip="24 fps video built from the exact frames and audio returned by this node, including the selected resolution, crop, and duration."),
                 io.String.Output("transcribed_audio", tooltip="Word-timed phrases split before uppercase words and after commas or sentence punctuation. A lone uppercase word with a comma stays with following speech until another boundary. Countable English phrases target 4–6 dictionary syllables; unknown or ambiguous counts keep text boundaries only. Phrases averaging over one second of aligned duration per word are omitted as suspected hallucinations, including genuinely slow speech. Gaps between words do not count toward that duration. Retained words appear once. Times start at the selected clip's beginning. Empty when Whisper is disconnected or no speech/audio is available, or all phrases are filtered."),
+                io.Float.Output("duration", tooltip="Matching generation duration in seconds at 24 fps (length / 24.0)."),
             ],
         )
 
@@ -140,7 +141,8 @@ class UC_MiniMaxH3RefVid(io.ComfyNode):
             "[UC_MiniMaxH3RefVid] Source %.2fs (%.2f fps)%s -> prepared %d frame(s)%s at %dx%d (24 fps, %.2fs, start_frame=%d) | audio=%s%s",
             src_sec, src_fps, seg_info, length, pad_info, width, height, length / 24.0, start_f, audio_info, whisper_info,
         )
-        return io.NodeOutput(frames, audio, width, height, length, prepared_video, transcribed_audio, ui={"h3_reference_range": [preview]})
+        duration = float(length) / 24.0
+        return io.NodeOutput(frames, audio, width, height, length, prepared_video, transcribed_audio, duration, ui={"h3_reference_range": [preview]})
 
 
 class UC_MiniMaxH3ClipContinuationSave(io.ComfyNode):

@@ -543,6 +543,11 @@ class UC_H3RefVideoSegments(io.ComfyNode):
                     is_output_list=True,
                     tooltip="Number of padded frames added at the end of each segment to fit the H3 grid (0 for full segments, positive only on the final segment when padded). Connect to trim_trailing_frames on MiniMax H3 Clip Continuation Trim to cut off the padded tail.",
                 ),
+                io.Float.Output(
+                    "durations",
+                    is_output_list=True,
+                    tooltip="List of segment durations in seconds at 24 fps as floating-point values.",
+                ),
             ],
         )
 
@@ -582,6 +587,7 @@ class UC_H3RefVideoSegments(io.ComfyNode):
             enable_whisper=enable_whisper,
             return_trim_metadata=True,
         )
+        durations = [float(length) / 24.0 for length in length_list]
         return io.NodeOutput(
             frames_list,
             audio_list,
@@ -592,5 +598,6 @@ class UC_H3RefVideoSegments(io.ComfyNode):
             transcript_list,
             tail_frames_opt,
             trim_trailing_list,
+            durations,
         )
 

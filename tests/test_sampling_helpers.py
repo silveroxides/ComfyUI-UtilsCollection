@@ -404,6 +404,8 @@ def test_node_schema():
     assert seg_schema.outputs[7].is_output_list is False
     assert seg_schema.outputs[8].id == "trim_trailing_frames"
     assert seg_schema.outputs[8].is_output_list is True
+    assert seg_schema.outputs[9].id == "durations"
+    assert seg_schema.outputs[9].is_output_list is True
 
     # Test split_h3_video_components_into_segments with megapixels=0.0 preserves resolution
     import types
@@ -412,6 +414,15 @@ def test_node_schema():
     vid = types.SimpleNamespace(get_components=lambda: comp)
     out = split_h3_video_components_into_segments(vid, megapixels=0.0, segment_count=1)
     frames_list, _, out_w, out_h, lengths, _, _ = out
+    assert out_w == 120
+    assert out_h == 60
+
+    # Test UC_H3RefVideoSegments.execute returns durations list
+    seg_out = UC_H3RefVideoSegments.execute(vid, megapixels=0.0, segment_count=1, enable_whisper=False)
+    assert len(seg_out.args) == 10
+    durations = seg_out.args[9]
+    assert isinstance(durations, list)
+    assert durations == [float(l) / 24.0 for l in seg_out.args[4]]
     assert (out_w, out_h) == (120, 60)
     assert tuple(frames_list[0].shape[1:3]) == (60, 120)
 
