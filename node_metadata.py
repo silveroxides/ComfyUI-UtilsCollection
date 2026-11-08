@@ -191,6 +191,8 @@ DESCRIPTIONS = {
     "UC_H3RefVideoSegments": "Prepares all sequential H3 reference segments as list outputs for multi-chunk captioning and conditioning workflows.",
     "UC_CreateListOfSame": "Creates a list containing the input item repeated a specified number of times.",
     "UC_MiniMaxH3ContextPatcher": "Patches a MiniMax H3 model with sliding temporal context windows to generate longer continuous video latents without out-of-memory errors.",
+    "UC_MermaidNote": "Canvas note with pure Canvas2D rendering for Markdown and interactive Mermaid diagrams with smooth pan and zoom.",
+    "UC_MermaidPreview": "Displays connected text containing Mermaid diagrams or Markdown using pure Canvas2D rendering with smooth pan and zoom.",
 }
 
 
@@ -262,6 +264,8 @@ EXTRA_ALIASES = {
     "UC_CreateListOfSame": ["create list", "repeat item", "list of same", "duplicate item", "list duplicator"],
     "UC_MiniMaxH3ContextPatcher": ["minimax context", "h3 context windows", "context patcher", "sliding window", "long video patcher"],
     "UC_SigmasPreview": ["sigmas preview", "sigma plot", "schedule preview", "graph sigmas", "sigma visualizer"],
+    "UC_MermaidNote": ["mermaid note", "markdown note", "diagram note", "flowchart note", "mermaid editor"],
+    "UC_MermaidPreview": ["preview as mermaid", "mermaid preview", "diagram preview", "render mermaid", "mermaid viewer"],
 }
 
 

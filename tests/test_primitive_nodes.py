@@ -16,6 +16,8 @@ cli_args.cpu = True
 try:
     from utils_collection_primitive_test.nodes.utils_nodes import (
         UC_FromSeedCluster,
+        UC_MermaidNote,
+        UC_MermaidPreview,
         UC_SeedCluster,
         UC_StaticFloat,
         UC_StaticInt,
@@ -86,3 +88,41 @@ def test_from_seed_cluster_unpacks_and_fills_eight_integer_outputs():
     assert UC_FromSeedCluster.execute([8, 10, 12, 14]).result == (
         8, 10, 12, 14, 14, 14, 14, 14,
     )
+
+
+def test_mermaid_note_schema_and_execution():
+    schema = UC_MermaidNote.define_schema()
+    assert schema.node_id == "UC_MermaidNote"
+    assert schema.display_name == "Mermaid Note"
+    assert schema.category == "utils/documentation"
+    assert schema.is_output_node is True
+    assert len(schema.inputs) == 1
+    assert schema.inputs[0].id == "text"
+    assert schema.inputs[0].multiline is True
+    assert "mermaid" in schema.inputs[0].default
+    assert len(schema.outputs) == 1
+    assert schema.outputs[0].id == "text"
+
+    out = UC_MermaidNote.execute("graph TD\nA-->B")
+    assert out.result == ("graph TD\nA-->B",)
+    assert out.ui == {"mermaid_text": ("graph TD\nA-->B",)}
+
+
+def test_mermaid_preview_schema_and_execution():
+    schema = UC_MermaidPreview.define_schema()
+    assert schema.node_id == "UC_MermaidPreview"
+    assert schema.display_name == "Preview as Mermaid"
+    assert schema.category == "utils/documentation"
+    assert schema.is_output_node is True
+    assert len(schema.inputs) == 1
+    assert schema.inputs[0].id == "source"
+    assert len(schema.outputs) == 1
+    assert schema.outputs[0].id == "text"
+
+    out_str = UC_MermaidPreview.execute("pie title Pets\n\"Cats\" : 45")
+    assert out_str.result == ("pie title Pets\n\"Cats\" : 45",)
+    assert out_str.ui == {"mermaid_text": ("pie title Pets\n\"Cats\" : 45",)}
+
+    out_dict = UC_MermaidPreview.execute({"chart": "mindmap"})
+    assert "mindmap" in out_dict.result[0]
+    assert out_dict.ui == {"mermaid_text": (out_dict.result[0],)}

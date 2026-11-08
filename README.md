@@ -367,6 +367,8 @@ The left sidebar stays visible and shows the selected foreground's context actio
 - `UC_Krea2EditPatcher`
 - `UC_MOSSImageEditPatcher`
 - `UC_MarkdownPreview`
+- `UC_MermaidNote`
+- `UC_MermaidPreview`
 - `UC_BoldFrakturTextStyle`
 - `UC_UnBoldFrakturTextStyle`
 - `UC_WordJoiner`

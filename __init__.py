@@ -210,6 +210,8 @@ class SamplingUtils(ComfyExtension):
             UC_CompositeNodesGuide,
             UC_HighResolutionTilingGuide,
             UC_MarkdownPreview,
+            UC_MermaidNote,
+            UC_MermaidPreview,
             UC_LoraLoaderCLIPOnly,
             UC_LoraLoaderModelOnly,
             UC_LoraStackLoaderModelOnly,

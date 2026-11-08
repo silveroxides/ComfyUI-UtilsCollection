@@ -1869,4 +1869,52 @@ class UC_MarkdownPreview(io.ComfyNode):
         return io.NodeOutput(value, ui={"markdown": (value,)})
 
 
+DEFAULT_MERMAID_NOTE_TEXT = "```mermaid\nflowchart TD\n    A[Start] --> B{Process}\n    B -->|Yes| C[Output]\n    B -->|No| D[Alternative]\n```"
+
+
+class UC_MermaidNote(io.ComfyNode):
+    @classmethod
+    def define_schema(cls) -> io.Schema:
+        return io.Schema(
+            node_id="UC_MermaidNote",
+            display_name="Mermaid Note",
+            category="utils/documentation",
+            description="Canvas note with pure Canvas2D rendering for Markdown and Mermaid diagrams.",
+            inputs=[io.String.Input("text", multiline=True, default=DEFAULT_MERMAID_NOTE_TEXT, tooltip="Markdown text containing ```mermaid ... ``` code blocks or raw Mermaid code.")],
+            outputs=[io.String.Output("text", display_name="text", tooltip="Note text content for chaining to downstream nodes.")],
+            is_output_node=True,
+        )
+
+    @classmethod
+    def execute(cls, text: str = "") -> io.NodeOutput:
+        return io.NodeOutput(text, ui={"mermaid_text": (text,)})
+
+
+class UC_MermaidPreview(io.ComfyNode):
+    @classmethod
+    def define_schema(cls) -> io.Schema:
+        return io.Schema(
+            node_id="UC_MermaidPreview",
+            display_name="Preview as Mermaid",
+            category="utils/documentation",
+            description="Displays connected text containing Mermaid diagrams or Markdown using pure Canvas2D rendering.",
+            inputs=[io.AnyType.Input("source", tooltip="Text or serializable value containing Mermaid diagrams or Markdown.")],
+            outputs=[io.String.Output("text", display_name="text", tooltip="Passthrough of source text.")],
+            is_output_node=True,
+        )
+
+    @classmethod
+    def execute(cls, source=None) -> io.NodeOutput:
+        if isinstance(source, str):
+            value = source
+        elif isinstance(source, (int, float, bool)) or source is None:
+            value = str(source)
+        else:
+            try:
+                value = json.dumps(source, indent=2)
+            except (TypeError, ValueError):
+                value = str(source)
+        return io.NodeOutput(value, ui={"mermaid_text": (value,)})
+
+
 CompositeNodesGuide = UC_CompositeNodesGuide
