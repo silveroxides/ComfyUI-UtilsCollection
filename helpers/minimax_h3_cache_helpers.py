@@ -49,6 +49,8 @@ logging.getLogger("unifiedefficientloader").addFilter(_filter_h3_cache_write_log
 
 def lifetime_identity(value):
     """Never retain a model, nor serialize a recyclable Python address as its key."""
+    while isinstance(value, (tuple, list)) and len(value) > 0:
+        value = value[0]
     address = id(value)
     with _IDENTITY_LOCK:
         existing = _IDENTITIES.get(address)
@@ -61,7 +63,10 @@ def lifetime_identity(value):
                 if current is not None and current[0] is reference:
                     del _IDENTITIES[address]
 
-        reference = weakref.ref(value, discard)
+        try:
+            reference = weakref.ref(value, discard)
+        except TypeError:
+            reference = lambda: None
         identity = uuid.uuid4().hex
         _IDENTITIES[address] = (reference, identity)
         return identity
@@ -471,6 +476,8 @@ class H3EncoderCache:
         }, compute)
 
     def encode_vae(self, vae, samples, media="image"):
+        while isinstance(vae, (tuple, list)) and len(vae) > 0:
+            vae = vae[0]
         if not self._allows_media(media):
             return vae.encode(samples)
         identity = {

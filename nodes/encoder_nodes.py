@@ -1,3 +1,4 @@
+import sys
 import re
 import math
 import os
@@ -55,6 +56,7 @@ from ..helpers.encoder_helpers import(
     CONSENSUS_BLEND_PRESETS,
     execute_advanced_visual_consensus,
     execute_advanced_minimax_h3_image_to_video,
+    execute_batch_minimax_h3_image_to_video,
     execute_minimax_h3_vlm_guide,
     execute_minimax_h3_vlm_frame_guide,
     build_minimax_h3_media_config,
@@ -63,6 +65,11 @@ from ..helpers.encoder_helpers import(
     execute_token_fusion_visual_conditioning,
     build_context_attention_bias,
     resolve_reference_latent_output,
+    normalize_h3_fusion_method,
+    normalize_visual_fusion_method,
+    is_list_batch_call,
+    get_list_batch_size,
+    slice_item_inputs,
 )
 from ..helpers.minimax_h3_reference_media_helpers import execute_advanced_minimax_h3_reference_media_image_to_video
 from ..helpers.image_helpers import VIDEO_FRAME_TIMESTAMP_FORMATS
@@ -2103,6 +2110,7 @@ class UC_AdvancedVisualConditioningEncode(io.ComfyNode):
             node_id="UC_AdvancedVisualConditioningEncode",
             display_name="Advanced Visual Conditioning Encode",
             category="advanced/conditioning",
+            is_input_list=True,
             inputs=[
                 # --- Primary Inputs ---
                 io.Clip.Input("clip", tooltip="CLIP/T5 dual text encoder reference."),
@@ -2172,11 +2180,11 @@ class UC_AdvancedVisualConditioningEncode(io.ComfyNode):
                 ),
                 io.Boolean.Input("semantic_anchor", default=False, tooltip="Prefixes each encoded visual slot with its numbered <Picture N>: semantic anchor."),
                 io.Autogrow.Input("image_inputs", template=autogrow_template, tooltip="Multimodal images. Maps active inputs sequentially to variables (a, b, c, ...)."),
-                io.Combo.Input("fusion_method", options=["conds_fusion", "token_fusion"], default=cls.DEFAULT_FUSION_METHOD, optional=True, tooltip="Fuse visual conditioning after encoding, or visual features and DeepStack before joint encoding. Off/no-image behavior remains unchanged."),
+                io.Combo.Input("fusion_method", options=["conds_fusion", "token_fusion", "disabled", "off"], default=cls.DEFAULT_FUSION_METHOD, optional=True, tooltip="Fuse visual conditioning after encoding, or visual features and DeepStack before joint encoding. Off/no-image behavior remains unchanged."),
             ],
             outputs=[
-                io.Conditioning.Output("conditioning", display_name="conditioning"),
-                io.Latent.Output("latent", display_name="latent", tooltip="VAE reference latent encoded from input images (None if VAE or images disconnected)."),
+                io.Conditioning.Output(id="conditioning", display_name="conditioning", is_output_list=True),
+                io.Latent.Output(id="latent", display_name="latent", is_output_list=True, tooltip="VAE reference latent encoded from input images (None if VAE or images disconnected)."),
             ],
         )
 
@@ -2201,28 +2209,46 @@ class UC_AdvancedVisualConditioningEncode(io.ComfyNode):
         semantic_anchor: bool = False,
         fusion_method=None,
     ) -> io.NodeOutput:
-        method = cls.DEFAULT_FUSION_METHOD if fusion_method is None else fusion_method
-        if method not in ("conds_fusion", "token_fusion"):
-            raise ValueError(f"Unsupported visual fusion method: {method}")
-        execute = cls._execute_token_fusion if method == "token_fusion" else cls._execute_conds_fusion
-        return execute(
-            clip=clip,
-            prompt=prompt,
-            system_prompt=system_prompt,
-            vlm_resolution=vlm_resolution,
-            image_inputs=image_inputs,
-            fusion_images=fusion_images,
-            visual_fusion_config=visual_fusion_config,
-            formula=formula,
-            padding_method=padding_method,
-            vae_resolution=vae_resolution,
-            ref_latent_mode=ref_latent_mode,
-            vae=vae,
-            multiplier=multiplier,
-            image_strength=image_strength,
-            vae_dimension_multiple=vae_dimension_multiple,
-            semantic_anchor=semantic_anchor,
-        )
+        raw_args = dict(locals())
+        raw_args.pop("cls", None)
+        raw_kwargs = raw_args.pop("kwargs", {})
+        raw_args.update(raw_kwargs)
+        is_list = is_list_batch_call(raw_args)
+        batch_size = get_list_batch_size(raw_args) if is_list else 1
+
+        all_conds = []
+        all_latents = []
+
+        for entry_id in range(batch_size):
+            item = slice_item_inputs(raw_args, entry_id) if is_list else raw_args
+            method = normalize_visual_fusion_method(item.get("fusion_method"), default=cls.DEFAULT_FUSION_METHOD)
+            execute = cls._execute_token_fusion if method == "token_fusion" else cls._execute_conds_fusion
+            out = execute(
+                clip=item.get("clip"),
+                prompt=item.get("prompt"),
+                system_prompt=item.get("system_prompt"),
+                vlm_resolution=item.get("vlm_resolution"),
+                image_inputs=item.get("image_inputs"),
+                fusion_images=item.get("fusion_images"),
+                visual_fusion_config=item.get("visual_fusion_config"),
+                formula=item.get("formula", ""),
+                padding_method=item.get("padding_method", "zero-pad"),
+                vae_resolution=item.get("vae_resolution", 1024),
+                ref_latent_mode=item.get("ref_latent_mode", "off"),
+                vae=item.get("vae"),
+                multiplier=item.get("multiplier", 1.0),
+                image_strength=item.get("image_strength", 1.0),
+                vae_dimension_multiple=item.get("vae_dimension_multiple", 8),
+                semantic_anchor=item.get("semantic_anchor", False),
+            )
+            cond = out.args[0] if hasattr(out, "args") else (out[0] if isinstance(out, (tuple, list)) else out)
+            latent = out.args[1] if hasattr(out, "args") and len(out.args) > 1 else (out[1] if isinstance(out, (tuple, list)) and len(out) > 1 else None)
+            all_conds.append(cond)
+            all_latents.append(latent)
+
+        if is_list:
+            return io.NodeOutput(all_conds, all_latents)
+        return io.NodeOutput(all_conds[0], all_latents[0])
 
     @classmethod
     def _execute_conds_fusion(
@@ -3351,7 +3377,7 @@ class UC_Krea2TokenAttentionWeight(io.ComfyNode):
                 io.Float.Input("multiplier", default=1.0, min=-1000.0, max=1000.0, step=0.1, tooltip="Overall multiplier applied to the final conditioning vector."),
                 io.Int.Input("vae_dimension_multiple", default=8, min=4, max=256, step=4, advanced=True, tooltip="Pixel multiple used to align reference images before VAE encoding."),
                 io.Autogrow.Input("image_inputs", template=autogrow_template, tooltip="Multimodal images. Maps active inputs sequentially to variables (a, b, c, ...)."),
-                io.Combo.Input("fusion_method", options=["conds_fusion", "token_fusion"], default=cls.DEFAULT_FUSION_METHOD, optional=True, tooltip="Select pre- or post-encoding visual fusion. Experimental attention weighting and off/no-image behavior remain unchanged."),
+                io.Combo.Input("fusion_method", options=["conds_fusion", "token_fusion", "disabled", "off"], default=cls.DEFAULT_FUSION_METHOD, optional=True, tooltip="Select pre- or post-encoding visual fusion. Experimental attention weighting and off/no-image behavior remain unchanged."),
             ],
             outputs=[
                 io.Model.Output(),
@@ -3362,9 +3388,7 @@ class UC_Krea2TokenAttentionWeight(io.ComfyNode):
 
     @classmethod
     def execute(cls, model, clip, prompt, system_prompt, attention_weights, image_inputs: io.Autogrow.Type, vlm_resolution: int, visual_fusion_config: dict = None, formula: str = "", padding_method: str = "zero-pad", vae_resolution=1024, ref_latent_mode="off", vae=None, multiplier: float = 1.0, strength: float = 1.0, vae_dimension_multiple=8, fusion_method=None) -> io.NodeOutput:
-        method = cls.DEFAULT_FUSION_METHOD if fusion_method is None else fusion_method
-        if method not in ("conds_fusion", "token_fusion"):
-            raise ValueError(f"Unsupported visual fusion method: {method}")
+        method = normalize_visual_fusion_method(fusion_method, default=cls.DEFAULT_FUSION_METHOD)
         execute = cls._execute_token_fusion if method == "token_fusion" else cls._execute_conds_fusion
         return execute(
             model=model,
@@ -3928,6 +3952,7 @@ class UC_AdvancedMiniMaxH3ImageToVideo(io.ComfyNode):
             node_id="UC_AdvancedMiniMaxH3ImageToVideo",
             display_name="Advanced MiniMax H3 Image to Video",
             category="advanced/conditioning",
+            is_input_list=True,
             description=(
                 "Creates coordinated MiniMax H3 Qwen conditioning from independent frame, reference, and fusion "
                 "inputs together with native visual controls and the matching joint video/audio latent. Optional media "
@@ -4029,7 +4054,7 @@ class UC_AdvancedMiniMaxH3ImageToVideo(io.ComfyNode):
                 io.Audio.Input("audio", optional=True, tooltip="Optional H3 reference audio. Missing audio from a video is ignored."),
                 io.Vae.Input("audio_vae", optional=True, lazy=True, tooltip="Required only when audio is present. When audio is absent, it skips resampling and encoding."),
                 io.Combo.Input(
-                    "fusion_method", options=["conds_fusion", "token_fusion"],
+                    "fusion_method", options=["conds_fusion", "token_fusion", "disabled", "off"],
                     default=cls.DEFAULT_FUSION_METHOD, optional=True,
                     tooltip="conds_fusion blends visual conditioning after Qwen encoding. token_fusion blends visual tokens and DeepStack before a joint Qwen encode. The visual fusion config controls the blend itself.",
                 ),
@@ -4060,9 +4085,11 @@ class UC_AdvancedMiniMaxH3ImageToVideo(io.ComfyNode):
             outputs=[
                 io.Conditioning.Output(
                     display_name="positive",
+                    is_output_list=True,
                     tooltip="Encoded prompt, visual, and audio guidance ready to connect to your guider or continuation sampler.",
                 ),
                 io.Latent.Output(
+                    is_output_list=True,
                     tooltip="Blank video and audio canvas sized to your selected width, height, and frame length.",
                 ),
             ],
@@ -4070,12 +4097,17 @@ class UC_AdvancedMiniMaxH3ImageToVideo(io.ComfyNode):
 
     @classmethod
     def check_lazy_status(cls, audio=None, audio_vae=None, continuation_media=None, **kwargs):
-        continuation_audio = (
-            isinstance(continuation_media, dict)
-            and continuation_media.get("audio") is not None
-            and continuation_media.get("latent") is None
+        audio_list = audio if isinstance(audio, (list, tuple)) else [audio]
+        cont_list = continuation_media if isinstance(continuation_media, (list, tuple)) else [continuation_media]
+        vae_list = audio_vae if isinstance(audio_vae, (list, tuple)) else [audio_vae]
+
+        has_audio = any(a is not None for a in audio_list)
+        has_cont_audio = any(
+            isinstance(c, dict) and c.get("audio") is not None and c.get("latent") is None
+            for c in cont_list
         )
-        return ["audio_vae"] if (audio is not None or continuation_audio) and audio_vae is None else []
+        has_vae = any(v is not None for v in vae_list)
+        return ["audio_vae"] if (has_audio or has_cont_audio) and not has_vae else []
 
     @classmethod
     def execute(
@@ -4103,33 +4135,58 @@ class UC_AdvancedMiniMaxH3ImageToVideo(io.ComfyNode):
         fusion_method=None,
         **kwargs,
     ) -> io.NodeOutput:
-        fusion_method = cls.DEFAULT_FUSION_METHOD if fusion_method is None else fusion_method
-        if fusion_method not in ("conds_fusion", "token_fusion"):
-            raise ValueError(f"Unsupported MiniMax H3 fusion method: {fusion_method}")
-        conditioning, latent = execute_advanced_minimax_h3_image_to_video(
-            clip,
-            vae,
-            prompt,
-            width,
-            height,
-            length,
-            first_frame=first_frame,
-            last_frame=last_frame,
-            reference_images=reference_images,
-            fusion_images=fusion_images,
-            visual_fusion_config=visual_fusion_config,
-            multiplier=multiplier,
-            ref_image_size=ref_image_size,
-            vlm_resolution=vlm_resolution,
-            vlm_video_resolution=vlm_video_resolution,
-            media_config=media_config,
-            video=video,
-            audio=audio,
-            audio_vae=audio_vae,
-            enable_caching=enable_caching,
-            token_fusion=fusion_method == "token_fusion",
-        )
-        return io.NodeOutput(conditioning, latent)
+        raw_args = dict(locals())
+        raw_args.pop("cls", None)
+        raw_kwargs = raw_args.pop("kwargs", {})
+        raw_args.update(raw_kwargs)
+        is_list = is_list_batch_call(raw_args)
+
+        if not is_list:
+            norm_fusion_method = normalize_h3_fusion_method(fusion_method, default=cls.DEFAULT_FUSION_METHOD)
+            conditioning, latent = execute_advanced_minimax_h3_image_to_video(
+                clip,
+                vae,
+                prompt,
+                width,
+                height,
+                length,
+                first_frame=first_frame,
+                last_frame=last_frame,
+                reference_images=reference_images,
+                fusion_images=fusion_images,
+                visual_fusion_config=visual_fusion_config,
+                multiplier=multiplier,
+                ref_image_size=ref_image_size,
+                vlm_resolution=vlm_resolution,
+                vlm_video_resolution=vlm_video_resolution,
+                media_config=media_config,
+                video=video,
+                audio=audio,
+                audio_vae=audio_vae,
+                enable_caching=enable_caching,
+                token_fusion=norm_fusion_method == "token_fusion",
+                **kwargs,
+            )
+            return io.NodeOutput(conditioning, latent)
+
+        batch_size = get_list_batch_size(raw_args)
+        items = []
+        for entry_id in range(batch_size):
+            item = slice_item_inputs(raw_args, entry_id)
+            norm_fusion_method = normalize_h3_fusion_method(item.get("fusion_method"), default=cls.DEFAULT_FUSION_METHOD)
+            item["token_fusion"] = norm_fusion_method == "token_fusion"
+            items.append(item)
+
+        mod = sys.modules.get(cls.__module__)
+        custom_exec = getattr(mod, "execute_advanced_minimax_h3_image_to_video", None) or globals().get("execute_advanced_minimax_h3_image_to_video")
+        if custom_exec is not None and custom_exec is not execute_advanced_minimax_h3_image_to_video:
+            outs = [custom_exec(**it) for it in items]
+            all_conds = [o[0] if isinstance(o, (tuple, list)) else o.args[0] for o in outs]
+            all_latents = [o[1] if isinstance(o, (tuple, list)) else o.args[1] for o in outs]
+            return io.NodeOutput(all_conds, all_latents)
+
+        all_conds, all_latents, _ = execute_batch_minimax_h3_image_to_video(items, enable_caching=items[0].get("enable_caching", "all"))
+        return io.NodeOutput(all_conds, all_latents)
 
 
 class UC_MiniMaxH3ClipContinuationEncoder(UC_AdvancedMiniMaxH3ImageToVideo):
@@ -4162,6 +4219,7 @@ class UC_MiniMaxH3ClipContinuationEncoder(UC_AdvancedMiniMaxH3ImageToVideo):
             io.Int.Output(
                 "trim_frames",
                 display_name="trim_frames",
+                is_output_list=True,
                 tooltip="Number of leading pinned frames to remove with MiniMax H3 Clip Continuation Trim after decoding (0 when no continuation is active).",
             ),
         ]
@@ -4194,45 +4252,82 @@ class UC_MiniMaxH3ClipContinuationEncoder(UC_AdvancedMiniMaxH3ImageToVideo):
         fusion_method=None,
         **kwargs,
     ) -> io.NodeOutput:
-        fusion_method = cls.DEFAULT_FUSION_METHOD if fusion_method is None else fusion_method
-        if fusion_method not in ("conds_fusion", "token_fusion"):
-            raise ValueError(f"Unsupported MiniMax H3 fusion method: {fusion_method}")
-        conditioning, latent = execute_advanced_minimax_h3_image_to_video(
-            clip,
-            vae,
-            prompt,
-            width,
-            height,
-            length,
-            first_frame=first_frame,
-            last_frame=last_frame,
-            reference_images=reference_images,
-            fusion_images=fusion_images,
-            visual_fusion_config=visual_fusion_config,
-            multiplier=multiplier,
-            ref_image_size=ref_image_size,
-            vlm_resolution=vlm_resolution,
-            vlm_video_resolution=vlm_video_resolution,
-            media_config=media_config,
-            video=video,
-            continuation_media=continuation_media,
-            audio=audio,
-            audio_vae=audio_vae,
-            enable_caching=enable_caching,
-            token_fusion=fusion_method == "token_fusion",
-        )
-        cond_meta = (
-            conditioning[0][1]
-            if conditioning and len(conditioning[0]) > 1 and isinstance(conditioning[0][1], dict)
-            else {}
-        )
-        trim_frames = int(
-            cond_meta.get(
-                "minimax_trim_frames",
-                cond_meta.get("uc_overlap_frames", latent.get("uc_overlap_frames", 0)),
+        raw_args = dict(locals())
+        raw_args.pop("cls", None)
+        raw_kwargs = raw_args.pop("kwargs", {})
+        raw_args.update(raw_kwargs)
+        is_list = is_list_batch_call(raw_args)
+
+        if not is_list:
+            norm_fusion_method = normalize_h3_fusion_method(fusion_method, default=cls.DEFAULT_FUSION_METHOD)
+            conditioning, latent = execute_advanced_minimax_h3_image_to_video(
+                clip,
+                vae,
+                prompt,
+                width,
+                height,
+                length,
+                first_frame=first_frame,
+                last_frame=last_frame,
+                reference_images=reference_images,
+                fusion_images=fusion_images,
+                visual_fusion_config=visual_fusion_config,
+                multiplier=multiplier,
+                ref_image_size=ref_image_size,
+                vlm_resolution=vlm_resolution,
+                vlm_video_resolution=vlm_video_resolution,
+                media_config=media_config,
+                video=video,
+                continuation_media=continuation_media,
+                audio=audio,
+                audio_vae=audio_vae,
+                enable_caching=enable_caching,
+                token_fusion=norm_fusion_method == "token_fusion",
+                **kwargs,
             )
-        )
-        return io.NodeOutput(conditioning, latent, trim_frames)
+            cond_meta = (
+                conditioning[0][1]
+                if conditioning and len(conditioning[0]) > 1 and isinstance(conditioning[0][1], dict)
+                else {}
+            )
+            trim_frames = int(
+                cond_meta.get(
+                    "minimax_trim_frames",
+                    cond_meta.get("uc_overlap_frames", latent.get("uc_overlap_frames", 0) if isinstance(latent, dict) else 0),
+                )
+            )
+            return io.NodeOutput(conditioning, latent, trim_frames)
+
+        batch_size = get_list_batch_size(raw_args)
+        items = []
+        for entry_id in range(batch_size):
+            item = slice_item_inputs(raw_args, entry_id)
+            norm_fusion_method = normalize_h3_fusion_method(item.get("fusion_method"), default=cls.DEFAULT_FUSION_METHOD)
+            item["token_fusion"] = norm_fusion_method == "token_fusion"
+            items.append(item)
+
+        mod = sys.modules.get(cls.__module__)
+        custom_exec = getattr(mod, "execute_advanced_minimax_h3_image_to_video", None) or globals().get("execute_advanced_minimax_h3_image_to_video")
+        if custom_exec is not None and custom_exec is not execute_advanced_minimax_h3_image_to_video:
+            all_conds, all_latents, all_trim_frames = [], [], []
+            for it in items:
+                out = custom_exec(**it)
+                c = out[0] if isinstance(out, (tuple, list)) else out.args[0]
+                l = out[1] if isinstance(out, (tuple, list)) else out.args[1]
+                t = 0
+                if isinstance(out, (tuple, list)) and len(out) > 2:
+                    t = out[2]
+                elif hasattr(out, "args") and len(out.args) > 2:
+                    t = out.args[2]
+                elif isinstance(c, list) and c and len(c[0]) > 1 and isinstance(c[0][1], dict):
+                    t = c[0][1].get("minimax_trim_frames", 0)
+                all_conds.append(c)
+                all_latents.append(l)
+                all_trim_frames.append(t)
+            return io.NodeOutput(all_conds, all_latents, all_trim_frames)
+
+        all_conds, all_latents, all_trim_frames = execute_batch_minimax_h3_image_to_video(items, enable_caching=items[0].get("enable_caching", "all"))
+        return io.NodeOutput(all_conds, all_latents, all_trim_frames)
 
 
 class UC_AdvancedVisConEncoder(io.ComfyNode):
@@ -4297,7 +4392,7 @@ class UC_AdvancedVisConEncoder(io.ComfyNode):
                 ),
                 io.Int.Input("vae_dimension_multiple", default=8, min=4, max=256, step=4, advanced=True),
                 io.Boolean.Input("semantic_anchor", default=False, tooltip="Prefixes each encoded visual slot with its numbered <Picture N>: semantic anchor."),
-                io.Combo.Input("fusion_method", options=["conds_fusion", "token_fusion"], default=cls.DEFAULT_FUSION_METHOD, optional=True, tooltip="Select pre- or post-encoding spatial fusion at each resolution and batch lane. Subsequent complete-conditioning consensus is unchanged."),
+                io.Combo.Input("fusion_method", options=["conds_fusion", "token_fusion", "disabled", "off"], default=cls.DEFAULT_FUSION_METHOD, optional=True, tooltip="Select pre- or post-encoding spatial fusion at each resolution and batch lane. Subsequent complete-conditioning consensus is unchanged."),
                 io.Autogrow.Input(
                     "image_inputs",
                     template=autogrow_template,
@@ -4325,9 +4420,7 @@ class UC_AdvancedVisConEncoder(io.ComfyNode):
         semantic_anchor=False,
         fusion_method=None,
     ) -> io.NodeOutput:
-        method = cls.DEFAULT_FUSION_METHOD if fusion_method is None else fusion_method
-        if method not in ("conds_fusion", "token_fusion"):
-            raise ValueError(f"Unsupported visual fusion method: {method}")
+        method = normalize_visual_fusion_method(fusion_method, default=cls.DEFAULT_FUSION_METHOD)
         conditioning = execute_advanced_visual_consensus(
             clip,
             prompt,
@@ -4519,9 +4612,7 @@ class UC_AdvMiniMaxH3ImageToVideoTemporalFusion(UC_AdvancedMiniMaxH3ImageToVideo
         fusion_method=None,
         **kwargs,
     ):
-        fusion_method = cls.DEFAULT_FUSION_METHOD if fusion_method is None else fusion_method
-        if fusion_method not in ("conds_fusion", "token_fusion"):
-            raise ValueError(f"Unsupported MiniMax H3 temporal fusion method: {fusion_method}")
+        norm_fusion_method = normalize_h3_fusion_method(fusion_method, default=cls.DEFAULT_FUSION_METHOD)
         conditioning, latent = execute_advanced_minimax_h3_image_to_video(
             clip, vae, prompt, width, height, length,
             first_frame=first_frame, last_frame=last_frame, reference_images=reference_images,
@@ -4529,7 +4620,7 @@ class UC_AdvMiniMaxH3ImageToVideoTemporalFusion(UC_AdvancedMiniMaxH3ImageToVideo
             ref_image_size=ref_image_size, vlm_resolution=vlm_resolution,
             vlm_video_resolution=vlm_video_resolution, media_config=media_config,
             video=video, audio=audio, audio_vae=audio_vae,
-            temporal_fusion=True, temporal_token_fusion=fusion_method == "token_fusion",
+            temporal_fusion=True, temporal_token_fusion=norm_fusion_method == "token_fusion",
             text_blend_config=text_blend_config,
             enable_caching=enable_caching,
         )
@@ -4574,6 +4665,7 @@ class UC_AdvancedMiniMaxH3RefMediaImageToVideo(io.ComfyNode):
             node_id="UC_AdvancedMiniMaxH3RefMediaImageToVideo",
             display_name="Advanced MiniMax H3 Reference Media to Video",
             category="advanced/conditioning",
+            is_input_list=True,
             description="Encodes MiniMax H3 prompt conditioning, multi-video and audio references from a Reference Media container.",
             inputs=[
                 io.Clip.Input("clip", tooltip="MiniMax H3 Qwen3-VL 32B text encoder (qwen3vl_32b)."),
@@ -4602,9 +4694,11 @@ class UC_AdvancedMiniMaxH3RefMediaImageToVideo(io.ComfyNode):
             outputs=[
                 io.Conditioning.Output(
                     display_name="positive",
+                    is_output_list=True,
                     tooltip="Conditioning output containing MiniMax H3 prompt, VLM visual presentations, video and audio reference latents, and layout.",
                 ),
                 io.Latent.Output(
+                    is_output_list=True,
                     tooltip="Empty joint video/audio latent matching configured width, height, and length (at 24 fps).",
                 ),
             ],
@@ -4612,10 +4706,14 @@ class UC_AdvancedMiniMaxH3RefMediaImageToVideo(io.ComfyNode):
 
     @classmethod
     def check_lazy_status(cls, reference_media=None, audio_vae=None, **kwargs):
-        has_audio = False
-        if isinstance(reference_media, dict):
-            has_audio = bool(reference_media.get("reference_audios") or reference_media.get("reference_video_audios"))
-        return ["audio_vae"] if has_audio and audio_vae is None else []
+        ref_list = reference_media if isinstance(reference_media, (list, tuple)) else [reference_media]
+        vae_list = audio_vae if isinstance(audio_vae, (list, tuple)) else [audio_vae]
+        has_audio = any(
+            isinstance(r, dict) and bool(r.get("reference_audios") or r.get("reference_video_audios"))
+            for r in ref_list
+        )
+        has_vae = any(v is not None for v in vae_list)
+        return ["audio_vae"] if has_audio and not has_vae else []
 
     @classmethod
     def execute(
@@ -4639,34 +4737,59 @@ class UC_AdvancedMiniMaxH3RefMediaImageToVideo(io.ComfyNode):
         reference_images=None,
         **kwargs,
     ) -> io.NodeOutput:
-        ref_imgs = dict(reference_images) if isinstance(reference_images, dict) else {}
-        for k, v in kwargs.items():
-            if k.startswith("reference_image_") and v is not None:
-                ref_imgs[k] = v
-        if not ref_imgs and not isinstance(reference_images, dict):
-            ref_imgs = reference_images
+        raw_args = dict(locals())
+        raw_args.pop("cls", None)
+        raw_kwargs = raw_args.pop("kwargs", {})
+        raw_args.update(raw_kwargs)
+        is_list = is_list_batch_call(raw_args)
+        batch_size = get_list_batch_size(raw_args) if is_list else 1
 
-        conditioning, latent = execute_advanced_minimax_h3_reference_media_image_to_video(
-            clip=clip,
-            vae=vae,
-            prompt=prompt,
-            width=width,
-            height=height,
-            length=length,
-            first_frame=first_frame,
-            last_frame=last_frame,
-            reference_media=reference_media,
-            audio_vae=audio_vae,
-            multiplier=multiplier,
-            ref_image_size=ref_image_size,
-            vlm_resolution=vlm_resolution,
-            vlm_video_resolution=vlm_video_resolution,
-            enable_caching=enable_caching,
-            media_config=media_config,
-            reference_images=ref_imgs,
-            **kwargs,
-        )
-        return io.NodeOutput(conditioning, latent)
+        all_conds = []
+        all_latents = []
+
+        for entry_id in range(batch_size):
+            item = slice_item_inputs(raw_args, entry_id) if is_list else raw_args
+            base_keys = {
+                "clip", "vae", "prompt", "width", "height", "length",
+                "first_frame", "last_frame", "reference_media", "audio_vae",
+                "multiplier", "ref_image_size", "vlm_resolution",
+                "vlm_video_resolution", "enable_caching", "media_config",
+                "reference_images",
+            }
+            extra_kwargs = {k: v for k, v in item.items() if k not in base_keys}
+            ref_imgs = dict(item.get("reference_images")) if isinstance(item.get("reference_images"), dict) else {}
+            for k, v in extra_kwargs.items():
+                if k.startswith("reference_image_") and v is not None:
+                    ref_imgs[k] = v
+            if not ref_imgs and not isinstance(item.get("reference_images"), dict):
+                ref_imgs = item.get("reference_images")
+
+            conditioning, latent = execute_advanced_minimax_h3_reference_media_image_to_video(
+                clip=item.get("clip"),
+                vae=item.get("vae"),
+                prompt=item.get("prompt", ""),
+                width=item.get("width", 1344),
+                height=item.get("height", 768),
+                length=item.get("length", 124),
+                first_frame=item.get("first_frame"),
+                last_frame=item.get("last_frame"),
+                reference_media=item.get("reference_media"),
+                audio_vae=item.get("audio_vae"),
+                multiplier=item.get("multiplier", 1.0),
+                ref_image_size=item.get("ref_image_size", "match"),
+                vlm_resolution=item.get("vlm_resolution", 384),
+                vlm_video_resolution=item.get("vlm_video_resolution", 384),
+                enable_caching=item.get("enable_caching", "all"),
+                media_config=item.get("media_config"),
+                reference_images=ref_imgs,
+                **extra_kwargs,
+            )
+            all_conds.append(conditioning)
+            all_latents.append(latent)
+
+        if is_list:
+            return io.NodeOutput(all_conds, all_latents)
+        return io.NodeOutput(all_conds[0], all_latents[0])
 
 
 class UC_AdvMiniMaxH3RefMediaImageToVideoTemporalFusion(UC_AdvancedMiniMaxH3RefMediaImageToVideo):
@@ -4753,9 +4876,7 @@ class UC_AdvMiniMaxH3RefMediaImageToVideoTemporalFusion(UC_AdvancedMiniMaxH3RefM
         fusion_method=None,
         **kwargs,
     ) -> io.NodeOutput:
-        fusion_method = cls.DEFAULT_FUSION_METHOD if fusion_method is None else fusion_method
-        if fusion_method not in ("conds_fusion", "token_fusion"):
-            raise ValueError(f"Unsupported MiniMax H3 temporal fusion method: {fusion_method}")
+        norm_fusion_method = normalize_h3_fusion_method(fusion_method, default=cls.DEFAULT_FUSION_METHOD)
         ref_imgs = dict(reference_images) if isinstance(reference_images, dict) else {}
         for k, v in kwargs.items():
             if k.startswith("reference_image_") and v is not None:
@@ -4783,7 +4904,7 @@ class UC_AdvMiniMaxH3RefMediaImageToVideoTemporalFusion(UC_AdvancedMiniMaxH3RefM
             reference_images=ref_imgs,
             visual_fusion_config=visual_fusion_config,
             temporal_fusion=True,
-            temporal_token_fusion=fusion_method == "token_fusion",
+            temporal_token_fusion=norm_fusion_method == "token_fusion",
             text_blend_config=text_blend_config,
             **kwargs,
         )
