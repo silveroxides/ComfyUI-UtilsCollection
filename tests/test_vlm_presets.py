@@ -2035,6 +2035,9 @@ def test_minimax_h3_storyboard_t2va_contract():
         assert "Detailed 3-5 sentence" in instruction
         assert "short single sentence" not in instruction
         assert "Never use the word 'both' or 'Both' in any context inside [VISUAL]" in instruction
+        assert "Mandatory Storyboard Audio Channel Extraction ([SPEECH], [SOUNDS], [MUSIC]):" in instruction
+        assert "Storyboard Audio Tag Enforcement:" in instruction
+        assert "Never collapse timeline segments into visual-only blocks" in instruction
         assert re.search(r"\{[^{}]*\{[^{}]*\}[^{}]*\}", instruction) is None
 
 
