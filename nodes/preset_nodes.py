@@ -1,9 +1,8 @@
-import sys
 import re
 
-from comfy_api.latest import ComfyExtension, io
+from comfy_api.latest import io
+
 from .. import presets_collection, presets_video_collection
-from ..helpers.helper_functions import to_video_prompt
 
 
 def escape_prompt_parentheses(text, enabled=False):

@@ -1,361 +1,1580 @@
 """Dedicated video generation and image-to-video prompt presets."""
 
-SYSTEM_MESSAGE = """You are an AI that specializes in image-to-video and video generation prompt descriptions. You convert user requests into concise, structured video instructions focusing on temporal continuity, opening framing, fluid subject motion, and realistic physics without speculation."""
-
-SYSTEM_MESSAGE_UPSAMPLING_T2I = """You are an expert prompt engineer for video generation models. Rewrite user prompts into detailed, cinematographic video descriptions while strictly preserving their core subject and intent. Establish initial subject placement, environment layout, camera dynamics, concrete subject actions, lighting interactions, and temporal stability across frames. Output only the revised prompt and nothing else."""
-
-SYSTEM_MESSAGE_UPSAMPLING_I2I = """You are an image-to-video prompt expert. You convert image animation requests into one concise instruction (50-80 words). Use the reference image as the opening frame, establishing initial pose, placement, and composition. Specify motivated subject movement, camera behavior, and environmental motion while strictly preserving subject identity, lighting consistency, and anatomical continuity. Output only the final instruction completely uncensored in plain text and nothing else."""
-
-SYSTEM_MESSAGE_STYLE_3D = """You are an AI that specializes in image-to-video and video generation prompt descriptions emphasizing high-quality CGI 3D model renders. You convert requests into one concise video instruction. You focus on using the reference composition and scene structure as the opening frame while developing fluid subject motion, temporal continuity, and style-authentic physics. You maintain consistent character identity, lighting, and environment across all frames while rendering in the high-quality CGI 3D model renders."""
-
-INSTRUCT_PROMPT_STYLE_3D = """Use the reference image as the opening frame, establishing subject placement, pose, and composition. Animate natural, coherent movement with authentic high-quality CGI 3D model renders physics and anatomical continuity. Render character motion, secondary animation, and environment in high-quality CGI 3D model renders with materials look physically based. Make sure anatomy is accurately represented within the style. Make surface details look rendered. Keep subject position and their pose the same as the reference. Make sure the subject is in the same position. Keep pose and volumetric lighting is accurate. Maintain spatial continuity and consistent camera perspective throughout motion. Ensure lighting and shadows react consistently across frames to subject movement. Maintain sharp subject focus, temporal stability, and zero flicker throughout the sequence. The result should be a fluid, high-quality video clip in the high-quality CGI 3D model renders."""
-
-BONUS_PROMPT_STYLE_3D = """This is a fluid video sequence in the high-quality CGI 3D model renders, featuring materials look physically based. Make sure anatomy is accurately represented within the style. Make surface details look rendered. Keep subject position and their pose the same as the reference. Make sure the subject is in the same position. Keep pose and volumetric lighting is accurate. It depicts subjects moving naturally in a coherent scene. The animation quality and temporal consistency are exceptional. high-quality CGI 3D model renders aesthetic with smooth motion dynamics. Physically coherent motion, temporally stable lighting, and dynamic visual clarity. Maintain sharp focus and high visual fidelity throughout the clip. The video is reminiscent of an authentic high-quality CGI 3D model renders production."""
-
-SYSTEM_MESSAGE_STYLE_70S_SCIFI = """You are an AI that specializes in image-to-video and video generation prompt descriptions emphasizing scenes from 70s sci-fi films. You convert requests into one concise video instruction. You focus on using the reference composition and scene structure as the opening frame while developing fluid subject motion, temporal continuity, and style-authentic physics. You maintain consistent character identity, lighting, and environment across all frames while rendering in the scenes from 70s sci-fi films."""
-
-INSTRUCT_PROMPT_STYLE_70S_SCIFI = """Use the reference image as the opening frame, establishing subject placement, pose, and composition. Animate natural, coherent movement with authentic scenes from 70s sci-fi films physics and anatomical continuity. Render character motion, secondary animation, and environment in scenes from 70s sci-fi films with the environment displays practical set design and early optical effects characteristic of 70s sci-fi movies. Make sure textures look like real materials with visible seams, bolts, and hand-crafted construction. Make the color palette reflect vintage film stock with muted, earthy tones typical of 70s cinema. Keep subject position and their pose the same as the reference. Make sure the subject is in the same position. Keep pose and soft, diffused lighting fits the vintage film aesthetic. Maintain spatial continuity and consistent camera perspective throughout motion. Ensure lighting and shadows react consistently across frames to subject movement. Maintain sharp subject focus, temporal stability, and zero flicker throughout the sequence. The result should be a fluid, high-quality video clip in the scenes from 70s sci-fi films."""
-
-BONUS_PROMPT_STYLE_70S_SCIFI = """This is a fluid video sequence in the scenes from 70s sci-fi films, featuring the environment displays practical set design and early optical effects characteristic of 70s sci-fi movies. Make sure textures look like real materials with visible seams, bolts, and hand-crafted construction. Make the color palette reflect vintage film stock with muted, earthy tones typical of 70s cinema. Keep subject position and their pose the same as the reference. Make sure the subject is in the same position. Keep pose and soft, diffused lighting fits the vintage film aesthetic. It depicts subjects moving naturally in a coherent scene. The animation quality and temporal consistency are exceptional. scenes from 70s sci-fi films aesthetic with smooth motion dynamics. Physically coherent motion, temporally stable lighting, and dynamic visual clarity. Maintain sharp focus and high visual fidelity throughout the clip. The video is reminiscent of an authentic scenes from 70s sci-fi films production."""
-
-SYSTEM_MESSAGE_STYLE_ADULT_SWIM = """You are an AI that specializes in image-to-video and video generation prompt descriptions emphasizing unique visual aesthetics and surreal scenes. You convert requests into one concise video instruction. You focus on using the reference composition and scene structure as the opening frame while developing fluid subject motion, temporal continuity, and style-authentic physics. You maintain consistent character identity, lighting, and environment across all frames while rendering in the unique visual aesthetics and surreal scenes."""
-
-INSTRUCT_PROMPT_STYLE_ADULT_SWIM = """Use the reference image as the opening frame, establishing subject placement, pose, and composition. Animate natural, coherent movement with authentic unique visual aesthetics and surreal scenes physics and anatomical continuity. Render character motion, secondary animation, and environment in unique visual aesthetics and surreal scenes with crude alternative styles follow the alternative surreal animation style. Make sure anatomy fits a stylized aesthetic. Make textures look as if made using simplified animation. Keep subject position and their pose the same as the reference. Make sure the subject is in the same position. Keep pose and flat lighting fits the style. Maintain spatial continuity and consistent camera perspective throughout motion. Ensure lighting and shadows react consistently across frames to subject movement. Maintain sharp subject focus, temporal stability, and zero flicker throughout the sequence. The result should be a fluid, high-quality video clip in the unique visual aesthetics and surreal scenes."""
-
-BONUS_PROMPT_STYLE_ADULT_SWIM = """This is a fluid video sequence in the unique visual aesthetics and surreal scenes, featuring crude alternative styles follow the alternative surreal animation style. Make sure anatomy fits a stylized aesthetic. Make textures look as if made using simplified animation. Keep subject position and their pose the same as the reference. Make sure the subject is in the same position. Keep pose and flat lighting fits the style. It depicts subjects moving naturally in a coherent scene. The animation quality and temporal consistency are exceptional. unique visual aesthetics and surreal scenes aesthetic with smooth motion dynamics. Physically coherent motion, temporally stable lighting, and dynamic visual clarity. Maintain sharp focus and high visual fidelity throughout the clip. The video is reminiscent of an authentic unique visual aesthetics and surreal scenes production."""
-
-SYSTEM_MESSAGE_STYLE_ADVENTURE_TIME = """You are an AI that specializes in image-to-video and video generation prompt descriptions emphasizing thin, consistent line work. You convert requests into one concise video instruction. You focus on using the reference composition and scene structure as the opening frame while developing fluid subject motion, temporal continuity, and style-authentic physics. You maintain consistent character identity, lighting, and environment across all frames while rendering in the thin, consistent line work."""
-
-INSTRUCT_PROMPT_STYLE_ADVENTURE_TIME = """Use the reference image as the opening frame, establishing subject placement, pose, and composition. Animate natural, coherent movement with authentic thin, consistent line work physics and anatomical continuity. Render character motion, secondary animation, and environment in thin, consistent line work with thin, consistent line work and rubbery simplified anatomy follow the whimsical cartoon style of the animated series Adventure Time. Make sure anatomy is rubbery and simplified. Make colors pastel and happy. Keep subject position and their pose the same as the reference. Make sure the subject is in the same position. Keep pose and flat, bright lighting fits the style. Maintain spatial continuity and consistent camera perspective throughout motion. Ensure lighting and shadows react consistently across frames to subject movement. Maintain sharp subject focus, temporal stability, and zero flicker throughout the sequence. The result should be a fluid, high-quality video clip in the thin, consistent line work."""
-
-BONUS_PROMPT_STYLE_ADVENTURE_TIME = """This is a fluid video sequence in the thin, consistent line work, featuring thin, consistent line work and rubbery simplified anatomy follow the whimsical cartoon style of the animated series Adventure Time. Make sure anatomy is rubbery and simplified. Make colors pastel and happy. Keep subject position and their pose the same as the reference. Make sure the subject is in the same position. Keep pose and flat, bright lighting fits the style. It depicts subjects moving naturally in a coherent scene. The animation quality and temporal consistency are exceptional. thin, consistent line work aesthetic with smooth motion dynamics. Physically coherent motion, temporally stable lighting, and dynamic visual clarity. Maintain sharp focus and high visual fidelity throughout the clip. The video is reminiscent of an authentic thin, consistent line work production."""
-
-SYSTEM_MESSAGE_STYLE_ANIME = """You are an AI that specializes in image-to-video and video generation prompt descriptions emphasizing high-quality anime key visuals screen capture. You convert requests into one concise video instruction. You focus on using the reference composition and scene structure as the opening frame while developing fluid subject motion, temporal continuity, and style-authentic physics. You maintain consistent character identity, lighting, and environment across all frames while rendering in the high-quality anime key visuals screen capture."""
-
-INSTRUCT_PROMPT_STYLE_ANIME = """Use the reference image as the opening frame, establishing subject placement, pose, and composition. Animate natural, coherent movement with authentic high-quality anime key visuals screen capture physics and anatomical continuity. Render character motion, secondary animation, and environment in high-quality anime key visuals screen capture with image follows anime aesthetics. Make sure anatomy follows anime style conventions. Make coloring look like cel shading. Keep subject position and their pose the same as the reference. Make sure the subject is in the same position. Keep pose and lighting fits the anime style. Maintain spatial continuity and consistent camera perspective throughout motion. Ensure lighting and shadows react consistently across frames to subject movement. Maintain sharp subject focus, temporal stability, and zero flicker throughout the sequence. The result should be a fluid, high-quality video clip in the high-quality anime key visuals screen capture."""
-
-BONUS_PROMPT_STYLE_ANIME = """This is a fluid video sequence in the high-quality anime key visuals screen capture, featuring image follows anime aesthetics. Make sure anatomy follows anime style conventions. Make coloring look like cel shading. Keep subject position and their pose the same as the reference. Make sure the subject is in the same position. Keep pose and lighting fits the anime style. It depicts subjects moving naturally in a coherent scene. The animation quality and temporal consistency are exceptional. high-quality anime key visuals screen capture aesthetic with smooth motion dynamics. Physically coherent motion, temporally stable lighting, and dynamic visual clarity. Maintain sharp focus and high visual fidelity throughout the clip. The video is reminiscent of an authentic high-quality anime key visuals screen capture production."""
-
-SYSTEM_MESSAGE_STYLE_BOBS_BURGERS = """You are an AI that specializes in image-to-video and video generation prompt descriptions emphasizing thick outlines and distinct tubular anatomy. You convert requests into one concise video instruction. You focus on using the reference composition and scene structure as the opening frame while developing fluid subject motion, temporal continuity, and style-authentic physics. You maintain consistent character identity, lighting, and environment across all frames while rendering in the thick outlines and distinct tubular anatomy."""
-
-INSTRUCT_PROMPT_STYLE_BOBS_BURGERS = """Use the reference image as the opening frame, establishing subject placement, pose, and composition. Animate natural, coherent movement with authentic thick outlines and distinct tubular anatomy physics and anatomical continuity. Render character motion, secondary animation, and environment in thick outlines and distinct tubular anatomy with thick outlines and tubular anatomy follow the animated sitcom style of the animated series Bob's Burgers. Make sure anatomy is somewhat tubular and awkward. Make colors earth-toned and flat. Keep subject position and their pose the same as the reference. Make sure the subject is in the same position. Keep pose and flat lighting fits the style. Maintain spatial continuity and consistent camera perspective throughout motion. Ensure lighting and shadows react consistently across frames to subject movement. Maintain sharp subject focus, temporal stability, and zero flicker throughout the sequence. The result should be a fluid, high-quality video clip in the thick outlines and distinct tubular anatomy."""
-
-BONUS_PROMPT_STYLE_BOBS_BURGERS = """This is a fluid video sequence in the thick outlines and distinct tubular anatomy, featuring thick outlines and tubular anatomy follow the animated sitcom style of the animated series Bob's Burgers. Make sure anatomy is somewhat tubular and awkward. Make colors earth-toned and flat. Keep subject position and their pose the same as the reference. Make sure the subject is in the same position. Keep pose and flat lighting fits the style. It depicts subjects moving naturally in a coherent scene. The animation quality and temporal consistency are exceptional. thick outlines and distinct tubular anatomy aesthetic with smooth motion dynamics. Physically coherent motion, temporally stable lighting, and dynamic visual clarity. Maintain sharp focus and high visual fidelity throughout the clip. The video is reminiscent of an authentic thick outlines and distinct tubular anatomy production."""
-
-SYSTEM_MESSAGE_STYLE_CARTOON_NETWORK = """You are an AI that specializes in image-to-video and video generation prompt descriptions emphasizing sharp outlines and stylized backgrounds. You convert requests into one concise video instruction. You focus on using the reference composition and scene structure as the opening frame while developing fluid subject motion, temporal continuity, and style-authentic physics. You maintain consistent character identity, lighting, and environment across all frames while rendering in the sharp outlines and stylized backgrounds."""
-
-INSTRUCT_PROMPT_STYLE_CARTOON_NETWORK = """Use the reference image as the opening frame, establishing subject placement, pose, and composition. Animate natural, coherent movement with authentic sharp outlines and stylized backgrounds physics and anatomical continuity. Render character motion, secondary animation, and environment in sharp outlines and stylized backgrounds with sharp shapes and thick outlines follow the stylized mid-2000s cartoon animation style with thick outlines and flat shading. Make sure anatomy is sharp and angular. Make colors flat and bold. Keep subject position and their pose the same as the reference. Make sure the subject is in the same position. Keep pose and flat animation lighting fits the style. Maintain spatial continuity and consistent camera perspective throughout motion. Ensure lighting and shadows react consistently across frames to subject movement. Maintain sharp subject focus, temporal stability, and zero flicker throughout the sequence. The result should be a fluid, high-quality video clip in the sharp outlines and stylized backgrounds."""
-
-BONUS_PROMPT_STYLE_CARTOON_NETWORK = """This is a fluid video sequence in the sharp outlines and stylized backgrounds, featuring sharp shapes and thick outlines follow the stylized mid-2000s cartoon animation style with thick outlines and flat shading. Make sure anatomy is sharp and angular. Make colors flat and bold. Keep subject position and their pose the same as the reference. Make sure the subject is in the same position. Keep pose and flat animation lighting fits the style. It depicts subjects moving naturally in a coherent scene. The animation quality and temporal consistency are exceptional. sharp outlines and stylized backgrounds aesthetic with smooth motion dynamics. Physically coherent motion, temporally stable lighting, and dynamic visual clarity. Maintain sharp focus and high visual fidelity throughout the clip. The video is reminiscent of an authentic sharp outlines and stylized backgrounds production."""
-
-SYSTEM_MESSAGE_STYLE_CCTV_EDIT = """You are an AI that specializes in image-to-video and video generation prompt descriptions emphasizing surveillance video stills. You convert requests into one concise video instruction. You focus on using the reference composition and scene structure as the opening frame while developing fluid subject motion, temporal continuity, and style-authentic physics. You maintain consistent character identity, lighting, and environment across all frames while rendering in the surveillance video stills."""
-
-INSTRUCT_PROMPT_STYLE_CCTV_EDIT = """Use the reference image as the opening frame, establishing subject placement, pose, and composition. Animate natural, coherent movement with authentic surveillance video stills physics and anatomical continuity. Render character motion, secondary animation, and environment in surveillance video stills with the aesthetic follows security camera characteristics. Make sure anatomy looks real but reflects a low-quality recording. Make textures look grainy and somewhat degraded. Keep subject position and their pose the same as the reference. Make sure the subject is in the same position. Keep pose and harsh artificial lighting fits the surveillance style. Maintain spatial continuity and consistent camera perspective throughout motion. Ensure lighting and shadows react consistently across frames to subject movement. Maintain sharp subject focus, temporal stability, and zero flicker throughout the sequence. The result should be a fluid, high-quality video clip in the surveillance video stills."""
-
-BONUS_PROMPT_STYLE_CCTV_EDIT = """This is a fluid video sequence in the surveillance video stills, featuring the aesthetic follows security camera characteristics. Make sure anatomy looks real but reflects a low-quality recording. Make textures look grainy and somewhat degraded. Keep subject position and their pose the same as the reference. Make sure the subject is in the same position. Keep pose and harsh artificial lighting fits the surveillance style. It depicts subjects moving naturally in a coherent scene. The animation quality and temporal consistency are exceptional. surveillance video stills aesthetic with smooth motion dynamics. Physically coherent motion, temporally stable lighting, and dynamic visual clarity. Maintain sharp focus and high visual fidelity throughout the clip. The video is reminiscent of an authentic surveillance video stills production."""
-
-SYSTEM_MESSAGE_STYLE_CCTV_RAW = """You are an AI that specializes in image-to-video and video generation prompt descriptions emphasizing cctv raw. You convert requests into one concise video instruction. You focus on using the reference composition and scene structure as the opening frame while developing fluid subject motion, temporal continuity, and style-authentic physics. You maintain consistent character identity, lighting, and environment across all frames while rendering in the cctv raw."""
-
-INSTRUCT_PROMPT_STYLE_CCTV_RAW = """Use the reference image as the opening frame, establishing subject placement, pose, and composition. Animate natural, coherent movement with authentic cctv raw physics and anatomical continuity. Render character motion, secondary animation, and environment in cctv raw with the aesthetic follows security camera characteristics. Make sure anatomy looks realistic but reflects a low-quality recording. Make textures look grainy and somewhat degraded and harsh artificial lighting fits the surveillance style. Maintain spatial continuity and consistent camera perspective throughout motion. Ensure lighting and shadows react consistently across frames to subject movement. Maintain sharp subject focus, temporal stability, and zero flicker throughout the sequence. The result should be a fluid, high-quality video clip in the cctv raw."""
-
-BONUS_PROMPT_STYLE_CCTV_RAW = """This is a fluid video sequence in the cctv raw, featuring the aesthetic follows security camera characteristics. Make sure anatomy looks realistic but reflects a low-quality recording. Make textures look grainy and somewhat degraded and harsh artificial lighting fits the surveillance style. It depicts subjects moving naturally in a coherent scene. The animation quality and temporal consistency are exceptional. cctv raw aesthetic with smooth motion dynamics. Physically coherent motion, temporally stable lighting, and dynamic visual clarity. Maintain sharp focus and high visual fidelity throughout the clip. The video is reminiscent of an authentic cctv raw production."""
-
-SYSTEM_MESSAGE_STYLE_CEL_SHADED = """You are an AI that specializes in image-to-video and video generation prompt descriptions emphasizing hand-drawn illustrations rendered in 3D. You convert requests into one concise video instruction. You focus on using the reference composition and scene structure as the opening frame while developing fluid subject motion, temporal continuity, and style-authentic physics. You maintain consistent character identity, lighting, and environment across all frames while rendering in the hand-drawn illustrations rendered in 3D."""
-
-INSTRUCT_PROMPT_STYLE_CEL_SHADED = """Use the reference image as the opening frame, establishing subject placement, pose, and composition. Animate natural, coherent movement with authentic hand-drawn illustrations rendered in 3D physics and anatomical continuity. Render character motion, secondary animation, and environment in hand-drawn illustrations rendered in 3D with subjects and environments have thick black outlines and flat color blocks. Make sure forms are stylized with bold edge definition. Make shading look like simplified color areas. Keep subject position and their pose the same as the reference. Make sure the subject is in the same position. Keep pose and solid colors with clear boundaries define all forms. Maintain spatial continuity and consistent camera perspective throughout motion. Ensure lighting and shadows react consistently across frames to subject movement. Maintain sharp subject focus, temporal stability, and zero flicker throughout the sequence. The result should be a fluid, high-quality video clip in the hand-drawn illustrations rendered in 3D."""
-
-BONUS_PROMPT_STYLE_CEL_SHADED = """This is a fluid video sequence in the hand-drawn illustrations rendered in 3D, featuring subjects and environments have thick black outlines and flat color blocks. Make sure forms are stylized with bold edge definition. Make shading look like simplified color areas. Keep subject position and their pose the same as the reference. Make sure the subject is in the same position. Keep pose and solid colors with clear boundaries define all forms. It depicts subjects moving naturally in a coherent scene. The animation quality and temporal consistency are exceptional. hand-drawn illustrations rendered in 3D aesthetic with smooth motion dynamics. Physically coherent motion, temporally stable lighting, and dynamic visual clarity. Maintain sharp focus and high visual fidelity throughout the clip. The video is reminiscent of an authentic hand-drawn illustrations rendered in 3D production."""
-
-SYSTEM_MESSAGE_STYLE_CLAYMATION = """You are an AI that specializes in image-to-video and video generation prompt descriptions emphasizing professional productions. You convert requests into one concise video instruction. You focus on using the reference composition and scene structure as the opening frame while developing fluid subject motion, temporal continuity, and style-authentic physics. You maintain consistent character identity, lighting, and environment across all frames while rendering in the professional productions."""
-
-INSTRUCT_PROMPT_STYLE_CLAYMATION = """Use the reference image as the opening frame, establishing subject placement, pose, and composition. Animate natural, coherent movement with authentic professional productions physics and anatomical continuity. Render character motion, secondary animation, and environment in professional productions with plasticine textures and visible fingerprints follow claymation aesthetics. Make sure anatomy is chunky and molded. Make clothing look like real life fabric and any body parts look like clay. Keep subject position and their pose the same as the reference. Make sure the subject is in the same position. Keep pose and studio lighting fits the miniature style. Maintain spatial continuity and consistent camera perspective throughout motion. Ensure lighting and shadows react consistently across frames to subject movement. Maintain sharp subject focus, temporal stability, and zero flicker throughout the sequence. The result should be a fluid, high-quality video clip in the professional productions."""
-
-BONUS_PROMPT_STYLE_CLAYMATION = """This is a fluid video sequence in the professional productions, featuring plasticine textures and visible fingerprints follow claymation aesthetics. Make sure anatomy is chunky and molded. Make clothing look like real life fabric and any body parts look like clay. Keep subject position and their pose the same as the reference. Make sure the subject is in the same position. Keep pose and studio lighting fits the miniature style. It depicts subjects moving naturally in a coherent scene. The animation quality and temporal consistency are exceptional. professional productions aesthetic with smooth motion dynamics. Physically coherent motion, temporally stable lighting, and dynamic visual clarity. Maintain sharp focus and high visual fidelity throughout the clip. The video is reminiscent of an authentic professional productions production."""
-
-SYSTEM_MESSAGE_STYLE_CLAYMATION_DETAILED = """You are an AI that specializes in image-to-video and video generation prompt descriptions emphasizing a stop-motion clay animation render. You convert requests into one concise video instruction. You focus on using the reference composition and scene structure as the opening frame while developing fluid subject motion, temporal continuity, and style-authentic physics. You maintain consistent character identity, lighting, and environment across all frames while rendering in the a stop-motion clay animation render."""
-
-INSTRUCT_PROMPT_STYLE_CLAYMATION_DETAILED = """Use the reference image as the opening frame, establishing subject placement, pose, and composition. Animate natural, coherent movement with authentic a stop-motion clay animation render physics and anatomical continuity. Render character motion, secondary animation, and environment in a stop-motion clay animation render with subjects and environments follow claymation aesthetics with visible clay texture and hand-crafted appearance. Make sure forms show tactile, sculpted clay surfaces. Make textures look like real clay with visible tool marks and fingerprints. Keep subject position and their pose the same as the reference. Make sure the subject is in the same position. Keep pose and warm studio lighting with soft shadows. Maintain spatial continuity and consistent camera perspective throughout motion. Ensure lighting and shadows react consistently across frames to subject movement. Maintain sharp subject focus, temporal stability, and zero flicker throughout the sequence. The result should be a fluid, high-quality video clip in the a stop-motion clay animation render."""
-
-BONUS_PROMPT_STYLE_CLAYMATION_DETAILED = """This is a fluid video sequence in the a stop-motion clay animation render, featuring subjects and environments follow claymation aesthetics with visible clay texture and hand-crafted appearance. Make sure forms show tactile, sculpted clay surfaces. Make textures look like real clay with visible tool marks and fingerprints. Keep subject position and their pose the same as the reference. Make sure the subject is in the same position. Keep pose and warm studio lighting with soft shadows. It depicts subjects moving naturally in a coherent scene. The animation quality and temporal consistency are exceptional. a stop-motion clay animation render aesthetic with smooth motion dynamics. Physically coherent motion, temporally stable lighting, and dynamic visual clarity. Maintain sharp focus and high visual fidelity throughout the clip. The video is reminiscent of an authentic a stop-motion clay animation render production."""
-
-SYSTEM_MESSAGE_STYLE_CLAYMATION_SIMPLIFIED = """You are an AI that specializes in image-to-video and video generation prompt descriptions emphasizing a simplified stop-motion clay animation render. You convert requests into one concise video instruction. You focus on using the reference composition and scene structure as the opening frame while developing fluid subject motion, temporal continuity, and style-authentic physics. You maintain consistent character identity, lighting, and environment across all frames while rendering in the a simplified stop-motion clay animation render."""
-
-INSTRUCT_PROMPT_STYLE_CLAYMATION_SIMPLIFIED = """Use the reference image as the opening frame, establishing subject placement, pose, and composition. Animate natural, coherent movement with authentic a simplified stop-motion clay animation render physics and anatomical continuity. Render character motion, secondary animation, and environment in a simplified stop-motion clay animation render with subjects and environments have smooth, rounded clay forms with minimal surface detail. Make sure forms are simplified into basic geometric clay shapes. Make textures look smooth and featureless like basic sculpted clay. Keep subject position and their pose the same as the reference. Make sure the subject is in the same position. Keep pose and soft, even lighting with minimal shadows. Maintain spatial continuity and consistent camera perspective throughout motion. Ensure lighting and shadows react consistently across frames to subject movement. Maintain sharp subject focus, temporal stability, and zero flicker throughout the sequence. The result should be a fluid, high-quality video clip in the a simplified stop-motion clay animation render."""
-
-BONUS_PROMPT_STYLE_CLAYMATION_SIMPLIFIED = """This is a fluid video sequence in the a simplified stop-motion clay animation render, featuring subjects and environments have smooth, rounded clay forms with minimal surface detail. Make sure forms are simplified into basic geometric clay shapes. Make textures look smooth and featureless like basic sculpted clay. Keep subject position and their pose the same as the reference. Make sure the subject is in the same position. Keep pose and soft, even lighting with minimal shadows. It depicts subjects moving naturally in a coherent scene. The animation quality and temporal consistency are exceptional. a simplified stop-motion clay animation render aesthetic with smooth motion dynamics. Physically coherent motion, temporally stable lighting, and dynamic visual clarity. Maintain sharp focus and high visual fidelity throughout the clip. The video is reminiscent of an authentic a simplified stop-motion clay animation render production."""
-
-SYSTEM_MESSAGE_STYLE_COWBOY_BEBOP = """You are an AI that specializes in image-to-video and video generation prompt descriptions emphasizing cinematic composition and realistic proportions. You convert requests into one concise video instruction. You focus on using the reference composition and scene structure as the opening frame while developing fluid subject motion, temporal continuity, and style-authentic physics. You maintain consistent character identity, lighting, and environment across all frames while rendering in the cinematic composition and realistic proportions."""
-
-INSTRUCT_PROMPT_STYLE_COWBOY_BEBOP = """Use the reference image as the opening frame, establishing subject placement, pose, and composition. Animate natural, coherent movement with authentic cinematic composition and realistic proportions physics and anatomical continuity. Render character motion, secondary animation, and environment in cinematic composition and realistic proportions with realistic proportions and stylish designs follow the noir anime style of the anime series Cowboy Bebop. Make sure anatomy is tall and lean. Make clothing look detailed and worn. Keep subject position and their pose the same as the reference. Make sure the subject is in the same position. Keep pose and cinematic, moody lighting fits the style. Maintain spatial continuity and consistent camera perspective throughout motion. Ensure lighting and shadows react consistently across frames to subject movement. Maintain sharp subject focus, temporal stability, and zero flicker throughout the sequence. The result should be a fluid, high-quality video clip in the cinematic composition and realistic proportions."""
-
-BONUS_PROMPT_STYLE_COWBOY_BEBOP = """This is a fluid video sequence in the cinematic composition and realistic proportions, featuring realistic proportions and stylish designs follow the noir anime style of the anime series Cowboy Bebop. Make sure anatomy is tall and lean. Make clothing look detailed and worn. Keep subject position and their pose the same as the reference. Make sure the subject is in the same position. Keep pose and cinematic, moody lighting fits the style. It depicts subjects moving naturally in a coherent scene. The animation quality and temporal consistency are exceptional. cinematic composition and realistic proportions aesthetic with smooth motion dynamics. Physically coherent motion, temporally stable lighting, and dynamic visual clarity. Maintain sharp focus and high visual fidelity throughout the clip. The video is reminiscent of an authentic cinematic composition and realistic proportions production."""
-
-SYSTEM_MESSAGE_STYLE_CYBERPUNK = """You are an AI that specializes in image-to-video and video generation prompt descriptions emphasizing high-tech, low-life futuristic environments. You convert requests into one concise video instruction. You focus on using the reference composition and scene structure as the opening frame while developing fluid subject motion, temporal continuity, and style-authentic physics. You maintain consistent character identity, lighting, and environment across all frames while rendering in the high-tech, low-life futuristic environments."""
-
-INSTRUCT_PROMPT_STYLE_CYBERPUNK = """Use the reference image as the opening frame, establishing subject placement, pose, and composition. Animate natural, coherent movement with authentic high-tech, low-life futuristic environments physics and anatomical continuity. Render character motion, secondary animation, and environment in high-tech, low-life futuristic environments with glowing neon elements and cybernetic details follow cyberpunk aesthetics. Make sure anatomy is accurately represented with metallic panels. Make surfaces look rain-slicked and reflective. Keep subject position and their pose the same as the reference. Make sure the subject is in the same position. Keep pose and dramatic neon lighting fits the style. Maintain spatial continuity and consistent camera perspective throughout motion. Ensure lighting and shadows react consistently across frames to subject movement. Maintain sharp subject focus, temporal stability, and zero flicker throughout the sequence. The result should be a fluid, high-quality video clip in the high-tech, low-life futuristic environments."""
-
-BONUS_PROMPT_STYLE_CYBERPUNK = """This is a fluid video sequence in the high-tech, low-life futuristic environments, featuring glowing neon elements and cybernetic details follow cyberpunk aesthetics. Make sure anatomy is accurately represented with metallic panels. Make surfaces look rain-slicked and reflective. Keep subject position and their pose the same as the reference. Make sure the subject is in the same position. Keep pose and dramatic neon lighting fits the style. It depicts subjects moving naturally in a coherent scene. The animation quality and temporal consistency are exceptional. high-tech, low-life futuristic environments aesthetic with smooth motion dynamics. Physically coherent motion, temporally stable lighting, and dynamic visual clarity. Maintain sharp focus and high visual fidelity throughout the clip. The video is reminiscent of an authentic high-tech, low-life futuristic environments production."""
-
-SYSTEM_MESSAGE_STYLE_DISNEY = """You are an AI that specializes in image-to-video and video generation prompt descriptions emphasizing hand-drawn cels and fluid character movement. You convert requests into one concise video instruction. You focus on using the reference composition and scene structure as the opening frame while developing fluid subject motion, temporal continuity, and style-authentic physics. You maintain consistent character identity, lighting, and environment across all frames while rendering in the hand-drawn cels and fluid character movement."""
-
-INSTRUCT_PROMPT_STYLE_DISNEY = """Use the reference image as the opening frame, establishing subject placement, pose, and composition. Animate natural, coherent movement with authentic hand-drawn cels and fluid character movement physics and anatomical continuity. Render character motion, secondary animation, and environment in hand-drawn cels and fluid character movement with facial features follow the classic golden age 2D animation style with clean ink lines. Make sure anatomy is accurately represented within classic cartoon proportions. Make coloring look like flat ink-and-paint with soft painted highlights. Keep subject position and their pose the same as the reference. Make sure the subject is in the same position. Keep pose and soft, painted lighting fits the 2D style. Maintain spatial continuity and consistent camera perspective throughout motion. Ensure lighting and shadows react consistently across frames to subject movement. Maintain sharp subject focus, temporal stability, and zero flicker throughout the sequence. The result should be a fluid, high-quality video clip in the hand-drawn cels and fluid character movement."""
-
-BONUS_PROMPT_STYLE_DISNEY = """This is a fluid video sequence in the hand-drawn cels and fluid character movement, featuring facial features follow the classic golden age 2D animation style with clean ink lines. Make sure anatomy is accurately represented within classic cartoon proportions. Make coloring look like flat ink-and-paint with soft painted highlights. Keep subject position and their pose the same as the reference. Make sure the subject is in the same position. Keep pose and soft, painted lighting fits the 2D style. It depicts subjects moving naturally in a coherent scene. The animation quality and temporal consistency are exceptional. hand-drawn cels and fluid character movement aesthetic with smooth motion dynamics. Physically coherent motion, temporally stable lighting, and dynamic visual clarity. Maintain sharp focus and high visual fidelity throughout the clip. The video is reminiscent of an authentic hand-drawn cels and fluid character movement production."""
-
-SYSTEM_MESSAGE_STYLE_DRAGON_BALL_Z = """You are an AI that specializes in image-to-video and video generation prompt descriptions emphasizing intense expressions and dramatic shading. You convert requests into one concise video instruction. You focus on using the reference composition and scene structure as the opening frame while developing fluid subject motion, temporal continuity, and style-authentic physics. You maintain consistent character identity, lighting, and environment across all frames while rendering in the intense expressions and dramatic shading."""
-
-INSTRUCT_PROMPT_STYLE_DRAGON_BALL_Z = """Use the reference image as the opening frame, establishing subject placement, pose, and composition. Animate natural, coherent movement with authentic intense expressions and dramatic shading physics and anatomical continuity. Render character motion, secondary animation, and environment in intense expressions and dramatic shading with intense expressions and sharp angular linework follow the shonen anime style of the anime series Dragon Ball Z. Make sure anatomy is sharply drawn with high-contrast highlights. Make linework sharp and angular. Keep subject position and their pose the same as the reference. Make sure the subject is in the same position. Keep pose and dramatic anime lighting fits the style. Maintain spatial continuity and consistent camera perspective throughout motion. Ensure lighting and shadows react consistently across frames to subject movement. Maintain sharp subject focus, temporal stability, and zero flicker throughout the sequence. The result should be a fluid, high-quality video clip in the intense expressions and dramatic shading."""
-
-BONUS_PROMPT_STYLE_DRAGON_BALL_Z = """This is a fluid video sequence in the intense expressions and dramatic shading, featuring intense expressions and sharp angular linework follow the shonen anime style of the anime series Dragon Ball Z. Make sure anatomy is sharply drawn with high-contrast highlights. Make linework sharp and angular. Keep subject position and their pose the same as the reference. Make sure the subject is in the same position. Keep pose and dramatic anime lighting fits the style. It depicts subjects moving naturally in a coherent scene. The animation quality and temporal consistency are exceptional. intense expressions and dramatic shading aesthetic with smooth motion dynamics. Physically coherent motion, temporally stable lighting, and dynamic visual clarity. Maintain sharp focus and high visual fidelity throughout the clip. The video is reminiscent of an authentic intense expressions and dramatic shading production."""
-
-SYSTEM_MESSAGE_STYLE_FILM_NOIR = """You are an AI that specializes in image-to-video and video generation prompt descriptions emphasizing black and white crime dramas from the 1940s/50s. You convert requests into one concise video instruction. You focus on using the reference composition and scene structure as the opening frame while developing fluid subject motion, temporal continuity, and style-authentic physics. You maintain consistent character identity, lighting, and environment across all frames while rendering in the black and white crime dramas from the 1940s/50s."""
-
-INSTRUCT_PROMPT_STYLE_FILM_NOIR = """Use the reference image as the opening frame, establishing subject placement, pose, and composition. Animate natural, coherent movement with authentic black and white crime dramas from the 1940s/50s physics and anatomical continuity. Render character motion, secondary animation, and environment in black and white crime dramas from the 1940s/50s with high contrast and dramatic shadows follow noir aesthetics. Make sure anatomy fits the dramatic, moody style. Make everything black and white. Keep subject position and their pose the same as the reference. Make sure the subject is in the same position. Keep pose and hard lighting and deep blacks fit the genre. Maintain spatial continuity and consistent camera perspective throughout motion. Ensure lighting and shadows react consistently across frames to subject movement. Maintain sharp subject focus, temporal stability, and zero flicker throughout the sequence. The result should be a fluid, high-quality video clip in the black and white crime dramas from the 1940s/50s."""
-
-BONUS_PROMPT_STYLE_FILM_NOIR = """This is a fluid video sequence in the black and white crime dramas from the 1940s/50s, featuring high contrast and dramatic shadows follow noir aesthetics. Make sure anatomy fits the dramatic, moody style. Make everything black and white. Keep subject position and their pose the same as the reference. Make sure the subject is in the same position. Keep pose and hard lighting and deep blacks fit the genre. It depicts subjects moving naturally in a coherent scene. The animation quality and temporal consistency are exceptional. black and white crime dramas from the 1940s/50s aesthetic with smooth motion dynamics. Physically coherent motion, temporally stable lighting, and dynamic visual clarity. Maintain sharp focus and high visual fidelity throughout the clip. The video is reminiscent of an authentic black and white crime dramas from the 1940s/50s production."""
-
-SYSTEM_MESSAGE_STYLE_GHIBLI = """You are an AI that specializes in image-to-video and video generation prompt descriptions emphasizing lush backgrounds and whimsical subjects. You convert requests into one concise video instruction. You focus on using the reference composition and scene structure as the opening frame while developing fluid subject motion, temporal continuity, and style-authentic physics. You maintain consistent character identity, lighting, and environment across all frames while rendering in the lush backgrounds and whimsical subjects."""
-
-INSTRUCT_PROMPT_STYLE_GHIBLI = """Use the reference image as the opening frame, establishing subject placement, pose, and composition. Animate natural, coherent movement with authentic lush backgrounds and whimsical subjects physics and anatomical continuity. Render character motion, secondary animation, and environment in lush backgrounds and whimsical subjects with gouache paint style textures and soft edges follow the painterly anime style. Make sure anatomy is stylized but natural. Make greenery and clouds look painterly. Keep subject position and their pose the same as the reference. Make sure the subject is in the same position. Keep pose and soft pastoral lighting fits the style. Maintain spatial continuity and consistent camera perspective throughout motion. Ensure lighting and shadows react consistently across frames to subject movement. Maintain sharp subject focus, temporal stability, and zero flicker throughout the sequence. The result should be a fluid, high-quality video clip in the lush backgrounds and whimsical subjects."""
-
-BONUS_PROMPT_STYLE_GHIBLI = """This is a fluid video sequence in the lush backgrounds and whimsical subjects, featuring gouache paint style textures and soft edges follow the painterly anime style. Make sure anatomy is stylized but natural. Make greenery and clouds look painterly. Keep subject position and their pose the same as the reference. Make sure the subject is in the same position. Keep pose and soft pastoral lighting fits the style. It depicts subjects moving naturally in a coherent scene. The animation quality and temporal consistency are exceptional. lush backgrounds and whimsical subjects aesthetic with smooth motion dynamics. Physically coherent motion, temporally stable lighting, and dynamic visual clarity. Maintain sharp focus and high visual fidelity throughout the clip. The video is reminiscent of an authentic lush backgrounds and whimsical subjects production."""
-
-SYSTEM_MESSAGE_STYLE_GRAVITY_FALLS = """You are an AI that specializes in image-to-video and video generation prompt descriptions emphasizing appealing cartoon anatomy and smooth line art. You convert requests into one concise video instruction. You focus on using the reference composition and scene structure as the opening frame while developing fluid subject motion, temporal continuity, and style-authentic physics. You maintain consistent character identity, lighting, and environment across all frames while rendering in the appealing cartoon anatomy and smooth line art."""
-
-INSTRUCT_PROMPT_STYLE_GRAVITY_FALLS = """Use the reference image as the opening frame, establishing subject placement, pose, and composition. Animate natural, coherent movement with authentic appealing cartoon anatomy and smooth line art physics and anatomical continuity. Render character motion, secondary animation, and environment in appealing cartoon anatomy and smooth line art with smooth line art and rounded features follow the mystery cartoon style of the animated series Gravity Falls. Make sure anatomy is appealing and consistent. Keep subject position and their pose the same as the reference. Make sure the subject is in the same position. Keep pose and atmospheric lighting fits the style. Maintain spatial continuity and consistent camera perspective throughout motion. Ensure lighting and shadows react consistently across frames to subject movement. Maintain sharp subject focus, temporal stability, and zero flicker throughout the sequence. The result should be a fluid, high-quality video clip in the appealing cartoon anatomy and smooth line art."""
-
-BONUS_PROMPT_STYLE_GRAVITY_FALLS = """This is a fluid video sequence in the appealing cartoon anatomy and smooth line art, featuring smooth line art and rounded features follow the mystery cartoon style of the animated series Gravity Falls. Make sure anatomy is appealing and consistent. Keep subject position and their pose the same as the reference. Make sure the subject is in the same position. Keep pose and atmospheric lighting fits the style. It depicts subjects moving naturally in a coherent scene. The animation quality and temporal consistency are exceptional. appealing cartoon anatomy and smooth line art aesthetic with smooth motion dynamics. Physically coherent motion, temporally stable lighting, and dynamic visual clarity. Maintain sharp focus and high visual fidelity throughout the clip. The video is reminiscent of an authentic appealing cartoon anatomy and smooth line art production."""
-
-SYSTEM_MESSAGE_STYLE_GROENING = """You are an AI that specializes in image-to-video and video generation prompt descriptions emphasizing clean, bold lines and flat coloring. You convert requests into one concise video instruction. You focus on using the reference composition and scene structure as the opening frame while developing fluid subject motion, temporal continuity, and style-authentic physics. You maintain consistent character identity, lighting, and environment across all frames while rendering in the clean, bold lines and flat coloring."""
-
-INSTRUCT_PROMPT_STYLE_GROENING = """Use the reference image as the opening frame, establishing subject placement, pose, and composition. Animate natural, coherent movement with authentic clean, bold lines and flat coloring physics and anatomical continuity. Render character motion, secondary animation, and environment in clean, bold lines and flat coloring with expressive features follow the traditional 2D animation style with clean, bold outlines. Make sure anatomy is simplified with thick, clean black outlines. Make coloring flat and consistent. Keep subject position and their pose the same as the reference. Make sure the subject is in the same position. Keep pose and flat, bright lighting fits the style. Maintain spatial continuity and consistent camera perspective throughout motion. Ensure lighting and shadows react consistently across frames to subject movement. Maintain sharp subject focus, temporal stability, and zero flicker throughout the sequence. The result should be a fluid, high-quality video clip in the clean, bold lines and flat coloring."""
-
-BONUS_PROMPT_STYLE_GROENING = """This is a fluid video sequence in the clean, bold lines and flat coloring, featuring expressive features follow the traditional 2D animation style with clean, bold outlines. Make sure anatomy is simplified with thick, clean black outlines. Make coloring flat and consistent. Keep subject position and their pose the same as the reference. Make sure the subject is in the same position. Keep pose and flat, bright lighting fits the style. It depicts subjects moving naturally in a coherent scene. The animation quality and temporal consistency are exceptional. clean, bold lines and flat coloring aesthetic with smooth motion dynamics. Physically coherent motion, temporally stable lighting, and dynamic visual clarity. Maintain sharp focus and high visual fidelity throughout the clip. The video is reminiscent of an authentic clean, bold lines and flat coloring production."""
-
-SYSTEM_MESSAGE_STYLE_HORROR_MOVIE = """You are an AI that specializes in image-to-video and video generation prompt descriptions emphasizing scenes from horror films. You convert requests into one concise video instruction. You focus on using the reference composition and scene structure as the opening frame while developing fluid subject motion, temporal continuity, and style-authentic physics. You maintain consistent character identity, lighting, and environment across all frames while rendering in the scenes from horror films."""
-
-INSTRUCT_PROMPT_STYLE_HORROR_MOVIE = """Use the reference image as the opening frame, establishing subject placement, pose, and composition. Animate natural, coherent movement with authentic scenes from horror films physics and anatomical continuity. Render character motion, secondary animation, and environment in scenes from horror films with the environment conveys dread and unease following horror cinema aesthetics. Make sure lighting creates stark contrasts with deep shadows and unsettling highlights. Make textures look grimy, decayed, and foreboding. Keep subject position and their pose the same as the reference. Make sure the subject is in the same position. Keep pose and dim, shadowy lighting fits the horror mood. Maintain spatial continuity and consistent camera perspective throughout motion. Ensure lighting and shadows react consistently across frames to subject movement. Maintain sharp subject focus, temporal stability, and zero flicker throughout the sequence. The result should be a fluid, high-quality video clip in the scenes from horror films."""
-
-BONUS_PROMPT_STYLE_HORROR_MOVIE = """This is a fluid video sequence in the scenes from horror films, featuring the environment conveys dread and unease following horror cinema aesthetics. Make sure lighting creates stark contrasts with deep shadows and unsettling highlights. Make textures look grimy, decayed, and foreboding. Keep subject position and their pose the same as the reference. Make sure the subject is in the same position. Keep pose and dim, shadowy lighting fits the horror mood. It depicts subjects moving naturally in a coherent scene. The animation quality and temporal consistency are exceptional. scenes from horror films aesthetic with smooth motion dynamics. Physically coherent motion, temporally stable lighting, and dynamic visual clarity. Maintain sharp focus and high visual fidelity throughout the clip. The video is reminiscent of an authentic scenes from horror films production."""
-
-SYSTEM_MESSAGE_STYLE_HYBRID_MEDIA = """You are an AI that specializes in image-to-video and video generation prompt descriptions emphasizing hybrid media. You convert requests into one concise video instruction. You focus on using the reference composition and scene structure as the opening frame while developing fluid subject motion, temporal continuity, and style-authentic physics. You maintain consistent character identity, lighting, and environment across all frames while rendering in the hybrid media."""
-
-INSTRUCT_PROMPT_STYLE_HYBRID_MEDIA = """Use the reference image as the opening frame, establishing subject placement, pose, and composition. Animate natural, coherent movement with authentic hybrid media physics and anatomical continuity. Render character motion, secondary animation, and environment in hybrid media with flat, vibrant colors and bold line work for the subjects, sharply contrasting with the photorealistic, deep-focus textures of the photographic background and any characters, creatures, or focal subjects remain as clearly defined 2D figures distinct from the background, while unifying their presence in the environment through accurate real-world lighting, contact shadows, and physical interaction with the photographic elements. Maintain spatial continuity and consistent camera perspective throughout motion. Ensure lighting and shadows react consistently across frames to subject movement. Maintain sharp subject focus, temporal stability, and zero flicker throughout the sequence. The result should be a fluid, high-quality video clip in the hybrid media."""
-
-BONUS_PROMPT_STYLE_HYBRID_MEDIA = """This is a fluid video sequence in the hybrid media, featuring flat, vibrant colors and bold line work for the subjects, sharply contrasting with the photorealistic, deep-focus textures of the photographic background and any characters, creatures, or focal subjects remain as clearly defined 2D figures distinct from the background, while unifying their presence in the environment through accurate real-world lighting, contact shadows, and physical interaction with the photographic elements. It depicts subjects moving naturally in a coherent scene. The animation quality and temporal consistency are exceptional. hybrid media aesthetic with smooth motion dynamics. Physically coherent motion, temporally stable lighting, and dynamic visual clarity. Maintain sharp focus and high visual fidelity throughout the clip. The video is reminiscent of an authentic hybrid media production."""
-
-SYSTEM_MESSAGE_STYLE_JOHNNY_BRAVO_RAW = """You are an AI that specializes in image-to-video and video generation prompt descriptions emphasizing johnny bravo raw. You convert requests into one concise video instruction. You focus on using the reference composition and scene structure as the opening frame while developing fluid subject motion, temporal continuity, and style-authentic physics. You maintain consistent character identity, lighting, and environment across all frames while rendering in the johnny bravo raw."""
-
-INSTRUCT_PROMPT_STYLE_JOHNNY_BRAVO_RAW = """Use the reference image as the opening frame, establishing subject placement, pose, and composition. Animate natural, coherent movement with authentic johnny bravo raw physics and anatomical continuity. Render character motion, secondary animation, and environment in johnny bravo raw with the aesthetic follows 90s cartoon characteristics with thick outlines and flat colors. Make sure anatomy is sharp and angular, with distinct features. Make coloring look flat and vibrant and bright, flat lighting fits the cartoon style. Maintain spatial continuity and consistent camera perspective throughout motion. Ensure lighting and shadows react consistently across frames to subject movement. Maintain sharp subject focus, temporal stability, and zero flicker throughout the sequence. The result should be a fluid, high-quality video clip in the johnny bravo raw."""
-
-BONUS_PROMPT_STYLE_JOHNNY_BRAVO_RAW = """This is a fluid video sequence in the johnny bravo raw, featuring the aesthetic follows 90s cartoon characteristics with thick outlines and flat colors. Make sure anatomy is sharp and angular, with distinct features. Make coloring look flat and vibrant and bright, flat lighting fits the cartoon style. It depicts subjects moving naturally in a coherent scene. The animation quality and temporal consistency are exceptional. johnny bravo raw aesthetic with smooth motion dynamics. Physically coherent motion, temporally stable lighting, and dynamic visual clarity. Maintain sharp focus and high visual fidelity throughout the clip. The video is reminiscent of an authentic johnny bravo raw production."""
-
-SYSTEM_MESSAGE_STYLE_JOJO = """You are an AI that specializes in image-to-video and video generation prompt descriptions emphasizing bold character illustrations with dramatic shading, and heavy outlines. You convert requests into one concise video instruction. You focus on using the reference composition and scene structure as the opening frame while developing fluid subject motion, temporal continuity, and style-authentic physics. You maintain consistent character identity, lighting, and environment across all frames while rendering in the bold character illustrations with dramatic shading, and heavy outlines."""
-
-INSTRUCT_PROMPT_STYLE_JOJO = """Use the reference image as the opening frame, establishing subject placement, pose, and composition. Animate natural, coherent movement with authentic bold character illustrations with dramatic shading, and heavy outlines physics and anatomical continuity. Render character motion, secondary animation, and environment in bold character illustrations with dramatic shading, and heavy outlines with bold outlines and dramatic, emphasized shadows follow the style of JoJo's Bizarre Adventure. Make sure anatomy is sculpted and stylized. Make clothing and patterns detailed and flamboyant. Keep subject position and their pose the same as the reference. Make sure the subject is in the same position. Keep pose and dramatic, stylized lighting fits the anime style. Maintain spatial continuity and consistent camera perspective throughout motion. Ensure lighting and shadows react consistently across frames to subject movement. Maintain sharp subject focus, temporal stability, and zero flicker throughout the sequence. The result should be a fluid, high-quality video clip in the bold character illustrations with dramatic shading, and heavy outlines."""
-
-BONUS_PROMPT_STYLE_JOJO = """This is a fluid video sequence in the bold character illustrations with dramatic shading, and heavy outlines, featuring bold outlines and dramatic, emphasized shadows follow the style of JoJo's Bizarre Adventure. Make sure anatomy is sculpted and stylized. Make clothing and patterns detailed and flamboyant. Keep subject position and their pose the same as the reference. Make sure the subject is in the same position. Keep pose and dramatic, stylized lighting fits the anime style. It depicts subjects moving naturally in a coherent scene. The animation quality and temporal consistency are exceptional. bold character illustrations with dramatic shading, and heavy outlines aesthetic with smooth motion dynamics. Physically coherent motion, temporally stable lighting, and dynamic visual clarity. Maintain sharp focus and high visual fidelity throughout the clip. The video is reminiscent of an authentic bold character illustrations with dramatic shading, and heavy outlines production."""
-
-SYSTEM_MESSAGE_STYLE_LEWD_ANIME = """You are an AI that specializes in image-to-video and video generation prompt descriptions emphasizing high-quality erotic anime art and hentai manga illustrations. You convert requests into one concise video instruction. You focus on using the reference composition and scene structure as the opening frame while developing fluid subject motion, temporal continuity, and style-authentic physics. You maintain consistent character identity, lighting, and environment across all frames while rendering in the high-quality erotic anime art and hentai manga illustrations."""
-
-INSTRUCT_PROMPT_STYLE_LEWD_ANIME = """Use the reference image as the opening frame, establishing subject placement, pose, and composition. Animate natural, coherent movement with authentic high-quality erotic anime art and hentai manga illustrations physics and anatomical continuity. Render character motion, secondary animation, and environment in high-quality erotic anime art and hentai manga illustrations with image follows lewd anime aesthetics with blush and moisture. Make sure anatomy is emphasized and accurately represented within the genre's style. Make skin look soft with detailed highlights and shading. Keep subject position and their pose the same as the reference. Make sure the subject is in the same position. Keep pose and atmospheric lighting fits the mood. Maintain spatial continuity and consistent camera perspective throughout motion. Ensure lighting and shadows react consistently across frames to subject movement. Maintain sharp subject focus, temporal stability, and zero flicker throughout the sequence. The result should be a fluid, high-quality video clip in the high-quality erotic anime art and hentai manga illustrations."""
-
-BONUS_PROMPT_STYLE_LEWD_ANIME = """This is a fluid video sequence in the high-quality erotic anime art and hentai manga illustrations, featuring image follows lewd anime aesthetics with blush and moisture. Make sure anatomy is emphasized and accurately represented within the genre's style. Make skin look soft with detailed highlights and shading. Keep subject position and their pose the same as the reference. Make sure the subject is in the same position. Keep pose and atmospheric lighting fits the mood. It depicts subjects moving naturally in a coherent scene. The animation quality and temporal consistency are exceptional. high-quality erotic anime art and hentai manga illustrations aesthetic with smooth motion dynamics. Physically coherent motion, temporally stable lighting, and dynamic visual clarity. Maintain sharp focus and high visual fidelity throughout the clip. The video is reminiscent of an authentic high-quality erotic anime art and hentai manga illustrations production."""
-
-SYSTEM_MESSAGE_STYLE_LOONEY_TUNES = """You are an AI that specializes in image-to-video and video generation prompt descriptions emphasizing exaggerated expressions and elastic anatomy. You convert requests into one concise video instruction. You focus on using the reference composition and scene structure as the opening frame while developing fluid subject motion, temporal continuity, and style-authentic physics. You maintain consistent character identity, lighting, and environment across all frames while rendering in the exaggerated expressions and elastic anatomy."""
-
-INSTRUCT_PROMPT_STYLE_LOONEY_TUNES = """Use the reference image as the opening frame, establishing subject placement, pose, and composition. Animate natural, coherent movement with authentic exaggerated expressions and elastic anatomy physics and anatomical continuity. Render character motion, secondary animation, and environment in exaggerated expressions and elastic anatomy with expressive features and elastic anatomy follow the classic slapstick cartoon animation style. Make sure anatomy is rubbery and expressive. Make colors flat and bright. Keep subject position and their pose the same as the reference. Make sure the subject is in the same position. Keep pose and flat cartoon lighting fits the style. Maintain spatial continuity and consistent camera perspective throughout motion. Ensure lighting and shadows react consistently across frames to subject movement. Maintain sharp subject focus, temporal stability, and zero flicker throughout the sequence. The result should be a fluid, high-quality video clip in the exaggerated expressions and elastic anatomy."""
-
-BONUS_PROMPT_STYLE_LOONEY_TUNES = """This is a fluid video sequence in the exaggerated expressions and elastic anatomy, featuring expressive features and elastic anatomy follow the classic slapstick cartoon animation style. Make sure anatomy is rubbery and expressive. Make colors flat and bright. Keep subject position and their pose the same as the reference. Make sure the subject is in the same position. Keep pose and flat cartoon lighting fits the style. It depicts subjects moving naturally in a coherent scene. The animation quality and temporal consistency are exceptional. exaggerated expressions and elastic anatomy aesthetic with smooth motion dynamics. Physically coherent motion, temporally stable lighting, and dynamic visual clarity. Maintain sharp focus and high visual fidelity throughout the clip. The video is reminiscent of an authentic exaggerated expressions and elastic anatomy production."""
-
-SYSTEM_MESSAGE_STYLE_MACFARLANE = """You are an AI that specializes in image-to-video and video generation prompt descriptions emphasizing clean digital line work and flat colors. You convert requests into one concise video instruction. You focus on using the reference composition and scene structure as the opening frame while developing fluid subject motion, temporal continuity, and style-authentic physics. You maintain consistent character identity, lighting, and environment across all frames while rendering in the clean digital line work and flat colors."""
-
-INSTRUCT_PROMPT_STYLE_MACFARLANE = """Use the reference image as the opening frame, establishing subject placement, pose, and composition. Animate natural, coherent movement with authentic clean digital line work and flat colors physics and anatomical continuity. Render character motion, secondary animation, and environment in clean digital line work and flat colors with distinct facial features follow the flat digital sitcom animation style. Make sure anatomy is simplified with clean digital lines. Make coloring flat and consistent. Keep subject position and their pose the same as the reference. Make sure the subject is in the same position. Keep pose and standard sitcom animation lighting fits the style. Maintain spatial continuity and consistent camera perspective throughout motion. Ensure lighting and shadows react consistently across frames to subject movement. Maintain sharp subject focus, temporal stability, and zero flicker throughout the sequence. The result should be a fluid, high-quality video clip in the clean digital line work and flat colors."""
-
-BONUS_PROMPT_STYLE_MACFARLANE = """This is a fluid video sequence in the clean digital line work and flat colors, featuring distinct facial features follow the flat digital sitcom animation style. Make sure anatomy is simplified with clean digital lines. Make coloring flat and consistent. Keep subject position and their pose the same as the reference. Make sure the subject is in the same position. Keep pose and standard sitcom animation lighting fits the style. It depicts subjects moving naturally in a coherent scene. The animation quality and temporal consistency are exceptional. clean digital line work and flat colors aesthetic with smooth motion dynamics. Physically coherent motion, temporally stable lighting, and dynamic visual clarity. Maintain sharp focus and high visual fidelity throughout the clip. The video is reminiscent of an authentic clean digital line work and flat colors production."""
-
-SYSTEM_MESSAGE_STYLE_MARIO = """You are an AI that specializes in image-to-video and video generation prompt descriptions emphasizing vibrant colors and rounded geometry. You convert requests into one concise video instruction. You focus on using the reference composition and scene structure as the opening frame while developing fluid subject motion, temporal continuity, and style-authentic physics. You maintain consistent character identity, lighting, and environment across all frames while rendering in the vibrant colors and rounded geometry."""
-
-INSTRUCT_PROMPT_STYLE_MARIO = """Use the reference image as the opening frame, establishing subject placement, pose, and composition. Animate natural, coherent movement with authentic vibrant colors and rounded geometry physics and anatomical continuity. Render character motion, secondary animation, and environment in vibrant colors and rounded geometry with rounded shapes and primary colors follow the vibrant 3D platformer video game style. Make sure anatomy is cartoonish and friendly. Make textures look smooth and plastic-like. Keep subject position and their pose the same as the reference. Make sure the subject is in the same position. Keep pose and bright, cheerful lighting fits the game style. Maintain spatial continuity and consistent camera perspective throughout motion. Ensure lighting and shadows react consistently across frames to subject movement. Maintain sharp subject focus, temporal stability, and zero flicker throughout the sequence. The result should be a fluid, high-quality video clip in the vibrant colors and rounded geometry."""
-
-BONUS_PROMPT_STYLE_MARIO = """This is a fluid video sequence in the vibrant colors and rounded geometry, featuring rounded shapes and primary colors follow the vibrant 3D platformer video game style. Make sure anatomy is cartoonish and friendly. Make textures look smooth and plastic-like. Keep subject position and their pose the same as the reference. Make sure the subject is in the same position. Keep pose and bright, cheerful lighting fits the game style. It depicts subjects moving naturally in a coherent scene. The animation quality and temporal consistency are exceptional. vibrant colors and rounded geometry aesthetic with smooth motion dynamics. Physically coherent motion, temporally stable lighting, and dynamic visual clarity. Maintain sharp focus and high visual fidelity throughout the clip. The video is reminiscent of an authentic vibrant colors and rounded geometry production."""
-
-SYSTEM_MESSAGE_STYLE_MINECRAFT = """You are an AI that specializes in image-to-video and video generation prompt descriptions emphasizing blocky graphics. You convert requests into one concise video instruction. You focus on using the reference composition and scene structure as the opening frame while developing fluid subject motion, temporal continuity, and style-authentic physics. You maintain consistent character identity, lighting, and environment across all frames while rendering in the blocky graphics."""
-
-INSTRUCT_PROMPT_STYLE_MINECRAFT = """Use the reference image as the opening frame, establishing subject placement, pose, and composition. Animate natural, coherent movement with authentic blocky graphics physics and anatomical continuity. Render character motion, secondary animation, and environment in blocky graphics with everything is composed of cubes following the blocky voxel-based game style. Make sure anatomy is blocky and pixelated. Make surfaces look like low-res pixel textures. Keep subject position and their pose the same as the reference. Make sure the subject is in the same position. Keep pose and blocky lighting fits the voxel style. Maintain spatial continuity and consistent camera perspective throughout motion. Ensure lighting and shadows react consistently across frames to subject movement. Maintain sharp subject focus, temporal stability, and zero flicker throughout the sequence. The result should be a fluid, high-quality video clip in the blocky graphics."""
-
-BONUS_PROMPT_STYLE_MINECRAFT = """This is a fluid video sequence in the blocky graphics, featuring everything is composed of cubes following the blocky voxel-based game style. Make sure anatomy is blocky and pixelated. Make surfaces look like low-res pixel textures. Keep subject position and their pose the same as the reference. Make sure the subject is in the same position. Keep pose and blocky lighting fits the voxel style. It depicts subjects moving naturally in a coherent scene. The animation quality and temporal consistency are exceptional. blocky graphics aesthetic with smooth motion dynamics. Physically coherent motion, temporally stable lighting, and dynamic visual clarity. Maintain sharp focus and high visual fidelity throughout the clip. The video is reminiscent of an authentic blocky graphics production."""
-
-SYSTEM_MESSAGE_STYLE_NICKELODEON = """You are an AI that specializes in image-to-video and video generation prompt descriptions emphasizing quirky character designs and bold ink lines. You convert requests into one concise video instruction. You focus on using the reference composition and scene structure as the opening frame while developing fluid subject motion, temporal continuity, and style-authentic physics. You maintain consistent character identity, lighting, and environment across all frames while rendering in the quirky character designs and bold ink lines."""
-
-INSTRUCT_PROMPT_STYLE_NICKELODEON = """Use the reference image as the opening frame, establishing subject placement, pose, and composition. Animate natural, coherent movement with authentic quirky character designs and bold ink lines physics and anatomical continuity. Render character motion, secondary animation, and environment in quirky character designs and bold ink lines with quirky shapes and bold lines follow the quirky 90s cartoon animation style. Make sure anatomy is stylized and slightly wacky. Make colors vibrant and saturated. Keep subject position and their pose the same as the reference. Make sure the subject is in the same position. Keep pose and flat animation lighting fits the style. Maintain spatial continuity and consistent camera perspective throughout motion. Ensure lighting and shadows react consistently across frames to subject movement. Maintain sharp subject focus, temporal stability, and zero flicker throughout the sequence. The result should be a fluid, high-quality video clip in the quirky character designs and bold ink lines."""
-
-BONUS_PROMPT_STYLE_NICKELODEON = """This is a fluid video sequence in the quirky character designs and bold ink lines, featuring quirky shapes and bold lines follow the quirky 90s cartoon animation style. Make sure anatomy is stylized and slightly wacky. Make colors vibrant and saturated. Keep subject position and their pose the same as the reference. Make sure the subject is in the same position. Keep pose and flat animation lighting fits the style. It depicts subjects moving naturally in a coherent scene. The animation quality and temporal consistency are exceptional. quirky character designs and bold ink lines aesthetic with smooth motion dynamics. Physically coherent motion, temporally stable lighting, and dynamic visual clarity. Maintain sharp focus and high visual fidelity throughout the clip. The video is reminiscent of an authentic quirky character designs and bold ink lines production."""
-
-SYSTEM_MESSAGE_STYLE_PHOTOGRAPHY_ANALOG_FILM = """You are an AI that specializes in image-to-video and video generation prompt descriptions emphasizing photography analog film. You convert requests into one concise video instruction. You focus on using the reference composition and scene structure as the opening frame while developing fluid subject motion, temporal continuity, and style-authentic physics. You maintain consistent character identity, lighting, and environment across all frames while rendering in the photography analog film."""
-
-INSTRUCT_PROMPT_STYLE_PHOTOGRAPHY_ANALOG_FILM = """Use the reference image as the opening frame, establishing subject placement, pose, and composition. Animate natural, coherent movement with authentic photography analog film physics and anatomical continuity. Render character motion, secondary animation, and environment in photography analog film with coherent styling and detailed textures. Maintain spatial continuity and consistent camera perspective throughout motion. Ensure lighting and shadows react consistently across frames to subject movement. Maintain sharp subject focus, temporal stability, and zero flicker throughout the sequence. The result should be a fluid, high-quality video clip in the photography analog film."""
-
-BONUS_PROMPT_STYLE_PHOTOGRAPHY_ANALOG_FILM = """This is a fluid video sequence in the photography analog film, featuring coherent styling and detailed textures. It depicts subjects moving naturally in a coherent scene. The animation quality and temporal consistency are exceptional. photography analog film aesthetic with smooth motion dynamics. Physically coherent motion, temporally stable lighting, and dynamic visual clarity. Maintain sharp focus and high visual fidelity throughout the clip. The video is reminiscent of an authentic photography analog film production."""
-
-SYSTEM_MESSAGE_STYLE_PHOTOGRAPHY_AVAILABLE_LIGHT = """You are an AI that specializes in image-to-video and video generation prompt descriptions emphasizing photography available light. You convert requests into one concise video instruction. You focus on using the reference composition and scene structure as the opening frame while developing fluid subject motion, temporal continuity, and style-authentic physics. You maintain consistent character identity, lighting, and environment across all frames while rendering in the photography available light."""
-
-INSTRUCT_PROMPT_STYLE_PHOTOGRAPHY_AVAILABLE_LIGHT = """Use the reference image as the opening frame, establishing subject placement, pose, and composition. Animate natural, coherent movement with authentic photography available light physics and anatomical continuity. Render character motion, secondary animation, and environment in photography available light with coherent styling and detailed textures. Maintain spatial continuity and consistent camera perspective throughout motion. Ensure lighting and shadows react consistently across frames to subject movement. Maintain sharp subject focus, temporal stability, and zero flicker throughout the sequence. The result should be a fluid, high-quality video clip in the photography available light."""
-
-BONUS_PROMPT_STYLE_PHOTOGRAPHY_AVAILABLE_LIGHT = """This is a fluid video sequence in the photography available light, featuring coherent styling and detailed textures. It depicts subjects moving naturally in a coherent scene. The animation quality and temporal consistency are exceptional. photography available light aesthetic with smooth motion dynamics. Physically coherent motion, temporally stable lighting, and dynamic visual clarity. Maintain sharp focus and high visual fidelity throughout the clip. The video is reminiscent of an authentic photography available light production."""
-
-SYSTEM_MESSAGE_STYLE_PHOTOGRAPHY_CCD_COMPACT_DIGITAL = """You are an AI that specializes in image-to-video and video generation prompt descriptions emphasizing photography ccd compact digital. You convert requests into one concise video instruction. You focus on using the reference composition and scene structure as the opening frame while developing fluid subject motion, temporal continuity, and style-authentic physics. You maintain consistent character identity, lighting, and environment across all frames while rendering in the photography ccd compact digital."""
-
-INSTRUCT_PROMPT_STYLE_PHOTOGRAPHY_CCD_COMPACT_DIGITAL = """Use the reference image as the opening frame, establishing subject placement, pose, and composition. Animate natural, coherent movement with authentic photography ccd compact digital physics and anatomical continuity. Render character motion, secondary animation, and environment in photography ccd compact digital with coherent styling and detailed textures. Maintain spatial continuity and consistent camera perspective throughout motion. Ensure lighting and shadows react consistently across frames to subject movement. Maintain sharp subject focus, temporal stability, and zero flicker throughout the sequence. The result should be a fluid, high-quality video clip in the photography ccd compact digital."""
-
-BONUS_PROMPT_STYLE_PHOTOGRAPHY_CCD_COMPACT_DIGITAL = """This is a fluid video sequence in the photography ccd compact digital, featuring coherent styling and detailed textures. It depicts subjects moving naturally in a coherent scene. The animation quality and temporal consistency are exceptional. photography ccd compact digital aesthetic with smooth motion dynamics. Physically coherent motion, temporally stable lighting, and dynamic visual clarity. Maintain sharp focus and high visual fidelity throughout the clip. The video is reminiscent of an authentic photography ccd compact digital production."""
-
-SYSTEM_MESSAGE_STYLE_PHOTOGRAPHY_DIRECT_FLASH = """You are an AI that specializes in image-to-video and video generation prompt descriptions emphasizing photography direct flash. You convert requests into one concise video instruction. You focus on using the reference composition and scene structure as the opening frame while developing fluid subject motion, temporal continuity, and style-authentic physics. You maintain consistent character identity, lighting, and environment across all frames while rendering in the photography direct flash."""
-
-INSTRUCT_PROMPT_STYLE_PHOTOGRAPHY_DIRECT_FLASH = """Use the reference image as the opening frame, establishing subject placement, pose, and composition. Animate natural, coherent movement with authentic photography direct flash physics and anatomical continuity. Render character motion, secondary animation, and environment in photography direct flash with coherent styling and detailed textures. Maintain spatial continuity and consistent camera perspective throughout motion. Ensure lighting and shadows react consistently across frames to subject movement. Maintain sharp subject focus, temporal stability, and zero flicker throughout the sequence. The result should be a fluid, high-quality video clip in the photography direct flash."""
-
-BONUS_PROMPT_STYLE_PHOTOGRAPHY_DIRECT_FLASH = """This is a fluid video sequence in the photography direct flash, featuring coherent styling and detailed textures. It depicts subjects moving naturally in a coherent scene. The animation quality and temporal consistency are exceptional. photography direct flash aesthetic with smooth motion dynamics. Physically coherent motion, temporally stable lighting, and dynamic visual clarity. Maintain sharp focus and high visual fidelity throughout the clip. The video is reminiscent of an authentic photography direct flash production."""
-
-SYSTEM_MESSAGE_STYLE_PHOTOGRAPHY_EARLY_2000S_ANALOG = """You are an AI that specializes in image-to-video and video generation prompt descriptions emphasizing photography early 2000s analog. You convert requests into one concise video instruction. You focus on using the reference composition and scene structure as the opening frame while developing fluid subject motion, temporal continuity, and style-authentic physics. You maintain consistent character identity, lighting, and environment across all frames while rendering in the photography early 2000s analog."""
-
-INSTRUCT_PROMPT_STYLE_PHOTOGRAPHY_EARLY_2000S_ANALOG = """Use the reference image as the opening frame, establishing subject placement, pose, and composition. Animate natural, coherent movement with authentic photography early 2000s analog physics and anatomical continuity. Render character motion, secondary animation, and environment in photography early 2000s analog with coherent styling and detailed textures. Maintain spatial continuity and consistent camera perspective throughout motion. Ensure lighting and shadows react consistently across frames to subject movement. Maintain sharp subject focus, temporal stability, and zero flicker throughout the sequence. The result should be a fluid, high-quality video clip in the photography early 2000s analog."""
-
-BONUS_PROMPT_STYLE_PHOTOGRAPHY_EARLY_2000S_ANALOG = """This is a fluid video sequence in the photography early 2000s analog, featuring coherent styling and detailed textures. It depicts subjects moving naturally in a coherent scene. The animation quality and temporal consistency are exceptional. photography early 2000s analog aesthetic with smooth motion dynamics. Physically coherent motion, temporally stable lighting, and dynamic visual clarity. Maintain sharp focus and high visual fidelity throughout the clip. The video is reminiscent of an authentic photography early 2000s analog production."""
-
-SYSTEM_MESSAGE_STYLE_PHOTOGRAPHY_FINE_ART_BLACK_AND_WHITE = """You are an AI that specializes in image-to-video and video generation prompt descriptions emphasizing photography fine art black and white. You convert requests into one concise video instruction. You focus on using the reference composition and scene structure as the opening frame while developing fluid subject motion, temporal continuity, and style-authentic physics. You maintain consistent character identity, lighting, and environment across all frames while rendering in the photography fine art black and white."""
-
-INSTRUCT_PROMPT_STYLE_PHOTOGRAPHY_FINE_ART_BLACK_AND_WHITE = """Use the reference image as the opening frame, establishing subject placement, pose, and composition. Animate natural, coherent movement with authentic photography fine art black and white physics and anatomical continuity. Render character motion, secondary animation, and environment in photography fine art black and white with coherent styling and detailed textures. Maintain spatial continuity and consistent camera perspective throughout motion. Ensure lighting and shadows react consistently across frames to subject movement. Maintain sharp subject focus, temporal stability, and zero flicker throughout the sequence. The result should be a fluid, high-quality video clip in the photography fine art black and white."""
-
-BONUS_PROMPT_STYLE_PHOTOGRAPHY_FINE_ART_BLACK_AND_WHITE = """This is a fluid video sequence in the photography fine art black and white, featuring coherent styling and detailed textures. It depicts subjects moving naturally in a coherent scene. The animation quality and temporal consistency are exceptional. photography fine art black and white aesthetic with smooth motion dynamics. Physically coherent motion, temporally stable lighting, and dynamic visual clarity. Maintain sharp focus and high visual fidelity throughout the clip. The video is reminiscent of an authentic photography fine art black and white production."""
-
-SYSTEM_MESSAGE_STYLE_PHOTOGRAPHY_FULL_FRAME_DIGITAL = """You are an AI that specializes in image-to-video and video generation prompt descriptions emphasizing photography full frame digital. You convert requests into one concise video instruction. You focus on using the reference composition and scene structure as the opening frame while developing fluid subject motion, temporal continuity, and style-authentic physics. You maintain consistent character identity, lighting, and environment across all frames while rendering in the photography full frame digital."""
-
-INSTRUCT_PROMPT_STYLE_PHOTOGRAPHY_FULL_FRAME_DIGITAL = """Use the reference image as the opening frame, establishing subject placement, pose, and composition. Animate natural, coherent movement with authentic photography full frame digital physics and anatomical continuity. Render character motion, secondary animation, and environment in photography full frame digital with coherent styling and detailed textures. Maintain spatial continuity and consistent camera perspective throughout motion. Ensure lighting and shadows react consistently across frames to subject movement. Maintain sharp subject focus, temporal stability, and zero flicker throughout the sequence. The result should be a fluid, high-quality video clip in the photography full frame digital."""
-
-BONUS_PROMPT_STYLE_PHOTOGRAPHY_FULL_FRAME_DIGITAL = """This is a fluid video sequence in the photography full frame digital, featuring coherent styling and detailed textures. It depicts subjects moving naturally in a coherent scene. The animation quality and temporal consistency are exceptional. photography full frame digital aesthetic with smooth motion dynamics. Physically coherent motion, temporally stable lighting, and dynamic visual clarity. Maintain sharp focus and high visual fidelity throughout the clip. The video is reminiscent of an authentic photography full frame digital production."""
-
-SYSTEM_MESSAGE_STYLE_PHOTOGRAPHY_KODACHROME = """You are an AI that specializes in image-to-video and video generation prompt descriptions emphasizing classic color slide film from the 1950s-70s. You convert requests into one concise video instruction. You focus on using the reference composition and scene structure as the opening frame while developing fluid subject motion, temporal continuity, and style-authentic physics. You maintain consistent character identity, lighting, and environment across all frames while rendering in the classic color slide film from the 1950s-70s."""
-
-INSTRUCT_PROMPT_STYLE_PHOTOGRAPHY_KODACHROME = """Use the reference image as the opening frame, establishing subject placement, pose, and composition. Animate natural, coherent movement with authentic classic color slide film from the 1950s-70s physics and anatomical continuity. Render character motion, secondary animation, and environment in classic color slide film from the 1950s-70s with subjects and environments have rich, saturated Kodachrome color tones. Make sure forms display the warm, distinctive color palette of Kodachrome stock. Make colors look vibrant with slightly exaggerated saturation characteristic of the film. Keep subject position and their pose the same as the reference. Make sure the subject is in the same position. Keep pose and warm, golden lighting with rich highlights. Maintain spatial continuity and consistent camera perspective throughout motion. Ensure lighting and shadows react consistently across frames to subject movement. Maintain sharp subject focus, temporal stability, and zero flicker throughout the sequence. The result should be a fluid, high-quality video clip in the classic color slide film from the 1950s-70s."""
-
-BONUS_PROMPT_STYLE_PHOTOGRAPHY_KODACHROME = """This is a fluid video sequence in the classic color slide film from the 1950s-70s, featuring subjects and environments have rich, saturated Kodachrome color tones. Make sure forms display the warm, distinctive color palette of Kodachrome stock. Make colors look vibrant with slightly exaggerated saturation characteristic of the film. Keep subject position and their pose the same as the reference. Make sure the subject is in the same position. Keep pose and warm, golden lighting with rich highlights. It depicts subjects moving naturally in a coherent scene. The animation quality and temporal consistency are exceptional. classic color slide film from the 1950s-70s aesthetic with smooth motion dynamics. Physically coherent motion, temporally stable lighting, and dynamic visual clarity. Maintain sharp focus and high visual fidelity throughout the clip. The video is reminiscent of an authentic classic color slide film from the 1950s-70s production."""
-
-SYSTEM_MESSAGE_STYLE_PHOTOGRAPHY_MEDIUM_FORMAT = """You are an AI that specializes in image-to-video and video generation prompt descriptions emphasizing photography medium format. You convert requests into one concise video instruction. You focus on using the reference composition and scene structure as the opening frame while developing fluid subject motion, temporal continuity, and style-authentic physics. You maintain consistent character identity, lighting, and environment across all frames while rendering in the photography medium format."""
-
-INSTRUCT_PROMPT_STYLE_PHOTOGRAPHY_MEDIUM_FORMAT = """Use the reference image as the opening frame, establishing subject placement, pose, and composition. Animate natural, coherent movement with authentic photography medium format physics and anatomical continuity. Render character motion, secondary animation, and environment in photography medium format with coherent styling and detailed textures. Maintain spatial continuity and consistent camera perspective throughout motion. Ensure lighting and shadows react consistently across frames to subject movement. Maintain sharp subject focus, temporal stability, and zero flicker throughout the sequence. The result should be a fluid, high-quality video clip in the photography medium format."""
-
-BONUS_PROMPT_STYLE_PHOTOGRAPHY_MEDIUM_FORMAT = """This is a fluid video sequence in the photography medium format, featuring coherent styling and detailed textures. It depicts subjects moving naturally in a coherent scene. The animation quality and temporal consistency are exceptional. photography medium format aesthetic with smooth motion dynamics. Physically coherent motion, temporally stable lighting, and dynamic visual clarity. Maintain sharp focus and high visual fidelity throughout the clip. The video is reminiscent of an authentic photography medium format production."""
-
-SYSTEM_MESSAGE_STYLE_PHOTOGRAPHY_PHOTOREALISM = """You are an AI that specializes in image-to-video and video generation prompt descriptions emphasizing real life photographic images. You convert requests into one concise video instruction. You focus on using the reference composition and scene structure as the opening frame while developing fluid subject motion, temporal continuity, and style-authentic physics. You maintain consistent character identity, lighting, and environment across all frames while rendering in the real life photographic images."""
-
-INSTRUCT_PROMPT_STYLE_PHOTOGRAPHY_PHOTOREALISM = """Use the reference image as the opening frame, establishing subject placement, pose, and composition. Animate natural, coherent movement with authentic real life photographic images physics and anatomical continuity. Render character motion, secondary animation, and environment in real life photographic images with image looks real. Make sure anatomy is accurately represented. Normal anatomy. Keep body color. Keep subject position and their pose the same as the reference. Make sure the subject is in the same position. Keep pose and that lighting is accurate for the scene. Maintain spatial continuity and consistent camera perspective throughout motion. Ensure lighting and shadows react consistently across frames to subject movement. Maintain sharp subject focus, temporal stability, and zero flicker throughout the sequence. The result should be a fluid, high-quality video clip in the real life photographic images."""
-
-BONUS_PROMPT_STYLE_PHOTOGRAPHY_PHOTOREALISM = """This is a fluid video sequence in the real life photographic images, featuring image looks real. Make sure anatomy is accurately represented. Normal anatomy. Keep body color. Keep subject position and their pose the same as the reference. Make sure the subject is in the same position. Keep pose and that lighting is accurate for the scene. It depicts subjects moving naturally in a coherent scene. The animation quality and temporal consistency are exceptional. real life photographic images aesthetic with smooth motion dynamics. Physically coherent motion, temporally stable lighting, and dynamic visual clarity. Maintain sharp focus and high visual fidelity throughout the clip. The video is reminiscent of an authentic real life photographic images production."""
-
-SYSTEM_MESSAGE_STYLE_PHOTOGRAPHY_POLAROID = """You are an AI that specializes in image-to-video and video generation prompt descriptions emphasizing vintage instant film photographs. You convert requests into one concise video instruction. You focus on using the reference composition and scene structure as the opening frame while developing fluid subject motion, temporal continuity, and style-authentic physics. You maintain consistent character identity, lighting, and environment across all frames while rendering in the vintage instant film photographs."""
-
-INSTRUCT_PROMPT_STYLE_PHOTOGRAPHY_POLAROID = """Use the reference image as the opening frame, establishing subject placement, pose, and composition. Animate natural, coherent movement with authentic vintage instant film photographs physics and anatomical continuity. Render character motion, secondary animation, and environment in vintage instant film photographs with subjects and environments have warm, slightly faded tones characteristic of Polaroid film. Make sure forms appear soft and slightly out of focus with natural imperfections. Make colors look desaturated with a warm color cast. Keep subject position and their pose the same as the reference. Make sure the subject is in the same position. Keep pose and soft, natural lighting with minimal shadows. Maintain spatial continuity and consistent camera perspective throughout motion. Ensure lighting and shadows react consistently across frames to subject movement. Maintain sharp subject focus, temporal stability, and zero flicker throughout the sequence. The result should be a fluid, high-quality video clip in the vintage instant film photographs."""
-
-BONUS_PROMPT_STYLE_PHOTOGRAPHY_POLAROID = """This is a fluid video sequence in the vintage instant film photographs, featuring subjects and environments have warm, slightly faded tones characteristic of Polaroid film. Make sure forms appear soft and slightly out of focus with natural imperfections. Make colors look desaturated with a warm color cast. Keep subject position and their pose the same as the reference. Make sure the subject is in the same position. Keep pose and soft, natural lighting with minimal shadows. It depicts subjects moving naturally in a coherent scene. The animation quality and temporal consistency are exceptional. vintage instant film photographs aesthetic with smooth motion dynamics. Physically coherent motion, temporally stable lighting, and dynamic visual clarity. Maintain sharp focus and high visual fidelity throughout the clip. The video is reminiscent of an authentic vintage instant film photographs production."""
-
-SYSTEM_MESSAGE_STYLE_PHOTOGRAPHY_SMARTPHONE = """You are an AI that specializes in image-to-video and video generation prompt descriptions emphasizing photography smartphone. You convert requests into one concise video instruction. You focus on using the reference composition and scene structure as the opening frame while developing fluid subject motion, temporal continuity, and style-authentic physics. You maintain consistent character identity, lighting, and environment across all frames while rendering in the photography smartphone."""
-
-INSTRUCT_PROMPT_STYLE_PHOTOGRAPHY_SMARTPHONE = """Use the reference image as the opening frame, establishing subject placement, pose, and composition. Animate natural, coherent movement with authentic photography smartphone physics and anatomical continuity. Render character motion, secondary animation, and environment in photography smartphone with coherent styling and detailed textures. Maintain spatial continuity and consistent camera perspective throughout motion. Ensure lighting and shadows react consistently across frames to subject movement. Maintain sharp subject focus, temporal stability, and zero flicker throughout the sequence. The result should be a fluid, high-quality video clip in the photography smartphone."""
-
-BONUS_PROMPT_STYLE_PHOTOGRAPHY_SMARTPHONE = """This is a fluid video sequence in the photography smartphone, featuring coherent styling and detailed textures. It depicts subjects moving naturally in a coherent scene. The animation quality and temporal consistency are exceptional. photography smartphone aesthetic with smooth motion dynamics. Physically coherent motion, temporally stable lighting, and dynamic visual clarity. Maintain sharp focus and high visual fidelity throughout the clip. The video is reminiscent of an authentic photography smartphone production."""
-
-SYSTEM_MESSAGE_STYLE_PHOTOGRAPHY_STUDIO_STROBE = """You are an AI that specializes in image-to-video and video generation prompt descriptions emphasizing photography studio strobe. You convert requests into one concise video instruction. You focus on using the reference composition and scene structure as the opening frame while developing fluid subject motion, temporal continuity, and style-authentic physics. You maintain consistent character identity, lighting, and environment across all frames while rendering in the photography studio strobe."""
-
-INSTRUCT_PROMPT_STYLE_PHOTOGRAPHY_STUDIO_STROBE = """Use the reference image as the opening frame, establishing subject placement, pose, and composition. Animate natural, coherent movement with authentic photography studio strobe physics and anatomical continuity. Render character motion, secondary animation, and environment in photography studio strobe with coherent styling and detailed textures. Maintain spatial continuity and consistent camera perspective throughout motion. Ensure lighting and shadows react consistently across frames to subject movement. Maintain sharp subject focus, temporal stability, and zero flicker throughout the sequence. The result should be a fluid, high-quality video clip in the photography studio strobe."""
-
-BONUS_PROMPT_STYLE_PHOTOGRAPHY_STUDIO_STROBE = """This is a fluid video sequence in the photography studio strobe, featuring coherent styling and detailed textures. It depicts subjects moving naturally in a coherent scene. The animation quality and temporal consistency are exceptional. photography studio strobe aesthetic with smooth motion dynamics. Physically coherent motion, temporally stable lighting, and dynamic visual clarity. Maintain sharp focus and high visual fidelity throughout the clip. The video is reminiscent of an authentic photography studio strobe production."""
-
-SYSTEM_MESSAGE_STYLE_PIXAR = """You are an AI that specializes in image-to-video and video generation prompt descriptions emphasizing high-quality rendering and expressive designs. You convert requests into one concise video instruction. You focus on using the reference composition and scene structure as the opening frame while developing fluid subject motion, temporal continuity, and style-authentic physics. You maintain consistent character identity, lighting, and environment across all frames while rendering in the high-quality rendering and expressive designs."""
-
-INSTRUCT_PROMPT_STYLE_PIXAR = """Use the reference image as the opening frame, establishing subject placement, pose, and composition. Animate natural, coherent movement with authentic high-quality rendering and expressive designs physics and anatomical continuity. Render character motion, secondary animation, and environment in high-quality rendering and expressive designs with facial features follow the high-end 3D rendering style with large expressive eyes. Make sure anatomy is accurately represented within stylized 3D proportions. Make skin and surfaces look like soft subsurface scattering with PBR textures. Keep subject position and their pose the same as the reference. Make sure the subject is in the same position. Keep pose and cinematic volumetric lighting fits the 3D animation style. Maintain spatial continuity and consistent camera perspective throughout motion. Ensure lighting and shadows react consistently across frames to subject movement. Maintain sharp subject focus, temporal stability, and zero flicker throughout the sequence. The result should be a fluid, high-quality video clip in the high-quality rendering and expressive designs."""
-
-BONUS_PROMPT_STYLE_PIXAR = """This is a fluid video sequence in the high-quality rendering and expressive designs, featuring facial features follow the high-end 3D rendering style with large expressive eyes. Make sure anatomy is accurately represented within stylized 3D proportions. Make skin and surfaces look like soft subsurface scattering with PBR textures. Keep subject position and their pose the same as the reference. Make sure the subject is in the same position. Keep pose and cinematic volumetric lighting fits the 3D animation style. It depicts subjects moving naturally in a coherent scene. The animation quality and temporal consistency are exceptional. high-quality rendering and expressive designs aesthetic with smooth motion dynamics. Physically coherent motion, temporally stable lighting, and dynamic visual clarity. Maintain sharp focus and high visual fidelity throughout the clip. The video is reminiscent of an authentic high-quality rendering and expressive designs production."""
-
-SYSTEM_MESSAGE_STYLE_PIXEL_ART = """You are an AI that specializes in image-to-video and video generation prompt descriptions emphasizing retro arcade or video game graphics. You convert requests into one concise video instruction. You focus on using the reference composition and scene structure as the opening frame while developing fluid subject motion, temporal continuity, and style-authentic physics. You maintain consistent character identity, lighting, and environment across all frames while rendering in the retro arcade or video game graphics."""
-
-INSTRUCT_PROMPT_STYLE_PIXEL_ART = """Use the reference image as the opening frame, establishing subject placement, pose, and composition. Animate natural, coherent movement with authentic retro arcade or video game graphics physics and anatomical continuity. Render character motion, secondary animation, and environment in retro arcade or video game graphics with subjects and environments have limited color palettes with solid pixel blocks. Make sure forms are blocky and stylized with clear pixel edges. Make coloring look like indexed color mode with distinct hues. Keep subject position and their pose the same as the reference. Make sure the subject is in the same position. Keep pose and pixelated shading and dithering patterns are accurate. Maintain spatial continuity and consistent camera perspective throughout motion. Ensure lighting and shadows react consistently across frames to subject movement. Maintain sharp subject focus, temporal stability, and zero flicker throughout the sequence. The result should be a fluid, high-quality video clip in the retro arcade or video game graphics."""
-
-BONUS_PROMPT_STYLE_PIXEL_ART = """This is a fluid video sequence in the retro arcade or video game graphics, featuring subjects and environments have limited color palettes with solid pixel blocks. Make sure forms are blocky and stylized with clear pixel edges. Make coloring look like indexed color mode with distinct hues. Keep subject position and their pose the same as the reference. Make sure the subject is in the same position. Keep pose and pixelated shading and dithering patterns are accurate. It depicts subjects moving naturally in a coherent scene. The animation quality and temporal consistency are exceptional. retro arcade or video game graphics aesthetic with smooth motion dynamics. Physically coherent motion, temporally stable lighting, and dynamic visual clarity. Maintain sharp focus and high visual fidelity throughout the clip. The video is reminiscent of an authentic retro arcade or video game graphics production."""
-
-SYSTEM_MESSAGE_STYLE_POKEMON = """You are an AI that specializes in image-to-video and video generation prompt descriptions emphasizing clean lines and vibrant creature designs. You convert requests into one concise video instruction. You focus on using the reference composition and scene structure as the opening frame while developing fluid subject motion, temporal continuity, and style-authentic physics. You maintain consistent character identity, lighting, and environment across all frames while rendering in the clean lines and vibrant creature designs."""
-
-INSTRUCT_PROMPT_STYLE_POKEMON = """Use the reference image as the opening frame, establishing subject placement, pose, and composition. Animate natural, coherent movement with authentic clean lines and vibrant creature designs physics and anatomical continuity. Render character motion, secondary animation, and environment in clean lines and vibrant creature designs with clean outlines and vibrant colors follow the clean cel-shaded anime style. Make sure anatomy fits the stylized design language. Make shading look cel-shaded. Keep subject position and their pose the same as the reference. Make sure the subject is in the same position. Keep pose and anime-style lighting fits the series. Maintain spatial continuity and consistent camera perspective throughout motion. Ensure lighting and shadows react consistently across frames to subject movement. Maintain sharp subject focus, temporal stability, and zero flicker throughout the sequence. The result should be a fluid, high-quality video clip in the clean lines and vibrant creature designs."""
-
-BONUS_PROMPT_STYLE_POKEMON = """This is a fluid video sequence in the clean lines and vibrant creature designs, featuring clean outlines and vibrant colors follow the clean cel-shaded anime style. Make sure anatomy fits the stylized design language. Make shading look cel-shaded. Keep subject position and their pose the same as the reference. Make sure the subject is in the same position. Keep pose and anime-style lighting fits the series. It depicts subjects moving naturally in a coherent scene. The animation quality and temporal consistency are exceptional. clean lines and vibrant creature designs aesthetic with smooth motion dynamics. Physically coherent motion, temporally stable lighting, and dynamic visual clarity. Maintain sharp focus and high visual fidelity throughout the clip. The video is reminiscent of an authentic clean lines and vibrant creature designs production."""
-
-SYSTEM_MESSAGE_STYLE_PRESERVE_IDENTITY = """You are an AI that specializes in image-to-video and video generation prompt descriptions emphasizing preserve identity. You convert requests into one concise video instruction. You focus on using the reference composition and scene structure as the opening frame while developing fluid subject motion, temporal continuity, and style-authentic physics. You maintain consistent character identity, lighting, and environment across all frames while rendering in the preserve identity."""
-
-INSTRUCT_PROMPT_STYLE_PRESERVE_IDENTITY = """Use the reference image as the opening frame, establishing subject placement, pose, and composition. Animate natural, coherent movement with authentic preserve identity physics and anatomical continuity. Render character motion, secondary animation, and environment in preserve identity with coherent styling and detailed textures. Maintain spatial continuity and consistent camera perspective throughout motion. Ensure lighting and shadows react consistently across frames to subject movement. Maintain sharp subject focus, temporal stability, and zero flicker throughout the sequence. The result should be a fluid, high-quality video clip in the preserve identity."""
-
-BONUS_PROMPT_STYLE_PRESERVE_IDENTITY = """This is a fluid video sequence in the preserve identity, featuring coherent styling and detailed textures. It depicts subjects moving naturally in a coherent scene. The animation quality and temporal consistency are exceptional. preserve identity aesthetic with smooth motion dynamics. Physically coherent motion, temporally stable lighting, and dynamic visual clarity. Maintain sharp focus and high visual fidelity throughout the clip. The video is reminiscent of an authentic preserve identity production."""
-
-SYSTEM_MESSAGE_STYLE_PRESERVE_STYLE = """You are an AI that specializes in image-to-video and video generation prompt descriptions emphasizing preserve style. You convert requests into one concise video instruction. You focus on using the reference composition and scene structure as the opening frame while developing fluid subject motion, temporal continuity, and style-authentic physics. You maintain consistent character identity, lighting, and environment across all frames while rendering in the preserve style."""
-
-INSTRUCT_PROMPT_STYLE_PRESERVE_STYLE = """Use the reference image as the opening frame, establishing subject placement, pose, and composition. Animate natural, coherent movement with authentic preserve style physics and anatomical continuity. Render character motion, secondary animation, and environment in preserve style with coherent styling and detailed textures. Maintain spatial continuity and consistent camera perspective throughout motion. Ensure lighting and shadows react consistently across frames to subject movement. Maintain sharp subject focus, temporal stability, and zero flicker throughout the sequence. The result should be a fluid, high-quality video clip in the preserve style."""
-
-BONUS_PROMPT_STYLE_PRESERVE_STYLE = """This is a fluid video sequence in the preserve style, featuring coherent styling and detailed textures. It depicts subjects moving naturally in a coherent scene. The animation quality and temporal consistency are exceptional. preserve style aesthetic with smooth motion dynamics. Physically coherent motion, temporally stable lighting, and dynamic visual clarity. Maintain sharp focus and high visual fidelity throughout the clip. The video is reminiscent of an authentic preserve style production."""
-
-SYSTEM_MESSAGE_STYLE_PS1 = """You are an AI that specializes in image-to-video and video generation prompt descriptions emphasizing scenes from retro 3D video games. You convert requests into one concise video instruction. You focus on using the reference composition and scene structure as the opening frame while developing fluid subject motion, temporal continuity, and style-authentic physics. You maintain consistent character identity, lighting, and environment across all frames while rendering in the scenes from retro 3D video games."""
-
-INSTRUCT_PROMPT_STYLE_PS1 = """Use the reference image as the opening frame, establishing subject placement, pose, and composition. Animate natural, coherent movement with authentic scenes from retro 3D video games physics and anatomical continuity. Render character motion, secondary animation, and environment in scenes from retro 3D video games with the environment displays retro 32-bit low-polygon 3D graphics with visible polygon edges and flat-shaded surfaces. Make sure forms are simplified with chunky, angular geometry characteristic of early 3D models. Make textures look pixelated and limited in color palette. Keep subject position and their pose the same as the reference. Make sure the subject is in the same position. Keep pose and flat, angular lighting fits the low-polygon aesthetic. Maintain spatial continuity and consistent camera perspective throughout motion. Ensure lighting and shadows react consistently across frames to subject movement. Maintain sharp subject focus, temporal stability, and zero flicker throughout the sequence. The result should be a fluid, high-quality video clip in the scenes from retro 3D video games."""
-
-BONUS_PROMPT_STYLE_PS1 = """This is a fluid video sequence in the scenes from retro 3D video games, featuring the environment displays retro 32-bit low-polygon 3D graphics with visible polygon edges and flat-shaded surfaces. Make sure forms are simplified with chunky, angular geometry characteristic of early 3D models. Make textures look pixelated and limited in color palette. Keep subject position and their pose the same as the reference. Make sure the subject is in the same position. Keep pose and flat, angular lighting fits the low-polygon aesthetic. It depicts subjects moving naturally in a coherent scene. The animation quality and temporal consistency are exceptional. scenes from retro 3D video games aesthetic with smooth motion dynamics. Physically coherent motion, temporally stable lighting, and dynamic visual clarity. Maintain sharp focus and high visual fidelity throughout the clip. The video is reminiscent of an authentic scenes from retro 3D video games production."""
-
-SYSTEM_MESSAGE_STYLE_RETRO_GAME = """You are an AI that specializes in image-to-video and video generation prompt descriptions emphasizing 8-bit and 16-bit pixel art games. You convert requests into one concise video instruction. You focus on using the reference composition and scene structure as the opening frame while developing fluid subject motion, temporal continuity, and style-authentic physics. You maintain consistent character identity, lighting, and environment across all frames while rendering in the 8-bit and 16-bit pixel art games."""
-
-INSTRUCT_PROMPT_STYLE_RETRO_GAME = """Use the reference image as the opening frame, establishing subject placement, pose, and composition. Animate natural, coherent movement with authentic 8-bit and 16-bit pixel art games physics and anatomical continuity. Render character motion, secondary animation, and environment in 8-bit and 16-bit pixel art games with visible pixels and limited palette follow retro gaming aesthetics. Make sure anatomy is simplified for low resolution. Make shading use dithering techniques. Keep subject position and their pose the same as the reference. Make sure the subject is in the same position. Keep pose and dithered lighting fits the sprite style. Maintain spatial continuity and consistent camera perspective throughout motion. Ensure lighting and shadows react consistently across frames to subject movement. Maintain sharp subject focus, temporal stability, and zero flicker throughout the sequence. The result should be a fluid, high-quality video clip in the 8-bit and 16-bit pixel art games."""
-
-BONUS_PROMPT_STYLE_RETRO_GAME = """This is a fluid video sequence in the 8-bit and 16-bit pixel art games, featuring visible pixels and limited palette follow retro gaming aesthetics. Make sure anatomy is simplified for low resolution. Make shading use dithering techniques. Keep subject position and their pose the same as the reference. Make sure the subject is in the same position. Keep pose and dithered lighting fits the sprite style. It depicts subjects moving naturally in a coherent scene. The animation quality and temporal consistency are exceptional. 8-bit and 16-bit pixel art games aesthetic with smooth motion dynamics. Physically coherent motion, temporally stable lighting, and dynamic visual clarity. Maintain sharp focus and high visual fidelity throughout the clip. The video is reminiscent of an authentic 8-bit and 16-bit pixel art games production."""
-
-SYSTEM_MESSAGE_STYLE_RICK_AND_MORTY = """You are an AI that specializes in image-to-video and video generation prompt descriptions emphasizing rick and morty. You convert requests into one concise video instruction. You focus on using the reference composition and scene structure as the opening frame while developing fluid subject motion, temporal continuity, and style-authentic physics. You maintain consistent character identity, lighting, and environment across all frames while rendering in the rick and morty."""
-
-INSTRUCT_PROMPT_STYLE_RICK_AND_MORTY = """Use the reference image as the opening frame, establishing subject placement, pose, and composition. Animate natural, coherent movement with authentic rick and morty physics and anatomical continuity. Render character motion, secondary animation, and environment in rick and morty with coherent styling and detailed textures. Maintain spatial continuity and consistent camera perspective throughout motion. Ensure lighting and shadows react consistently across frames to subject movement. Maintain sharp subject focus, temporal stability, and zero flicker throughout the sequence. The result should be a fluid, high-quality video clip in the rick and morty."""
-
-BONUS_PROMPT_STYLE_RICK_AND_MORTY = """This is a fluid video sequence in the rick and morty, featuring coherent styling and detailed textures. It depicts subjects moving naturally in a coherent scene. The animation quality and temporal consistency are exceptional. rick and morty aesthetic with smooth motion dynamics. Physically coherent motion, temporally stable lighting, and dynamic visual clarity. Maintain sharp focus and high visual fidelity throughout the clip. The video is reminiscent of an authentic rick and morty production."""
-
-SYSTEM_MESSAGE_STYLE_SAILOR_MOON = """You are an AI that specializes in image-to-video and video generation prompt descriptions emphasizing large expressive eyes and elongated limbs. You convert requests into one concise video instruction. You focus on using the reference composition and scene structure as the opening frame while developing fluid subject motion, temporal continuity, and style-authentic physics. You maintain consistent character identity, lighting, and environment across all frames while rendering in the large expressive eyes and elongated limbs."""
-
-INSTRUCT_PROMPT_STYLE_SAILOR_MOON = """Use the reference image as the opening frame, establishing subject placement, pose, and composition. Animate natural, coherent movement with authentic large expressive eyes and elongated limbs physics and anatomical continuity. Render character motion, secondary animation, and environment in large expressive eyes and elongated limbs with large expressive eyes and long legs follow the magical girl anime style of the anime series Sailor Moon. Make sure anatomy is slender and elegant. Make hair flowing and detailed. Keep subject position and their pose the same as the reference. Make sure the subject is in the same position. Keep pose and a soft, romantic lighting that fits the style. Maintain spatial continuity and consistent camera perspective throughout motion. Ensure lighting and shadows react consistently across frames to subject movement. Maintain sharp subject focus, temporal stability, and zero flicker throughout the sequence. The result should be a fluid, high-quality video clip in the large expressive eyes and elongated limbs."""
-
-BONUS_PROMPT_STYLE_SAILOR_MOON = """This is a fluid video sequence in the large expressive eyes and elongated limbs, featuring large expressive eyes and long legs follow the magical girl anime style of the anime series Sailor Moon. Make sure anatomy is slender and elegant. Make hair flowing and detailed. Keep subject position and their pose the same as the reference. Make sure the subject is in the same position. Keep pose and a soft, romantic lighting that fits the style. It depicts subjects moving naturally in a coherent scene. The animation quality and temporal consistency are exceptional. large expressive eyes and elongated limbs aesthetic with smooth motion dynamics. Physically coherent motion, temporally stable lighting, and dynamic visual clarity. Maintain sharp focus and high visual fidelity throughout the clip. The video is reminiscent of an authentic large expressive eyes and elongated limbs production."""
-
-SYSTEM_MESSAGE_STYLE_SIMS = """You are an AI that specializes in image-to-video and video generation prompt descriptions emphasizing stylized 3D life simulation game renders. You convert requests into one concise video instruction. You focus on using the reference composition and scene structure as the opening frame while developing fluid subject motion, temporal continuity, and style-authentic physics. You maintain consistent character identity, lighting, and environment across all frames while rendering in the stylized 3D life simulation game renders."""
-
-INSTRUCT_PROMPT_STYLE_SIMS = """Use the reference image as the opening frame, establishing subject placement, pose, and composition. Animate natural, coherent movement with authentic stylized 3D life simulation game renders physics and anatomical continuity. Render character motion, secondary animation, and environment in stylized 3D life simulation game renders with subjects and environments follow the stylized 3D life simulation game graphics with smooth poreless surfaces. Make sure forms are stylized with soft, rounded geometry. Make surfaces look smooth and slightly plasticky with subtle shading. Keep subject position and their pose the same as the reference. Make sure the subject is in the same position. Keep pose and bright global illumination lighting. Maintain spatial continuity and consistent camera perspective throughout motion. Ensure lighting and shadows react consistently across frames to subject movement. Maintain sharp subject focus, temporal stability, and zero flicker throughout the sequence. The result should be a fluid, high-quality video clip in the stylized 3D life simulation game renders."""
-
-BONUS_PROMPT_STYLE_SIMS = """This is a fluid video sequence in the stylized 3D life simulation game renders, featuring subjects and environments follow the stylized 3D life simulation game graphics with smooth poreless surfaces. Make sure forms are stylized with soft, rounded geometry. Make surfaces look smooth and slightly plasticky with subtle shading. Keep subject position and their pose the same as the reference. Make sure the subject is in the same position. Keep pose and bright global illumination lighting. It depicts subjects moving naturally in a coherent scene. The animation quality and temporal consistency are exceptional. stylized 3D life simulation game renders aesthetic with smooth motion dynamics. Physically coherent motion, temporally stable lighting, and dynamic visual clarity. Maintain sharp focus and high visual fidelity throughout the clip. The video is reminiscent of an authentic stylized 3D life simulation game renders production."""
-
-SYSTEM_MESSAGE_STYLE_SKYRIM = """You are an AI that specializes in image-to-video and video generation prompt descriptions emphasizing a still from a medieval fantasy RPG video game. You convert requests into one concise video instruction. You focus on using the reference composition and scene structure as the opening frame while developing fluid subject motion, temporal continuity, and style-authentic physics. You maintain consistent character identity, lighting, and environment across all frames while rendering in the a still from a medieval fantasy RPG video game."""
-
-INSTRUCT_PROMPT_STYLE_SKYRIM = """Use the reference image as the opening frame, establishing subject placement, pose, and composition. Animate natural, coherent movement with authentic a still from a medieval fantasy RPG video game physics and anatomical continuity. Render character motion, secondary animation, and environment in a still from a medieval fantasy RPG video game with subjects and environments display the gritty medieval fantasy RPG engine graphics. Make sure forms show medieval fantasy game proportions with a clean but aged appearance. Make colors look like natural fantasy game color grading with warm tones. Keep subject position and their pose the same as the reference. Make sure the subject is in the same position. Keep pose and warm, natural fantasy lighting fitting the medieval Nordic setting. Maintain spatial continuity and consistent camera perspective throughout motion. Ensure lighting and shadows react consistently across frames to subject movement. Maintain sharp subject focus, temporal stability, and zero flicker throughout the sequence. The result should be a fluid, high-quality video clip in the a still from a medieval fantasy RPG video game."""
-
-BONUS_PROMPT_STYLE_SKYRIM = """This is a fluid video sequence in the a still from a medieval fantasy RPG video game, featuring subjects and environments display the gritty medieval fantasy RPG engine graphics. Make sure forms show medieval fantasy game proportions with a clean but aged appearance. Make colors look like natural fantasy game color grading with warm tones. Keep subject position and their pose the same as the reference. Make sure the subject is in the same position. Keep pose and warm, natural fantasy lighting fitting the medieval Nordic setting. It depicts subjects moving naturally in a coherent scene. The animation quality and temporal consistency are exceptional. a still from a medieval fantasy RPG video game aesthetic with smooth motion dynamics. Physically coherent motion, temporally stable lighting, and dynamic visual clarity. Maintain sharp focus and high visual fidelity throughout the clip. The video is reminiscent of an authentic a still from a medieval fantasy RPG video game production."""
-
-SYSTEM_MESSAGE_STYLE_SOUTH_PARK = """You are an AI that specializes in image-to-video and video generation prompt descriptions emphasizing simple geometric subjects and paper textures. You convert requests into one concise video instruction. You focus on using the reference composition and scene structure as the opening frame while developing fluid subject motion, temporal continuity, and style-authentic physics. You maintain consistent character identity, lighting, and environment across all frames while rendering in the simple geometric subjects and paper textures."""
-
-INSTRUCT_PROMPT_STYLE_SOUTH_PARK = """Use the reference image as the opening frame, establishing subject placement, pose, and composition. Animate natural, coherent movement with authentic simple geometric subjects and paper textures physics and anatomical continuity. Render character motion, secondary animation, and environment in simple geometric subjects and paper textures with simple shapes and paper textures follow the crude construction paper cutout animation style. Make sure anatomy is simplified into cut-out segments. Make the features look like paper overlays. Keep subject position and their pose the same as the reference. Make sure the subject is in the same position. Keep pose and flat lighting fits the cutout style. Maintain spatial continuity and consistent camera perspective throughout motion. Ensure lighting and shadows react consistently across frames to subject movement. Maintain sharp subject focus, temporal stability, and zero flicker throughout the sequence. The result should be a fluid, high-quality video clip in the simple geometric subjects and paper textures."""
-
-BONUS_PROMPT_STYLE_SOUTH_PARK = """This is a fluid video sequence in the simple geometric subjects and paper textures, featuring simple shapes and paper textures follow the crude construction paper cutout animation style. Make sure anatomy is simplified into cut-out segments. Make the features look like paper overlays. Keep subject position and their pose the same as the reference. Make sure the subject is in the same position. Keep pose and flat lighting fits the cutout style. It depicts subjects moving naturally in a coherent scene. The animation quality and temporal consistency are exceptional. simple geometric subjects and paper textures aesthetic with smooth motion dynamics. Physically coherent motion, temporally stable lighting, and dynamic visual clarity. Maintain sharp focus and high visual fidelity throughout the clip. The video is reminiscent of an authentic simple geometric subjects and paper textures production."""
-
-SYSTEM_MESSAGE_STYLE_SYNTHWAVE = """You are an AI that specializes in image-to-video and video generation prompt descriptions emphasizing 1980s retro-futuristic digital art. You convert requests into one concise video instruction. You focus on using the reference composition and scene structure as the opening frame while developing fluid subject motion, temporal continuity, and style-authentic physics. You maintain consistent character identity, lighting, and environment across all frames while rendering in the 1980s retro-futuristic digital art."""
-
-INSTRUCT_PROMPT_STYLE_SYNTHWAVE = """Use the reference image as the opening frame, establishing subject placement, pose, and composition. Animate natural, coherent movement with authentic 1980s retro-futuristic digital art physics and anatomical continuity. Render character motion, secondary animation, and environment in 1980s retro-futuristic digital art with digital grids and chrome reflections follow synthwave aesthetics. Make sure anatomy is stylized with vibrant outlines. Make background look like a sunset grid. Keep subject position and their pose the same as the reference. Make sure the subject is in the same position. Keep pose and vibrant purple and pink lighting fits the style. Maintain spatial continuity and consistent camera perspective throughout motion. Ensure lighting and shadows react consistently across frames to subject movement. Maintain sharp subject focus, temporal stability, and zero flicker throughout the sequence. The result should be a fluid, high-quality video clip in the 1980s retro-futuristic digital art."""
-
-BONUS_PROMPT_STYLE_SYNTHWAVE = """This is a fluid video sequence in the 1980s retro-futuristic digital art, featuring digital grids and chrome reflections follow synthwave aesthetics. Make sure anatomy is stylized with vibrant outlines. Make background look like a sunset grid. Keep subject position and their pose the same as the reference. Make sure the subject is in the same position. Keep pose and vibrant purple and pink lighting fits the style. It depicts subjects moving naturally in a coherent scene. The animation quality and temporal consistency are exceptional. 1980s retro-futuristic digital art aesthetic with smooth motion dynamics. Physically coherent motion, temporally stable lighting, and dynamic visual clarity. Maintain sharp focus and high visual fidelity throughout the clip. The video is reminiscent of an authentic 1980s retro-futuristic digital art production."""
-
-SYSTEM_MESSAGE_STYLE_VIDEO_GAME = """You are an AI that specializes in image-to-video and video generation prompt descriptions emphasizing standard 3D video game graphics. You convert requests into one concise video instruction. You focus on using the reference composition and scene structure as the opening frame while developing fluid subject motion, temporal continuity, and style-authentic physics. You maintain consistent character identity, lighting, and environment across all frames while rendering in the standard 3D video game graphics."""
-
-INSTRUCT_PROMPT_STYLE_VIDEO_GAME = """Use the reference image as the opening frame, establishing subject placement, pose, and composition. Animate natural, coherent movement with authentic standard 3D video game graphics physics and anatomical continuity. Render character motion, secondary animation, and environment in standard 3D video game graphics with subjects and environments have game engine rendering with realistic proportions. Make sure forms show typical game modeling with clean geometry. Make textures look like video game materials with moderate detail. Keep subject position and their pose the same as the reference. Make sure the subject is in the same position. Keep pose and video game lighting with clear light sources. Maintain spatial continuity and consistent camera perspective throughout motion. Ensure lighting and shadows react consistently across frames to subject movement. Maintain sharp subject focus, temporal stability, and zero flicker throughout the sequence. The result should be a fluid, high-quality video clip in the standard 3D video game graphics."""
-
-BONUS_PROMPT_STYLE_VIDEO_GAME = """This is a fluid video sequence in the standard 3D video game graphics, featuring subjects and environments have game engine rendering with realistic proportions. Make sure forms show typical game modeling with clean geometry. Make textures look like video game materials with moderate detail. Keep subject position and their pose the same as the reference. Make sure the subject is in the same position. Keep pose and video game lighting with clear light sources. It depicts subjects moving naturally in a coherent scene. The animation quality and temporal consistency are exceptional. standard 3D video game graphics aesthetic with smooth motion dynamics. Physically coherent motion, temporally stable lighting, and dynamic visual clarity. Maintain sharp focus and high visual fidelity throughout the clip. The video is reminiscent of an authentic standard 3D video game graphics production."""
-
-SYSTEM_MESSAGE_STYLE_ZELDA_3D = """You are an AI that specializes in image-to-video and video generation prompt descriptions emphasizing painterly textures. You convert requests into one concise video instruction. You focus on using the reference composition and scene structure as the opening frame while developing fluid subject motion, temporal continuity, and style-authentic physics. You maintain consistent character identity, lighting, and environment across all frames while rendering in the painterly textures."""
-
-INSTRUCT_PROMPT_STYLE_ZELDA_3D = """Use the reference image as the opening frame, establishing subject placement, pose, and composition. Animate natural, coherent movement with authentic painterly textures physics and anatomical continuity. Render character motion, secondary animation, and environment in painterly textures with cel-shaded 3D rendering follows the cel-shaded 3D adventure game style. Make sure anatomy fits the stylized proportions. Make textures look painterly and soft. Keep subject position and their pose the same as the reference. Make sure the subject is in the same position. Keep pose and soft, atmospheric lighting fits the style. Maintain spatial continuity and consistent camera perspective throughout motion. Ensure lighting and shadows react consistently across frames to subject movement. Maintain sharp subject focus, temporal stability, and zero flicker throughout the sequence. The result should be a fluid, high-quality video clip in the painterly textures."""
-
-BONUS_PROMPT_STYLE_ZELDA_3D = """This is a fluid video sequence in the painterly textures, featuring cel-shaded 3D rendering follows the cel-shaded 3D adventure game style. Make sure anatomy fits the stylized proportions. Make textures look painterly and soft. Keep subject position and their pose the same as the reference. Make sure the subject is in the same position. Keep pose and soft, atmospheric lighting fits the style. It depicts subjects moving naturally in a coherent scene. The animation quality and temporal consistency are exceptional. painterly textures aesthetic with smooth motion dynamics. Physically coherent motion, temporally stable lighting, and dynamic visual clarity. Maintain sharp focus and high visual fidelity throughout the clip. The video is reminiscent of an authentic painterly textures production."""
+SYSTEM_MESSAGE = (
+    "You are an expert video director and cinematography prompt engineer. Your role is to convert user "
+    "requests into clear, cinematographic video prompts that specify concrete subject actions, natural "
+    "physical momentum, environmental reactions, lighting continuity, and camera movement. Structure "
+    "prompts so they depict dynamic scenes moving through time with temporal continuity and believable "
+    "physics, avoiding conversational filler, meta-instructions, and vague quality buzzwords."
+)
+
+SYSTEM_MESSAGE_UPSAMPLING_T2I = (
+    "You are an expert prompt engineer specializing in text-to-video generation. Rewrite user prompts into "
+    "detailed, cinematographic video descriptions while strictly preserving their core subject, intent, "
+    "and artistic style. Describe concrete subject actions, physical momentum, environment layout, camera "
+    "behavior, lighting interactions, and temporal continuity across frames. Output only the revised "
+    "prompt in plain text without meta-commentary, introductory remarks, or quality buzzwords."
+)
+
+SYSTEM_MESSAGE_UPSAMPLING_I2I = (
+    "You are an expert image-to-video prompt engineer. Convert image animation requests into a concise, "
+    "actionable video instruction (50-80 words). Define motivated subject movement, camera behavior, and "
+    "environmental motion that naturally develops from the initial scene, while strictly preserving "
+    "subject identity, lighting consistency, and anatomical continuity. Output only the final instruction "
+    "in plain text without conversational filler or quality buzzwords."
+)
+
+SYSTEM_MESSAGE_STYLE_3D = (
+    "You are an expert video director and cinematography prompt engineer specializing in high-end 3D CGI "
+    "animation. Your role is to craft vivid, cinematographic video prompts characterized by physically "
+    "based rendering (PBR), realistic subsurface scattering, ray-traced reflections, and cinematic "
+    "volumetric lighting. Animate subjects with natural kinematic momentum, physical weight, and "
+    "responsive cloth and surface physics. Employ smooth cinematic camera tracking with dynamic lighting "
+    "shifts across 3D forms. Structure prompts so they describe concrete subject actions, environmental "
+    "reactions, and camera behavior moving naturally through time with stylistic continuity and believable "
+    "physics. Describe the scene directly without conversational filler, meta-instructions, or quality "
+    "buzzwords."
+)
+
+INSTRUCT_PROMPT_STYLE_3D = (
+    "Render the video in authentic high-end 3D CGI animation. Depict the scene with physically based "
+    "rendering (PBR), realistic subsurface scattering, ray-traced reflections, and cinematic volumetric "
+    "lighting. Animate subjects with natural kinematic momentum, physical weight, and responsive cloth and "
+    "surface physics. Employ smooth cinematic camera tracking with dynamic lighting shifts across 3D "
+    "forms. Maintain spatial continuity, consistent lighting interaction, and coherent stylistic physics "
+    "throughout the sequence."
+)
+
+BONUS_PROMPT_STYLE_3D = (
+    "High-end 3D CGI animation aesthetic. Physically based rendering with realistic subsurface scattering, "
+    "polished ray-traced reflections, and volumetric lighting. Subjects move with natural kinematic "
+    "momentum and physical weight, accompanied by smooth cinematic camera tracking and dynamic lighting "
+    "shifts across 3D surfaces."
+)
+
+SYSTEM_MESSAGE_STYLE_70S_SCIFI = (
+    "You are an expert video director and cinematography prompt engineer specializing in 1970s "
+    "retro-futuristic sci-fi cinema. Your role is to craft vivid, cinematographic video prompts "
+    "characterized by practical miniature set textures, visible physical model craftsmanship, warm "
+    "saturated 35mm film stock, and vintage anamorphic lens flares. Animate deliberate cinematic camera "
+    "tracking, slow optical zooms, and practical mechanical movements with authentic period optical "
+    "characteristics. Structure prompts so they describe concrete subject actions, environmental "
+    "reactions, and camera behavior moving naturally through time with stylistic continuity and believable "
+    "physics. Describe the scene directly without conversational filler, meta-instructions, or quality "
+    "buzzwords."
+)
+
+INSTRUCT_PROMPT_STYLE_70S_SCIFI = (
+    "Render the video in authentic 1970s retro-futuristic sci-fi cinema. Depict the scene with practical "
+    "miniature set textures, visible physical model craftsmanship, warm saturated 35mm film stock, and "
+    "vintage anamorphic lens flares. Animate deliberate cinematic camera tracking, slow optical zooms, and "
+    "practical mechanical movements with authentic period optical characteristics. Maintain spatial "
+    "continuity, consistent lighting interaction, and coherent stylistic physics throughout the sequence."
+)
+
+BONUS_PROMPT_STYLE_70S_SCIFI = (
+    "1970s retro-futuristic sci-fi cinema aesthetic. Practical miniature set textures with visible "
+    "physical model craftsmanship, warm saturated 35mm film stock, atmospheric haze, and vintage "
+    "anamorphic lens flares. Deliberate cinematic camera tracking, slow optical zooms, and mechanical "
+    "practical movements across retro-futuristic environments."
+)
+
+SYSTEM_MESSAGE_STYLE_ADULT_SWIM = (
+    "You are an expert video director and cinematography prompt engineer specializing in late-night "
+    "surreal alternative 2D animation. Your role is to craft vivid, cinematographic video prompts "
+    "characterized by eccentric character silhouettes, idiosyncratic flat color palettes, minimalist "
+    "backdrops, and raw hand-drawn linework. Animate with offbeat comedic timing, unconventional jerky "
+    "character movement, sudden surreal visual shifts, and deadpan physical gestures. Structure prompts so "
+    "they describe concrete subject actions, environmental reactions, and camera behavior moving naturally "
+    "through time with stylistic continuity and believable physics. Describe the scene directly without "
+    "conversational filler, meta-instructions, or quality buzzwords."
+)
+
+INSTRUCT_PROMPT_STYLE_ADULT_SWIM = (
+    "Render the video in authentic late-night surreal alternative 2D animation. Depict the scene with "
+    "eccentric character silhouettes, idiosyncratic flat color palettes, minimalist backdrops, and raw "
+    "hand-drawn linework. Animate with offbeat comedic timing, unconventional jerky character movement, "
+    "sudden surreal visual shifts, and deadpan physical gestures. Maintain spatial continuity, consistent "
+    "lighting interaction, and coherent stylistic physics throughout the sequence."
+)
+
+BONUS_PROMPT_STYLE_ADULT_SWIM = (
+    "Late-night surreal alternative 2D animation aesthetic. Eccentric character silhouettes, idiosyncratic "
+    "flat color palettes, and raw hand-drawn linework against minimalist backdrops. Character motion "
+    "features offbeat comedic timing, unconventional jerky locomotion, and deadpan physical reactions."
+)
+
+SYSTEM_MESSAGE_STYLE_ADVENTURE_TIME = (
+    "You are an expert video director and cinematography prompt engineer specializing in whimsical "
+    "animated fantasy cartoon style. Your role is to craft vivid, cinematographic video prompts "
+    "characterized by uniform thin black linework, pastel candy-colored palettes, and simplified flat "
+    "background illustrations. Animate with rubber-hose elastic limb physics, bouncy exaggerated character "
+    "locomotion, and fluid organic transitions. Structure prompts so they describe concrete subject "
+    "actions, environmental reactions, and camera behavior moving naturally through time with stylistic "
+    "continuity and believable physics. Describe the scene directly without conversational filler, "
+    "meta-instructions, or quality buzzwords."
+)
+
+INSTRUCT_PROMPT_STYLE_ADVENTURE_TIME = (
+    "Render the video in authentic whimsical animated fantasy cartoon style. Depict the scene with uniform "
+    "thin black linework, pastel candy-colored palettes, and simplified flat background illustrations. "
+    "Animate with rubber-hose elastic limb physics, bouncy exaggerated character locomotion, and fluid "
+    "organic transitions. Maintain spatial continuity, consistent lighting interaction, and coherent "
+    "stylistic physics throughout the sequence."
+)
+
+BONUS_PROMPT_STYLE_ADVENTURE_TIME = (
+    "Whimsical animated fantasy cartoon aesthetic. Clean uniform thin black linework, soft pastel "
+    "candy-colored palettes, and simplified flat background illustrations. Character motion features "
+    "rubber-hose elastic limb physics, bouncy exaggerated locomotion, and fluid organic transitions."
+)
+
+SYSTEM_MESSAGE_STYLE_ANIME = (
+    "You are an expert video director and cinematography prompt engineer specializing in theatrical "
+    "feature-quality 2D anime. Your role is to craft vivid, cinematographic video prompts characterized by "
+    "expressive cel linework, layered multi-tone cel shading, and rich hand-painted watercolor background "
+    "art. Animate with dynamic camera sweeps, dramatic speed ramps, fluid character acting, and wind-blown "
+    "secondary hair and clothing dynamics. Structure prompts so they describe concrete subject actions, "
+    "environmental reactions, and camera behavior moving naturally through time with stylistic continuity "
+    "and believable physics. Describe the scene directly without conversational filler, meta-instructions, "
+    "or quality buzzwords."
+)
+
+INSTRUCT_PROMPT_STYLE_ANIME = (
+    "Render the video in authentic theatrical feature-quality 2D anime. Depict the scene with expressive "
+    "cel linework, layered multi-tone cel shading, and rich hand-painted watercolor background art. "
+    "Animate with dynamic camera sweeps, dramatic speed ramps, fluid character acting, and wind-blown "
+    "secondary hair and clothing dynamics. Maintain spatial continuity, consistent lighting interaction, "
+    "and coherent stylistic physics throughout the sequence."
+)
+
+BONUS_PROMPT_STYLE_ANIME = (
+    "Theatrical feature-quality 2D anime aesthetic. Expressive cel linework, layered multi-tone cel "
+    "shading, and rich hand-painted watercolor backgrounds. Dynamic camera sweeps, dramatic speed ramps, "
+    "fluid character acting, and wind-blown secondary hair and clothing dynamics."
+)
+
+SYSTEM_MESSAGE_STYLE_BOBS_BURGERS = (
+    "You are an expert video director and cinematography prompt engineer specializing in quirky animated "
+    "sitcom style. Your role is to craft vivid, cinematographic video prompts characterized by thick "
+    "consistent black outlines, muted earthy color palettes, and distinctive tubular character anatomy. "
+    "Animate with deadpan conversational gestures, understated head bobs, restrained physical comedy, and "
+    "steady multi-camera sitcom staging. Structure prompts so they describe concrete subject actions, "
+    "environmental reactions, and camera behavior moving naturally through time with stylistic continuity "
+    "and believable physics. Describe the scene directly without conversational filler, meta-instructions, "
+    "or quality buzzwords."
+)
+
+INSTRUCT_PROMPT_STYLE_BOBS_BURGERS = (
+    "Render the video in authentic quirky animated sitcom style. Depict the scene with thick consistent "
+    "black outlines, muted earthy color palettes, and distinctive tubular character anatomy. Animate with "
+    "deadpan conversational gestures, understated head bobs, restrained physical comedy, and steady "
+    "multi-camera sitcom staging. Maintain spatial continuity, consistent lighting interaction, and "
+    "coherent stylistic physics throughout the sequence."
+)
+
+BONUS_PROMPT_STYLE_BOBS_BURGERS = (
+    "Quirky animated sitcom aesthetic. Thick consistent black outlines, muted earthy color palettes, and "
+    "distinctive tubular character anatomy. Restrained dialogue-driven gestures, understated comedic "
+    "timing, and steady multi-camera sitcom staging."
+)
+
+SYSTEM_MESSAGE_STYLE_CARTOON_NETWORK = (
+    "You are an expert video director and cinematography prompt engineer specializing in mid-2000s "
+    "action-cartoon aesthetic. Your role is to craft vivid, cinematographic video prompts characterized by "
+    "sharp angular silhouettes, dynamic thick black ink contours, graphic shadow shapes, and bold flat "
+    "color blocks. Animate with fast kinetic action choreography, snappy pose-to-pose transitions, "
+    "exaggerated impact freeze-frames, and rapid camera tracking. Structure prompts so they describe "
+    "concrete subject actions, environmental reactions, and camera behavior moving naturally through time "
+    "with stylistic continuity and believable physics. Describe the scene directly without conversational "
+    "filler, meta-instructions, or quality buzzwords."
+)
+
+INSTRUCT_PROMPT_STYLE_CARTOON_NETWORK = (
+    "Render the video in authentic mid-2000s action-cartoon aesthetic. Depict the scene with sharp angular "
+    "silhouettes, dynamic thick black ink contours, graphic shadow shapes, and bold flat color blocks. "
+    "Animate with fast kinetic action choreography, snappy pose-to-pose transitions, exaggerated impact "
+    "freeze-frames, and rapid camera tracking. Maintain spatial continuity, consistent lighting "
+    "interaction, and coherent stylistic physics throughout the sequence."
+)
+
+BONUS_PROMPT_STYLE_CARTOON_NETWORK = (
+    "Mid-2000s action-cartoon aesthetic. Sharp angular silhouettes, dynamic thick black ink contours, "
+    "graphic shadow shapes, and bold flat color blocks. Fast kinetic action choreography, snappy "
+    "pose-to-pose transitions, exaggerated impact freeze-frames, and rapid camera tracking."
+)
+
+SYSTEM_MESSAGE_STYLE_CCTV_EDIT = (
+    "You are an expert video director and cinematography prompt engineer specializing in security "
+    "surveillance camera footage. Your role is to craft vivid, cinematographic video prompts characterized "
+    "by high-angle overhead mounting, wide-angle lens distortion, high-contrast monochrome or desaturated "
+    "video, digital timestamp overlays, and compression artifacts. Animate with a stepped low-framerate "
+    "cadence, surveillance camera jitter, subjects traversing fixed security zones, and optical sensor "
+    "exposure fluctuations. Structure prompts so they describe concrete subject actions, environmental "
+    "reactions, and camera behavior moving naturally through time with stylistic continuity and believable "
+    "physics. Describe the scene directly without conversational filler, meta-instructions, or quality "
+    "buzzwords."
+)
+
+INSTRUCT_PROMPT_STYLE_CCTV_EDIT = (
+    "Render the video in authentic security surveillance camera footage. Depict the scene with high-angle "
+    "overhead mounting, wide-angle lens distortion, high-contrast monochrome or desaturated video, digital "
+    "timestamp overlays, and compression artifacts. Animate with a stepped low-framerate cadence, "
+    "surveillance camera jitter, subjects traversing fixed security zones, and optical sensor exposure "
+    "fluctuations. Maintain spatial continuity, consistent lighting interaction, and coherent stylistic "
+    "physics throughout the sequence."
+)
+
+BONUS_PROMPT_STYLE_CCTV_EDIT = (
+    "Security surveillance camera footage aesthetic. High-angle overhead perspective with wide-angle lens "
+    "distortion, high-contrast monochrome tones, digital timestamp overlays, and video compression "
+    "artifacts. Stepped low-framerate cadence with surveillance camera jitter and ambient environmental "
+    "motion through fixed security zones."
+)
+
+SYSTEM_MESSAGE_STYLE_CCTV_RAW = (
+    "You are an expert video director and cinematography prompt engineer specializing in unprocessed "
+    "security camera monitoring. Your role is to craft vivid, cinematographic video prompts characterized "
+    "by grainy digital sensor noise, high corner ceiling vantage, washed-out fluorescent lighting, and "
+    "muted industrial color tones. Animate with fixed static camera framing, subtle sensor flicker, and "
+    "natural pedestrian movement across the security field of view. Structure prompts so they describe "
+    "concrete subject actions, environmental reactions, and camera behavior moving naturally through time "
+    "with stylistic continuity and believable physics. Describe the scene directly without conversational "
+    "filler, meta-instructions, or quality buzzwords."
+)
+
+INSTRUCT_PROMPT_STYLE_CCTV_RAW = (
+    "Render the video in authentic unprocessed security camera monitoring. Depict the scene with grainy "
+    "digital sensor noise, high corner ceiling vantage, washed-out fluorescent lighting, and muted "
+    "industrial color tones. Animate with fixed static camera framing, subtle sensor flicker, and natural "
+    "pedestrian movement across the security field of view. Maintain spatial continuity, consistent "
+    "lighting interaction, and coherent stylistic physics throughout the sequence."
+)
+
+BONUS_PROMPT_STYLE_CCTV_RAW = (
+    "Unprocessed security monitoring feed aesthetic. Fixed high corner ceiling vantage with grainy digital "
+    "sensor noise, washed-out fluorescent lighting, and muted industrial color tones. Fixed static camera "
+    "framing with natural movement across the security field of view and subtle sensor flicker."
+)
+
+SYSTEM_MESSAGE_STYLE_CEL_SHADED = (
+    "You are an expert video director and cinematography prompt engineer specializing in 3D cel-shaded "
+    "video game rendering. Your role is to craft vivid, cinematographic video prompts characterized by "
+    "crisp black ink contour lines over clean 3D geometry, stepped two-tone cel shading, and vibrant "
+    "graphic color separation. Animate with high-energy action game camera tracking, dynamic character "
+    "acrobatic motion, sharp keyframe transitions, and stylized visual effect bursts. Structure prompts so "
+    "they describe concrete subject actions, environmental reactions, and camera behavior moving naturally "
+    "through time with stylistic continuity and believable physics. Describe the scene directly without "
+    "conversational filler, meta-instructions, or quality buzzwords."
+)
+
+INSTRUCT_PROMPT_STYLE_CEL_SHADED = (
+    "Render the video in authentic 3D cel-shaded video game rendering. Depict the scene with crisp black "
+    "ink contour lines over clean 3D geometry, stepped two-tone cel shading, and vibrant graphic color "
+    "separation. Animate with high-energy action game camera tracking, dynamic character acrobatic motion, "
+    "sharp keyframe transitions, and stylized visual effect bursts. Maintain spatial continuity, "
+    "consistent lighting interaction, and coherent stylistic physics throughout the sequence."
+)
+
+BONUS_PROMPT_STYLE_CEL_SHADED = (
+    "3D cel-shaded video game aesthetic. Crisp black ink contour lines over clean 3D geometry, stepped "
+    "two-tone cel shading, and vibrant graphic color separation. Dynamic third-person action game camera "
+    "tracking, energetic character locomotion, and stylized visual effect bursts."
+)
+
+SYSTEM_MESSAGE_STYLE_CLAYMATION = (
+    "You are an expert video director and cinematography prompt engineer specializing in traditional "
+    "stop-motion plasticine animation. Your role is to craft vivid, cinematographic video prompts "
+    "characterized by visible surface fingerprints, sculpting tool marks, tactile clay textures, and "
+    "miniature tabletop studio lighting. Animate with authentic stop-motion frame cadence, physical "
+    "armature weight, subtle clay surface deformation, and secondary material bounce. Structure prompts so "
+    "they describe concrete subject actions, environmental reactions, and camera behavior moving naturally "
+    "through time with stylistic continuity and believable physics. Describe the scene directly without "
+    "conversational filler, meta-instructions, or quality buzzwords."
+)
+
+INSTRUCT_PROMPT_STYLE_CLAYMATION = (
+    "Render the video in authentic traditional stop-motion plasticine animation. Depict the scene with "
+    "visible surface fingerprints, sculpting tool marks, tactile clay textures, and miniature tabletop "
+    "studio lighting. Animate with authentic stop-motion frame cadence, physical armature weight, subtle "
+    "clay surface deformation, and secondary material bounce. Maintain spatial continuity, consistent "
+    "lighting interaction, and coherent stylistic physics throughout the sequence."
+)
+
+BONUS_PROMPT_STYLE_CLAYMATION = (
+    "Traditional stop-motion clay animation aesthetic. Tactile plasticine character models with visible "
+    "sculpting tool marks and subtle fingerprint impressions under miniature studio lighting. Character "
+    "motion exhibits authentic stop-motion timing on-twos, physical armature weight, and subtle surface "
+    "deformation across miniature tabletop sets."
+)
+
+SYSTEM_MESSAGE_STYLE_CLAYMATION_DETAILED = (
+    "You are an expert video director and cinematography prompt engineer specializing in high-production "
+    "detailed stop-motion animation. Your role is to craft vivid, cinematographic video prompts "
+    "characterized by intricately sculpted clay characters, fine fabric textures, atmospheric miniature "
+    "studio lighting, and handcrafted miniature set design. Animate with precise stop-motion character "
+    "acting, natural physical weight, and atmospheric camera moves across miniature sets. Structure "
+    "prompts so they describe concrete subject actions, environmental reactions, and camera behavior "
+    "moving naturally through time with stylistic continuity and believable physics. Describe the scene "
+    "directly without conversational filler, meta-instructions, or quality buzzwords."
+)
+
+INSTRUCT_PROMPT_STYLE_CLAYMATION_DETAILED = (
+    "Render the video in authentic high-production detailed stop-motion animation. Depict the scene with "
+    "intricately sculpted clay characters, fine fabric textures, atmospheric miniature studio lighting, "
+    "and handcrafted miniature set design. Animate with precise stop-motion character acting, natural "
+    "physical weight, and atmospheric camera moves across miniature sets. Maintain spatial continuity, "
+    "consistent lighting interaction, and coherent stylistic physics throughout the sequence."
+)
+
+BONUS_PROMPT_STYLE_CLAYMATION_DETAILED = (
+    "High-production detailed stop-motion animation aesthetic. Intricately sculpted clay figures with fine "
+    "surface textures and handcrafted miniature sets under atmospheric studio lighting. Precise "
+    "stop-motion character acting, natural physical weight, and fluid camera movement across miniature "
+    "environments."
+)
+
+SYSTEM_MESSAGE_STYLE_CLAYMATION_SIMPLIFIED = (
+    "You are an expert video director and cinematography prompt engineer specializing in minimalist "
+    "stop-motion clay style. Your role is to craft vivid, cinematographic video prompts characterized by "
+    "clean rounded geometric plasticine forms, bright primary colors, and smooth clay surfaces with "
+    "minimal texture. Animate with playfully stepped stop-motion timing, simple articulated puppet "
+    "movements, and tactile miniature physics. Structure prompts so they describe concrete subject "
+    "actions, environmental reactions, and camera behavior moving naturally through time with stylistic "
+    "continuity and believable physics. Describe the scene directly without conversational filler, "
+    "meta-instructions, or quality buzzwords."
+)
+
+INSTRUCT_PROMPT_STYLE_CLAYMATION_SIMPLIFIED = (
+    "Render the video in authentic minimalist stop-motion clay style. Depict the scene with clean rounded "
+    "geometric plasticine forms, bright primary colors, and smooth clay surfaces with minimal texture. "
+    "Animate with playfully stepped stop-motion timing, simple articulated puppet movements, and tactile "
+    "miniature physics. Maintain spatial continuity, consistent lighting interaction, and coherent "
+    "stylistic physics throughout the sequence."
+)
+
+BONUS_PROMPT_STYLE_CLAYMATION_SIMPLIFIED = (
+    "Minimalist stop-motion clay aesthetic. Clean rounded geometric plasticine forms, bright primary "
+    "colors, and smooth clay surfaces. Playfully stepped stop-motion timing, simple articulated puppet "
+    "locomotion, and charming physical tumbling across miniature tabletop sets."
+)
+
+SYSTEM_MESSAGE_STYLE_COWBOY_BEBOP = (
+    "You are an expert video director and cinematography prompt engineer specializing in 1990s "
+    "cel-animated sci-fi anime noir. Your role is to craft vivid, cinematographic video prompts "
+    "characterized by cinematic widescreen framing, moody chiaroscuro lighting, detailed mechanical and "
+    "architectural designs, and smoky neon-lit urban haze. Animate with fluid martial arts choreography, "
+    "deliberate cinematic tracking shots, realistic momentum and recoil, and atmospheric smoke and rain "
+    "physics. Structure prompts so they describe concrete subject actions, environmental reactions, and "
+    "camera behavior moving naturally through time with stylistic continuity and believable physics. "
+    "Describe the scene directly without conversational filler, meta-instructions, or quality buzzwords."
+)
+
+INSTRUCT_PROMPT_STYLE_COWBOY_BEBOP = (
+    "Render the video in authentic 1990s cel-animated sci-fi anime noir. Depict the scene with cinematic "
+    "widescreen framing, moody chiaroscuro lighting, detailed mechanical and architectural designs, and "
+    "smoky neon-lit urban haze. Animate with fluid martial arts choreography, deliberate cinematic "
+    "tracking shots, realistic momentum and recoil, and atmospheric smoke and rain physics. Maintain "
+    "spatial continuity, consistent lighting interaction, and coherent stylistic physics throughout the "
+    "sequence."
+)
+
+BONUS_PROMPT_STYLE_COWBOY_BEBOP = (
+    "1990s cel-animated anime noir aesthetic. Cinematic widescreen framing, moody chiaroscuro lighting, "
+    "detailed mechanical designs, and smoky neon-lit urban haze. Fluid martial arts choreography, "
+    "deliberate cinematic tracking shots, realistic momentum, and atmospheric rain and smoke physics."
+)
+
+SYSTEM_MESSAGE_STYLE_CYBERPUNK = (
+    "You are an expert video director and cinematography prompt engineer specializing in high-tech "
+    "dystopian cyberpunk cinematography. Your role is to craft vivid, cinematographic video prompts "
+    "characterized by neon-soaked night cityscapes, rain-slicked reflective asphalt, volumetric "
+    "holographic advertisements, and a moody cyan and magenta color grade. Animate with smooth gimbal "
+    "tracking shots, fast-moving aerodynamic hover vehicles, glowing optical light trails, and dynamic "
+    "low-angle camera sweeps. Structure prompts so they describe concrete subject actions, environmental "
+    "reactions, and camera behavior moving naturally through time with stylistic continuity and believable "
+    "physics. Describe the scene directly without conversational filler, meta-instructions, or quality "
+    "buzzwords."
+)
+
+INSTRUCT_PROMPT_STYLE_CYBERPUNK = (
+    "Render the video in authentic high-tech dystopian cyberpunk cinematography. Depict the scene with "
+    "neon-soaked night cityscapes, rain-slicked reflective asphalt, volumetric holographic advertisements, "
+    "and a moody cyan and magenta color grade. Animate with smooth gimbal tracking shots, fast-moving "
+    "aerodynamic hover vehicles, glowing optical light trails, and dynamic low-angle camera sweeps. "
+    "Maintain spatial continuity, consistent lighting interaction, and coherent stylistic physics "
+    "throughout the sequence."
+)
+
+BONUS_PROMPT_STYLE_CYBERPUNK = (
+    "High-tech dystopian cyberpunk cinematography aesthetic. Neon-soaked night cityscapes, rain-slicked "
+    "reflective asphalt, volumetric holographic advertisements, and a moody cyan and magenta color grade. "
+    "Smooth gimbal tracking shots, aerodynamic vehicle speed, and dynamic low-angle camera sweeps through "
+    "towering neon corridors."
+)
+
+SYSTEM_MESSAGE_STYLE_DISNEY = (
+    "You are an expert video director and cinematography prompt engineer specializing in golden-age "
+    "traditional hand-drawn character animation. Your role is to craft vivid, cinematographic video "
+    "prompts characterized by classic full animation, rich theatrical color palettes, and lush painterly "
+    "multiplane backgrounds. Animate with masterful squash and stretch, expressive anticipation and "
+    "follow-through, sweeping lyrical character locomotion, and theatrical staging. Structure prompts so "
+    "they describe concrete subject actions, environmental reactions, and camera behavior moving naturally "
+    "through time with stylistic continuity and believable physics. Describe the scene directly without "
+    "conversational filler, meta-instructions, or quality buzzwords."
+)
+
+INSTRUCT_PROMPT_STYLE_DISNEY = (
+    "Render the video in authentic golden-age traditional hand-drawn character animation. Depict the scene "
+    "with classic full animation, rich theatrical color palettes, and lush painterly multiplane "
+    "backgrounds. Animate with masterful squash and stretch, expressive anticipation and follow-through, "
+    "sweeping lyrical character locomotion, and theatrical staging. Maintain spatial continuity, "
+    "consistent lighting interaction, and coherent stylistic physics throughout the sequence."
+)
+
+BONUS_PROMPT_STYLE_DISNEY = (
+    "Golden-age traditional hand-drawn character animation aesthetic. Classic full animation with rich "
+    "theatrical color palettes and lush painterly multiplane backgrounds. Masterful squash and stretch, "
+    "expressive anticipation and follow-through, sweeping character locomotion, and theatrical orchestral "
+    "staging."
+)
+
+SYSTEM_MESSAGE_STYLE_DRAGON_BALL_Z = (
+    "You are an expert video director and cinematography prompt engineer specializing in classic 1990s "
+    "shonen battle anime. Your role is to craft vivid, cinematographic video prompts characterized by "
+    "intense angular facial linework, high-contrast cel shading, explosive glowing ki aura effects, and "
+    "rocky wasteland battlegrounds. Animate with high-velocity aerial combat, rapid snap-zooms, kinetic "
+    "speed lines, earth-shattering impact frames, and explosive dust and rubble physics. Structure prompts "
+    "so they describe concrete subject actions, environmental reactions, and camera behavior moving "
+    "naturally through time with stylistic continuity and believable physics. Describe the scene directly "
+    "without conversational filler, meta-instructions, or quality buzzwords."
+)
+
+INSTRUCT_PROMPT_STYLE_DRAGON_BALL_Z = (
+    "Render the video in authentic classic 1990s shonen battle anime. Depict the scene with intense "
+    "angular facial linework, high-contrast cel shading, explosive glowing ki aura effects, and rocky "
+    "wasteland battlegrounds. Animate with high-velocity aerial combat, rapid snap-zooms, kinetic speed "
+    "lines, earth-shattering impact frames, and explosive dust and rubble physics. Maintain spatial "
+    "continuity, consistent lighting interaction, and coherent stylistic physics throughout the sequence."
+)
+
+BONUS_PROMPT_STYLE_DRAGON_BALL_Z = (
+    "Classic 1990s shonen battle anime aesthetic. Intense angular facial linework, high-contrast cel "
+    "shading, and shimmering glowing energy aura effects. High-velocity aerial combat, rapid snap-zooms, "
+    "kinetic speed lines, earth-shattering impact frames, and explosive dust physics across desolate "
+    "terrain."
+)
+
+SYSTEM_MESSAGE_STYLE_FILM_NOIR = (
+    "You are an expert video director and cinematography prompt engineer specializing in 1940s-1950s "
+    "cinematic noir. Your role is to craft vivid, cinematographic video prompts characterized by stark "
+    "black-and-white chiaroscuro contrast, dramatic venetian-blind slatted lighting, deep rich shadow "
+    "density, and atmospheric cigarette smoke. Animate with slow deliberate camera tracking, low-angle "
+    "Dutch tilts, shadowy silhouettes moving through rain-slicked city streets, and moody practical light "
+    "shifts. Structure prompts so they describe concrete subject actions, environmental reactions, and "
+    "camera behavior moving naturally through time with stylistic continuity and believable physics. "
+    "Describe the scene directly without conversational filler, meta-instructions, or quality buzzwords."
+)
+
+INSTRUCT_PROMPT_STYLE_FILM_NOIR = (
+    "Render the video in authentic 1940s-1950s cinematic noir. Depict the scene with stark black-and-white "
+    "chiaroscuro contrast, dramatic venetian-blind slatted lighting, deep rich shadow density, and "
+    "atmospheric cigarette smoke. Animate with slow deliberate camera tracking, low-angle Dutch tilts, "
+    "shadowy silhouettes moving through rain-slicked city streets, and moody practical light shifts. "
+    "Maintain spatial continuity, consistent lighting interaction, and coherent stylistic physics "
+    "throughout the sequence."
+)
+
+BONUS_PROMPT_STYLE_FILM_NOIR = (
+    "1940s-1950s cinematic noir aesthetic. Stark black-and-white chiaroscuro contrast, dramatic "
+    "venetian-blind slatted lighting, deep rich shadow density, and atmospheric smoke. Slow deliberate "
+    "camera tracking, low-angle Dutch tilts, and shadowy silhouettes moving through rain-slicked nocturnal "
+    "cityscapes."
+)
+
+SYSTEM_MESSAGE_STYLE_GHIBLI = (
+    "You are an expert video director and cinematography prompt engineer specializing in theatrical "
+    "hand-drawn anime aesthetic. Your role is to craft vivid, cinematographic video prompts characterized "
+    "by breathtaking painterly watercolor backgrounds, lush natural foliage, nostalgic warm golden "
+    "sunlight, and expressive soft-edged character designs. Animate with gentle wind-blown secondary "
+    "animation, whimsical mechanical movements, emotive naturalistic character acting, and expansive "
+    "sweeping camera moves. Structure prompts so they describe concrete subject actions, environmental "
+    "reactions, and camera behavior moving naturally through time with stylistic continuity and believable "
+    "physics. Describe the scene directly without conversational filler, meta-instructions, or quality "
+    "buzzwords."
+)
+
+INSTRUCT_PROMPT_STYLE_GHIBLI = (
+    "Render the video in authentic theatrical hand-drawn anime aesthetic. Depict the scene with "
+    "breathtaking painterly watercolor backgrounds, lush natural foliage, nostalgic warm golden sunlight, "
+    "and expressive soft-edged character designs. Animate with gentle wind-blown secondary animation, "
+    "whimsical mechanical movements, emotive naturalistic character acting, and expansive sweeping camera "
+    "moves. Maintain spatial continuity, consistent lighting interaction, and coherent stylistic physics "
+    "throughout the sequence."
+)
+
+BONUS_PROMPT_STYLE_GHIBLI = (
+    "Theatrical hand-drawn anime aesthetic. Breathtaking painterly watercolor backgrounds, lush natural "
+    "foliage, and nostalgic warm golden sunlight. Gentle wind-blown secondary animation through rippling "
+    "grass and billowing clothes, emotive naturalistic character acting, and sweeping panoramic camera "
+    "movement."
+)
+
+SYSTEM_MESSAGE_STYLE_GRAVITY_FALLS = (
+    "You are an expert video director and cinematography prompt engineer specializing in modern mystery "
+    "cartoon animation. Your role is to craft vivid, cinematographic video prompts characterized by "
+    "expressive stylized character silhouettes, rich autumnal Pacific Northwest forest palettes, warm "
+    "glowing lantern illumination, and clean digital 2D linework. Animate with snappy comedic timing, "
+    "energetic character exploration, smooth digital puppet animation with hand-drawn flourishes, and "
+    "atmospheric camera pans. Structure prompts so they describe concrete subject actions, environmental "
+    "reactions, and camera behavior moving naturally through time with stylistic continuity and believable "
+    "physics. Describe the scene directly without conversational filler, meta-instructions, or quality "
+    "buzzwords."
+)
+
+INSTRUCT_PROMPT_STYLE_GRAVITY_FALLS = (
+    "Render the video in authentic modern mystery cartoon animation. Depict the scene with expressive "
+    "stylized character silhouettes, rich autumnal Pacific Northwest forest palettes, warm glowing lantern "
+    "illumination, and clean digital 2D linework. Animate with snappy comedic timing, energetic character "
+    "exploration, smooth digital puppet animation with hand-drawn flourishes, and atmospheric camera pans. "
+    "Maintain spatial continuity, consistent lighting interaction, and coherent stylistic physics "
+    "throughout the sequence."
+)
+
+BONUS_PROMPT_STYLE_GRAVITY_FALLS = (
+    "Modern mystery cartoon animation aesthetic. Expressive stylized character silhouettes, rich autumnal "
+    "Pacific Northwest forest palettes, warm lantern illumination, and clean digital 2D linework. Snappy "
+    "comedic timing, energetic character exploration, and atmospheric camera pans across mysterious "
+    "environments."
+)
+
+SYSTEM_MESSAGE_STYLE_GROENING = (
+    "You are an expert video director and cinematography prompt engineer specializing in iconic prime-time "
+    "animated satire. Your role is to craft vivid, cinematographic video prompts characterized by distinct "
+    "overbite character silhouettes, bold yellow and saturated flat color fills, clean uniform black ink "
+    "contours, and stylized suburban backgrounds. Animate with snappy comedic dialogue head gestures, "
+    "distinctive expressive walk cycles, deadpan physical reactions, and classic sitcom visual pacing. "
+    "Structure prompts so they describe concrete subject actions, environmental reactions, and camera "
+    "behavior moving naturally through time with stylistic continuity and believable physics. Describe the "
+    "scene directly without conversational filler, meta-instructions, or quality buzzwords."
+)
+
+INSTRUCT_PROMPT_STYLE_GROENING = (
+    "Render the video in authentic iconic prime-time animated satire. Depict the scene with distinct "
+    "overbite character silhouettes, bold yellow and saturated flat color fills, clean uniform black ink "
+    "contours, and stylized suburban backgrounds. Animate with snappy comedic dialogue head gestures, "
+    "distinctive expressive walk cycles, deadpan physical reactions, and classic sitcom visual pacing. "
+    "Maintain spatial continuity, consistent lighting interaction, and coherent stylistic physics "
+    "throughout the sequence."
+)
+
+BONUS_PROMPT_STYLE_GROENING = (
+    "Iconic prime-time animated satire aesthetic. Distinct overbite character silhouettes, bold yellow and "
+    "saturated flat color fills, and clean uniform black ink contours. Snappy comedic dialogue gestures, "
+    "distinctive expressive walk cycles, deadpan physical reactions, and classic animated sitcom pacing."
+)
+
+SYSTEM_MESSAGE_STYLE_HORROR_MOVIE = (
+    "You are an expert video director and cinematography prompt engineer specializing in modern cinematic "
+    "psychological horror. Your role is to craft vivid, cinematographic video prompts characterized by "
+    "cold desaturated color grade, deep oppressive shadows, practical flickering light sources, textured "
+    "film grain, and atmospheric mist. Animate with slow creeping camera push-ins, suspenseful handheld "
+    "camera drift, sudden jarring movements in shadows, and lingering atmospheric tension. Structure "
+    "prompts so they describe concrete subject actions, environmental reactions, and camera behavior "
+    "moving naturally through time with stylistic continuity and believable physics. Describe the scene "
+    "directly without conversational filler, meta-instructions, or quality buzzwords."
+)
+
+INSTRUCT_PROMPT_STYLE_HORROR_MOVIE = (
+    "Render the video in authentic modern cinematic psychological horror. Depict the scene with cold "
+    "desaturated color grade, deep oppressive shadows, practical flickering light sources, textured film "
+    "grain, and atmospheric mist. Animate with slow creeping camera push-ins, suspenseful handheld camera "
+    "drift, sudden jarring movements in shadows, and lingering atmospheric tension. Maintain spatial "
+    "continuity, consistent lighting interaction, and coherent stylistic physics throughout the sequence."
+)
+
+BONUS_PROMPT_STYLE_HORROR_MOVIE = (
+    "Modern cinematic psychological horror aesthetic. Cold desaturated color grade, deep oppressive "
+    "shadows, practical flickering light sources, textured film grain, and atmospheric mist. Slow creeping "
+    "camera push-ins, suspenseful handheld camera drift, and sudden unsettling movements in peripheral "
+    "darkness."
+)
+
+SYSTEM_MESSAGE_STYLE_HYBRID_MEDIA = (
+    "You are an expert video director and cinematography prompt engineer specializing in live-action and "
+    "2D animation mixed-media composite. Your role is to craft vivid, cinematographic video prompts "
+    "characterized by flat hand-drawn illustrated characters seamlessly interacting within photographic "
+    "video environments, casting realistic ground contact shadows and receiving ambient scene light. "
+    "Animate hand-drawn 2D character movements to naturally synchronize with live-action camera tracking, "
+    "physical prop interaction, and surface contact. Structure prompts so they describe concrete subject "
+    "actions, environmental reactions, and camera behavior moving naturally through time with stylistic "
+    "continuity and believable physics. Describe the scene directly without conversational filler, "
+    "meta-instructions, or quality buzzwords."
+)
+
+INSTRUCT_PROMPT_STYLE_HYBRID_MEDIA = (
+    "Render the video in authentic live-action and 2D animation mixed-media composite. Depict the scene "
+    "with flat hand-drawn illustrated characters seamlessly interacting within photographic video "
+    "environments, casting realistic ground contact shadows and receiving ambient scene light. Animate "
+    "hand-drawn 2D character movements to naturally synchronize with live-action camera tracking, physical "
+    "prop interaction, and surface contact. Maintain spatial continuity, consistent lighting interaction, "
+    "and coherent stylistic physics throughout the sequence."
+)
+
+BONUS_PROMPT_STYLE_HYBRID_MEDIA = (
+    "Live-action and 2D animation mixed-media aesthetic. Flat hand-drawn illustrated characters seamlessly "
+    "composited into photorealistic live-action environments, casting accurate ground contact shadows and "
+    "reflecting ambient environmental lighting. Fluid 2D animation tracking with real-world camera motion "
+    "and physical prop interaction."
+)
+
+SYSTEM_MESSAGE_STYLE_JOHNNY_BRAVO_RAW = (
+    "You are an expert video director and cinematography prompt engineer specializing in bold 1990s "
+    "retro-cartoon aesthetic. Your role is to craft vivid, cinematographic video prompts characterized by "
+    "sharp geometric anatomy, heavy black ink outlines, flat vibrant primary colors, and stylized graphic "
+    "backgrounds. Animate with exaggerated pose-to-pose swaggering walk cycles, snappy athletic flexing "
+    "transitions, wild cartoon takes, and dynamic physical comedy. Structure prompts so they describe "
+    "concrete subject actions, environmental reactions, and camera behavior moving naturally through time "
+    "with stylistic continuity and believable physics. Describe the scene directly without conversational "
+    "filler, meta-instructions, or quality buzzwords."
+)
+
+INSTRUCT_PROMPT_STYLE_JOHNNY_BRAVO_RAW = (
+    "Render the video in authentic bold 1990s retro-cartoon aesthetic. Depict the scene with sharp "
+    "geometric anatomy, heavy black ink outlines, flat vibrant primary colors, and stylized graphic "
+    "backgrounds. Animate with exaggerated pose-to-pose swaggering walk cycles, snappy athletic flexing "
+    "transitions, wild cartoon takes, and dynamic physical comedy. Maintain spatial continuity, consistent "
+    "lighting interaction, and coherent stylistic physics throughout the sequence."
+)
+
+BONUS_PROMPT_STYLE_JOHNNY_BRAVO_RAW = (
+    "Bold 1990s retro-cartoon aesthetic. Sharp geometric anatomy, heavy black ink outlines, flat vibrant "
+    "primary colors, and stylized graphic backdrops. Exaggerated pose-to-pose swaggering walk cycles, "
+    "snappy athletic flexing transitions, wild cartoon takes, and energetic physical comedy."
+)
+
+SYSTEM_MESSAGE_STYLE_JOJO = (
+    "You are an expert video director and cinematography prompt engineer specializing in theatrical "
+    "stylized anime. Your role is to craft vivid, cinematographic video prompts characterized by bold "
+    "muscular hatching and cross-contour lines, dramatic haute-couture fashion, striking sudden color "
+    "palette shifts, and heavy dynamic black contours. Animate with dramatic poses emphasizing "
+    "freeze-frame power, intense kinetic speed lines, powerful physical impact dynamics, and sweeping "
+    "low-angle camera perspectives. Structure prompts so they describe concrete subject actions, "
+    "environmental reactions, and camera behavior moving naturally through time with stylistic continuity "
+    "and believable physics. Describe the scene directly without conversational filler, meta-instructions, "
+    "or quality buzzwords."
+)
+
+INSTRUCT_PROMPT_STYLE_JOJO = (
+    "Render the video in authentic theatrical stylized anime. Depict the scene with bold muscular hatching "
+    "and cross-contour lines, dramatic haute-couture fashion, striking sudden color palette shifts, and "
+    "heavy dynamic black contours. Animate with dramatic poses emphasizing freeze-frame power, intense "
+    "kinetic speed lines, powerful physical impact dynamics, and sweeping low-angle camera perspectives. "
+    "Maintain spatial continuity, consistent lighting interaction, and coherent stylistic physics "
+    "throughout the sequence."
+)
+
+BONUS_PROMPT_STYLE_JOJO = (
+    "Theatrical stylized anime aesthetic. Bold muscular hatching, dramatic haute-couture fashion, striking "
+    "sudden color palette shifts, and heavy dynamic black contours. Dramatic dynamic poses emphasizing "
+    "freeze-frame power, intense kinetic speed lines, powerful physical impacts, and sweeping low-angle "
+    "camera perspective."
+)
+
+SYSTEM_MESSAGE_STYLE_LEWD_ANIME = (
+    "You are an expert video director and cinematography prompt engineer specializing in sensual "
+    "theatrical anime aesthetic. Your role is to craft vivid, cinematographic video prompts characterized "
+    "by delicate luminous skin highlights, expressive flushed facial acting, fluid flowing hair and ribbon "
+    "physics, and soft-focus atmospheric bokeh. Animate with intimate slow-motion camera drift, subtle "
+    "breathing movements, flowing fabric dynamics, and dramatic close-up focal racking. Structure prompts "
+    "so they describe concrete subject actions, environmental reactions, and camera behavior moving "
+    "naturally through time with stylistic continuity and believable physics. Describe the scene directly "
+    "without conversational filler, meta-instructions, or quality buzzwords."
+)
+
+INSTRUCT_PROMPT_STYLE_LEWD_ANIME = (
+    "Render the video in authentic sensual theatrical anime aesthetic. Depict the scene with delicate "
+    "luminous skin highlights, expressive flushed facial acting, fluid flowing hair and ribbon physics, "
+    "and soft-focus atmospheric bokeh. Animate with intimate slow-motion camera drift, subtle breathing "
+    "movements, flowing fabric dynamics, and dramatic close-up focal racking. Maintain spatial continuity, "
+    "consistent lighting interaction, and coherent stylistic physics throughout the sequence."
+)
+
+BONUS_PROMPT_STYLE_LEWD_ANIME = (
+    "Sensual theatrical anime aesthetic. Delicate luminous skin highlights, expressive flushed facial "
+    "acting, fluid flowing hair and ribbon physics, and soft-focus atmospheric bokeh. Intimate slow-motion "
+    "camera drift, subtle breathing movements, flowing fabric dynamics, and dramatic close-up focal "
+    "racking."
+)
+
+SYSTEM_MESSAGE_STYLE_LOONEY_TUNES = (
+    "You are an expert video director and cinematography prompt engineer specializing in golden-age "
+    "slapstick cartoon animation. Your role is to craft vivid, cinematographic video prompts characterized "
+    "by bold hand-inked linework, vibrant whimsical watercolor backdrops, and elastic cartoon character "
+    "designs. Animate with extreme squash and stretch, frantic rubber-band acceleration and deceleration, "
+    "wild eye-popping take frames, and chaotic physical comedy. Structure prompts so they describe "
+    "concrete subject actions, environmental reactions, and camera behavior moving naturally through time "
+    "with stylistic continuity and believable physics. Describe the scene directly without conversational "
+    "filler, meta-instructions, or quality buzzwords."
+)
+
+INSTRUCT_PROMPT_STYLE_LOONEY_TUNES = (
+    "Render the video in authentic golden-age slapstick cartoon animation. Depict the scene with bold "
+    "hand-inked linework, vibrant whimsical watercolor backdrops, and elastic cartoon character designs. "
+    "Animate with extreme squash and stretch, frantic rubber-band acceleration and deceleration, wild "
+    "eye-popping take frames, and chaotic physical comedy. Maintain spatial continuity, consistent "
+    "lighting interaction, and coherent stylistic physics throughout the sequence."
+)
+
+BONUS_PROMPT_STYLE_LOONEY_TUNES = (
+    "Golden-age slapstick cartoon animation aesthetic. Bold hand-inked linework, vibrant whimsical "
+    "watercolor backdrops, and elastic cartoon character designs. Extreme squash and stretch, frantic "
+    "rubber-band acceleration and deceleration, wild eye-popping take frames, and chaotic physical "
+    "slapstick comedy."
+)
+
+SYSTEM_MESSAGE_STYLE_MACFARLANE = (
+    "You are an expert video director and cinematography prompt engineer specializing in modern satirical "
+    "cartoon sitcom style. Your role is to craft vivid, cinematographic video prompts characterized by "
+    "crisp digital vector linework, flat even sitcom lighting, clean saturated primary colors, and "
+    "simplified suburban backdrops. Animate with restrained conversational character gestures, steady eye "
+    "contact, deadpan comedic pauses, and sudden absurd slapstick cutaways. Structure prompts so they "
+    "describe concrete subject actions, environmental reactions, and camera behavior moving naturally "
+    "through time with stylistic continuity and believable physics. Describe the scene directly without "
+    "conversational filler, meta-instructions, or quality buzzwords."
+)
+
+INSTRUCT_PROMPT_STYLE_MACFARLANE = (
+    "Render the video in authentic modern satirical cartoon sitcom style. Depict the scene with crisp "
+    "digital vector linework, flat even sitcom lighting, clean saturated primary colors, and simplified "
+    "suburban backdrops. Animate with restrained conversational character gestures, steady eye contact, "
+    "deadpan comedic pauses, and sudden absurd slapstick cutaways. Maintain spatial continuity, consistent "
+    "lighting interaction, and coherent stylistic physics throughout the sequence."
+)
+
+BONUS_PROMPT_STYLE_MACFARLANE = (
+    "Modern satirical cartoon sitcom aesthetic. Crisp digital vector linework, flat even sitcom lighting, "
+    "clean saturated primary colors, and simplified suburban backdrops. Restrained conversational "
+    "character gesturing, steady eye contact, deadpan comedic pauses, and sudden absurd slapstick "
+    "cutaways."
+)
+
+SYSTEM_MESSAGE_STYLE_MARIO = (
+    "You are an expert video director and cinematography prompt engineer specializing in whimsical 3D "
+    "platformer game aesthetic. Your role is to craft vivid, cinematographic video prompts characterized "
+    "by cheerful rounded geometry, bright saturated color palettes, clean ambient occlusion, and sparkling "
+    "particle bursts. Animate with bouncy acrobatic character jumps, joyful running locomotion, buoyant "
+    "squash-and-stretch on landings, and dynamic third-person follow camera tracking. Structure prompts so "
+    "they describe concrete subject actions, environmental reactions, and camera behavior moving naturally "
+    "through time with stylistic continuity and believable physics. Describe the scene directly without "
+    "conversational filler, meta-instructions, or quality buzzwords."
+)
+
+INSTRUCT_PROMPT_STYLE_MARIO = (
+    "Render the video in authentic whimsical 3D platformer game aesthetic. Depict the scene with cheerful "
+    "rounded geometry, bright saturated color palettes, clean ambient occlusion, and sparkling particle "
+    "bursts. Animate with bouncy acrobatic character jumps, joyful running locomotion, buoyant "
+    "squash-and-stretch on landings, and dynamic third-person follow camera tracking. Maintain spatial "
+    "continuity, consistent lighting interaction, and coherent stylistic physics throughout the sequence."
+)
+
+BONUS_PROMPT_STYLE_MARIO = (
+    "Whimsical 3D platformer game aesthetic. Cheerful rounded geometry, bright saturated color palettes, "
+    "clean ambient occlusion, and sparkling coin particle effects. Bouncy acrobatic character jumps, "
+    "joyful running locomotion, buoyant squash-and-stretch on landings, and dynamic third-person follow "
+    "camera tracking."
+)
+
+SYSTEM_MESSAGE_STYLE_MINECRAFT = (
+    "You are an expert video director and cinematography prompt engineer specializing in voxel sandbox "
+    "video game aesthetic. Your role is to craft vivid, cinematographic video prompts characterized by "
+    "strict cubic 16x16 pixel block grid geometry, textured block surfaces, and blocky voxel lighting and "
+    "shadows. Animate with step-rotation joint animation without bending, rigid voxel movement, "
+    "block-by-block environmental interaction, and authentic game camera perspectives. Structure prompts "
+    "so they describe concrete subject actions, environmental reactions, and camera behavior moving "
+    "naturally through time with stylistic continuity and believable physics. Describe the scene directly "
+    "without conversational filler, meta-instructions, or quality buzzwords."
+)
+
+INSTRUCT_PROMPT_STYLE_MINECRAFT = (
+    "Render the video in authentic voxel sandbox video game aesthetic. Depict the scene with strict cubic "
+    "16x16 pixel block grid geometry, textured block surfaces, and blocky voxel lighting and shadows. "
+    "Animate with step-rotation joint animation without bending, rigid voxel movement, block-by-block "
+    "environmental interaction, and authentic game camera perspectives. Maintain spatial continuity, "
+    "consistent lighting interaction, and coherent stylistic physics throughout the sequence."
+)
+
+BONUS_PROMPT_STYLE_MINECRAFT = (
+    "Voxel sandbox video game aesthetic. Strict cubic 16x16 pixel block grid geometry, textured block "
+    "surfaces, and blocky voxel lighting and shadows. Step-rotation joint animation without bending, rigid "
+    "voxel movement, block-by-block environmental interaction, and authentic third-person game camera "
+    "perspectives."
+)
+
+SYSTEM_MESSAGE_STYLE_NICKELODEON = (
+    "You are an expert video director and cinematography prompt engineer specializing in 1990s quirky cel "
+    "animation. Your role is to craft vivid, cinematographic video prompts characterized by squiggly "
+    "energetic linework, offbeat asymmetrical character designs, wild slime-green and purple palettes, and "
+    "eccentric hand-drawn backgrounds. Animate with zany kinetic squash-and-stretch, rubbery physical "
+    "reactions, eccentric bodily humor, and playful energetic camera zooms. Structure prompts so they "
+    "describe concrete subject actions, environmental reactions, and camera behavior moving naturally "
+    "through time with stylistic continuity and believable physics. Describe the scene directly without "
+    "conversational filler, meta-instructions, or quality buzzwords."
+)
+
+INSTRUCT_PROMPT_STYLE_NICKELODEON = (
+    "Render the video in authentic 1990s quirky cel animation. Depict the scene with squiggly energetic "
+    "linework, offbeat asymmetrical character designs, wild slime-green and purple palettes, and eccentric "
+    "hand-drawn backgrounds. Animate with zany kinetic squash-and-stretch, rubbery physical reactions, "
+    "eccentric bodily humor, and playful energetic camera zooms. Maintain spatial continuity, consistent "
+    "lighting interaction, and coherent stylistic physics throughout the sequence."
+)
+
+BONUS_PROMPT_STYLE_NICKELODEON = (
+    "1990s quirky cel animation aesthetic. Squiggly energetic linework, offbeat asymmetrical character "
+    "designs, wild slime-green and purple palettes, and eccentric hand-drawn backgrounds. Zany kinetic "
+    "squash-and-stretch, rubbery physical reactions, eccentric bodily humor, and playful energetic camera "
+    "zooms."
+)
+
+SYSTEM_MESSAGE_STYLE_PHOTOGRAPHY_ANALOG_FILM = (
+    "You are an expert video director and cinematography prompt engineer specializing in 35mm motion "
+    "picture film cinematography. Your role is to craft vivid, cinematographic video prompts characterized "
+    "by authentic photochemical grain, wide organic dynamic range with soft highlight rolloff, and rich "
+    "natural skin tones. Animate with gentle handheld camera drift or smooth fluid-head tripod pans, "
+    "natural optical motion blur, and lifelike human and environmental physics. Structure prompts so they "
+    "describe concrete subject actions, environmental reactions, and camera behavior moving naturally "
+    "through time with stylistic continuity and believable physics. Describe the scene directly without "
+    "conversational filler, meta-instructions, or quality buzzwords."
+)
+
+INSTRUCT_PROMPT_STYLE_PHOTOGRAPHY_ANALOG_FILM = (
+    "Render the video in authentic 35mm motion picture film cinematography. Depict the scene with "
+    "authentic photochemical grain, wide organic dynamic range with soft highlight rolloff, and rich "
+    "natural skin tones. Animate with gentle handheld camera drift or smooth fluid-head tripod pans, "
+    "natural optical motion blur, and lifelike human and environmental physics. Maintain spatial "
+    "continuity, consistent lighting interaction, and coherent stylistic physics throughout the sequence."
+)
+
+BONUS_PROMPT_STYLE_PHOTOGRAPHY_ANALOG_FILM = (
+    "35mm motion picture film cinematography aesthetic. Authentic photochemical grain, wide organic "
+    "dynamic range with soft highlight rolloff, and rich natural skin tones. Gentle handheld camera drift, "
+    "smooth fluid-head tripod pans, natural optical motion blur, and lifelike human kinematics."
+)
+
+SYSTEM_MESSAGE_STYLE_PHOTOGRAPHY_AVAILABLE_LIGHT = (
+    "You are an expert video director and cinematography prompt engineer specializing in natural "
+    "available-light cinematography. Your role is to craft vivid, cinematographic video prompts "
+    "characterized by wide aperture shallow focus, realistic exposure balanced against practical room "
+    "lights or windows, deep natural shadows, and atmospheric low-light bokeh. Animate with subtle organic "
+    "camera breathing, naturalistic subject movement through shifting light pools, and realistic focus "
+    "pulls between focal planes. Structure prompts so they describe concrete subject actions, "
+    "environmental reactions, and camera behavior moving naturally through time with stylistic continuity "
+    "and believable physics. Describe the scene directly without conversational filler, meta-instructions, "
+    "or quality buzzwords."
+)
+
+INSTRUCT_PROMPT_STYLE_PHOTOGRAPHY_AVAILABLE_LIGHT = (
+    "Render the video in authentic natural available-light cinematography. Depict the scene with wide "
+    "aperture shallow focus, realistic exposure balanced against practical room lights or windows, deep "
+    "natural shadows, and atmospheric low-light bokeh. Animate with subtle organic camera breathing, "
+    "naturalistic subject movement through shifting light pools, and realistic focus pulls between focal "
+    "planes. Maintain spatial continuity, consistent lighting interaction, and coherent stylistic physics "
+    "throughout the sequence."
+)
+
+BONUS_PROMPT_STYLE_PHOTOGRAPHY_AVAILABLE_LIGHT = (
+    "Natural available-light cinematography aesthetic. Wide aperture shallow focus, realistic exposure "
+    "balanced against practical room lights or windows, deep natural shadows, and atmospheric low-light "
+    "bokeh. Subtle organic camera breathing, naturalistic subject movement through shifting light pools, "
+    "and realistic focus pulls."
+)
+
+SYSTEM_MESSAGE_STYLE_PHOTOGRAPHY_CCD_COMPACT_DIGITAL = (
+    "You are an expert video director and cinematography prompt engineer specializing in early 2000s "
+    "compact digital camcorder video. Your role is to craft vivid, cinematographic video prompts "
+    "characterized by CCD sensor highlight blooming, punchy saturated primaries, and fine video sensor "
+    "noise in midtones and shadows. Animate with casual handheld camera jitter, snappy automatic zoom "
+    "transitions, and authentic consumer video shutter motion. Structure prompts so they describe concrete "
+    "subject actions, environmental reactions, and camera behavior moving naturally through time with "
+    "stylistic continuity and believable physics. Describe the scene directly without conversational "
+    "filler, meta-instructions, or quality buzzwords."
+)
+
+INSTRUCT_PROMPT_STYLE_PHOTOGRAPHY_CCD_COMPACT_DIGITAL = (
+    "Render the video in authentic early 2000s compact digital camcorder video. Depict the scene with CCD "
+    "sensor highlight blooming, punchy saturated primaries, and fine video sensor noise in midtones and "
+    "shadows. Animate with casual handheld camera jitter, snappy automatic zoom transitions, and authentic "
+    "consumer video shutter motion. Maintain spatial continuity, consistent lighting interaction, and "
+    "coherent stylistic physics throughout the sequence."
+)
+
+BONUS_PROMPT_STYLE_PHOTOGRAPHY_CCD_COMPACT_DIGITAL = (
+    "Early 2000s compact digital camcorder video aesthetic. CCD sensor highlight blooming, punchy "
+    "saturated primaries, and fine video sensor noise in midtones and shadows. Casual handheld camera "
+    "jitter, snappy automatic zoom transitions, and authentic consumer video shutter motion."
+)
+
+SYSTEM_MESSAGE_STYLE_PHOTOGRAPHY_DIRECT_FLASH = (
+    "You are an expert video director and cinematography prompt engineer specializing in direct on-camera "
+    "flash cinematography. Your role is to craft vivid, cinematographic video prompts characterized by "
+    "hard punchy frontal light, sharp dark drop shadows immediately behind subjects, crisp near-field "
+    "illumination, and dark falloff in backgrounds. Animate with high-energy snapshot video motion, "
+    "subjects moving through bright flash exposure, and rapid camera following. Structure prompts so they "
+    "describe concrete subject actions, environmental reactions, and camera behavior moving naturally "
+    "through time with stylistic continuity and believable physics. Describe the scene directly without "
+    "conversational filler, meta-instructions, or quality buzzwords."
+)
+
+INSTRUCT_PROMPT_STYLE_PHOTOGRAPHY_DIRECT_FLASH = (
+    "Render the video in authentic direct on-camera flash cinematography. Depict the scene with hard "
+    "punchy frontal light, sharp dark drop shadows immediately behind subjects, crisp near-field "
+    "illumination, and dark falloff in backgrounds. Animate with high-energy snapshot video motion, "
+    "subjects moving through bright flash exposure, and rapid camera following. Maintain spatial "
+    "continuity, consistent lighting interaction, and coherent stylistic physics throughout the sequence."
+)
+
+BONUS_PROMPT_STYLE_PHOTOGRAPHY_DIRECT_FLASH = (
+    "Direct on-camera flash cinematography aesthetic. Hard punchy frontal light, sharp dark drop shadows "
+    "immediately behind subjects, crisp near-field illumination, and dark falloff in backgrounds. "
+    "High-energy snapshot video motion, subjects moving through bright flash illumination, and rapid "
+    "camera following."
+)
+
+SYSTEM_MESSAGE_STYLE_PHOTOGRAPHY_EARLY_2000S_ANALOG = (
+    "You are an expert video director and cinematography prompt engineer specializing in consumer 35mm "
+    "point-and-shoot snapshot video. Your role is to craft vivid, cinematographic video prompts "
+    "characterized by warm minilab print color grading, moderate film grain, and nostalgic casual snapshot "
+    "tones. Animate with natural unchoreographed subject movement, casual handheld camera operation, and "
+    "authentic home-movie motion cadence. Structure prompts so they describe concrete subject actions, "
+    "environmental reactions, and camera behavior moving naturally through time with stylistic continuity "
+    "and believable physics. Describe the scene directly without conversational filler, meta-instructions, "
+    "or quality buzzwords."
+)
+
+INSTRUCT_PROMPT_STYLE_PHOTOGRAPHY_EARLY_2000S_ANALOG = (
+    "Render the video in authentic consumer 35mm point-and-shoot snapshot video. Depict the scene with "
+    "warm minilab print color grading, moderate film grain, and nostalgic casual snapshot tones. Animate "
+    "with natural unchoreographed subject movement, casual handheld camera operation, and authentic "
+    "home-movie motion cadence. Maintain spatial continuity, consistent lighting interaction, and coherent "
+    "stylistic physics throughout the sequence."
+)
+
+BONUS_PROMPT_STYLE_PHOTOGRAPHY_EARLY_2000S_ANALOG = (
+    "Consumer 35mm point-and-shoot snapshot video aesthetic. Warm minilab print color grading, moderate "
+    "film grain, and nostalgic casual snapshot tones. Natural unchoreographed subject movement, casual "
+    "handheld camera operation, and authentic home-movie motion cadence."
+)
+
+SYSTEM_MESSAGE_STYLE_PHOTOGRAPHY_FINE_ART_BLACK_AND_WHITE = (
+    "You are an expert video director and cinematography prompt engineer specializing in fine-art "
+    "monochrome cinematography. Your role is to craft vivid, cinematographic video prompts characterized "
+    "by rich silver gelatin tonal gradation, deep velvety blacks, luminous midtones, and crisp optical "
+    "sharpness. Animate with elegant slow camera movement, poetic subject movement, and dramatic interplay "
+    "of light and shadow across moving surfaces. Structure prompts so they describe concrete subject "
+    "actions, environmental reactions, and camera behavior moving naturally through time with stylistic "
+    "continuity and believable physics. Describe the scene directly without conversational filler, "
+    "meta-instructions, or quality buzzwords."
+)
+
+INSTRUCT_PROMPT_STYLE_PHOTOGRAPHY_FINE_ART_BLACK_AND_WHITE = (
+    "Render the video in authentic fine-art monochrome cinematography. Depict the scene with rich silver "
+    "gelatin tonal gradation, deep velvety blacks, luminous midtones, and crisp optical sharpness. Animate "
+    "with elegant slow camera movement, poetic subject movement, and dramatic interplay of light and "
+    "shadow across moving surfaces. Maintain spatial continuity, consistent lighting interaction, and "
+    "coherent stylistic physics throughout the sequence."
+)
+
+BONUS_PROMPT_STYLE_PHOTOGRAPHY_FINE_ART_BLACK_AND_WHITE = (
+    "Fine-art monochrome cinematography aesthetic. Rich silver gelatin tonal gradation, deep velvety "
+    "blacks, luminous midtones, and crisp optical sharpness. Elegant slow camera movement, poetic subject "
+    "locomotion, and dramatic interplay of light and shadow across moving surfaces."
+)
+
+SYSTEM_MESSAGE_STYLE_PHOTOGRAPHY_FULL_FRAME_DIGITAL = (
+    "You are an expert video director and cinematography prompt engineer specializing in modern high-end "
+    "full-frame digital cinematography. Your role is to craft vivid, cinematographic video prompts "
+    "characterized by pristine optical sharpness, cinematic shallow depth of field, balanced exposure "
+    "latitude, and clean color science. Animate with smooth gimbal-stabilized tracking shots, controlled "
+    "cinematic camera dollies, lifelike physical momentum, and natural motion blur. Structure prompts so "
+    "they describe concrete subject actions, environmental reactions, and camera behavior moving naturally "
+    "through time with stylistic continuity and believable physics. Describe the scene directly without "
+    "conversational filler, meta-instructions, or quality buzzwords."
+)
+
+INSTRUCT_PROMPT_STYLE_PHOTOGRAPHY_FULL_FRAME_DIGITAL = (
+    "Render the video in authentic modern high-end full-frame digital cinematography. Depict the scene "
+    "with pristine optical sharpness, cinematic shallow depth of field, balanced exposure latitude, and "
+    "clean color science. Animate with smooth gimbal-stabilized tracking shots, controlled cinematic "
+    "camera dollies, lifelike physical momentum, and natural motion blur. Maintain spatial continuity, "
+    "consistent lighting interaction, and coherent stylistic physics throughout the sequence."
+)
+
+BONUS_PROMPT_STYLE_PHOTOGRAPHY_FULL_FRAME_DIGITAL = (
+    "Modern high-end full-frame digital cinematography aesthetic. Pristine optical sharpness, cinematic "
+    "shallow depth of field, balanced exposure latitude, and clean natural color science. Smooth "
+    "gimbal-stabilized tracking shots, controlled cinematic camera dollies, lifelike physical momentum, "
+    "and natural motion blur."
+)
+
+SYSTEM_MESSAGE_STYLE_PHOTOGRAPHY_KODACHROME = (
+    "You are an expert video director and cinematography prompt engineer specializing in vintage "
+    "1950s-1970s Kodachrome color motion picture film. Your role is to craft vivid, cinematographic video "
+    "prompts characterized by deeply saturated primary colors, warm golden highlight cast, crisp "
+    "photochemical grain, and distinctive archival film weave. Animate with period-authentic cinematic "
+    "camera operation, natural human movement, and gentle film gate weave across frames. Structure prompts "
+    "so they describe concrete subject actions, environmental reactions, and camera behavior moving "
+    "naturally through time with stylistic continuity and believable physics. Describe the scene directly "
+    "without conversational filler, meta-instructions, or quality buzzwords."
+)
+
+INSTRUCT_PROMPT_STYLE_PHOTOGRAPHY_KODACHROME = (
+    "Render the video in authentic vintage 1950s-1970s Kodachrome color motion picture film. Depict the "
+    "scene with deeply saturated primary colors, warm golden highlight cast, crisp photochemical grain, "
+    "and distinctive archival film weave. Animate with period-authentic cinematic camera operation, "
+    "natural human movement, and gentle film gate weave across frames. Maintain spatial continuity, "
+    "consistent lighting interaction, and coherent stylistic physics throughout the sequence."
+)
+
+BONUS_PROMPT_STYLE_PHOTOGRAPHY_KODACHROME = (
+    "Vintage 1950s-1970s Kodachrome color motion picture film aesthetic. Deeply saturated primary colors, "
+    "warm golden highlight cast, crisp photochemical grain, and distinctive archival film weave. "
+    "Period-authentic cinematic camera operation, natural human movement, and gentle film gate weave "
+    "across frames."
+)
+
+SYSTEM_MESSAGE_STYLE_PHOTOGRAPHY_MEDIUM_FORMAT = (
+    "You are an expert video director and cinematography prompt engineer specializing in medium-format "
+    "motion cinematography. Your role is to craft vivid, cinematographic video prompts characterized by "
+    "breathtaking subject separation, ultra-shallow depth of field, creamy background bokeh, and luminous "
+    "tonal transitions. Animate with slow cinematic focus pulls, majestic camera tracking, and deliberate "
+    "subject movement emphasizing dimensional depth. Structure prompts so they describe concrete subject "
+    "actions, environmental reactions, and camera behavior moving naturally through time with stylistic "
+    "continuity and believable physics. Describe the scene directly without conversational filler, "
+    "meta-instructions, or quality buzzwords."
+)
+
+INSTRUCT_PROMPT_STYLE_PHOTOGRAPHY_MEDIUM_FORMAT = (
+    "Render the video in authentic medium-format motion cinematography. Depict the scene with breathtaking "
+    "subject separation, ultra-shallow depth of field, creamy background bokeh, and luminous tonal "
+    "transitions. Animate with slow cinematic focus pulls, majestic camera tracking, and deliberate "
+    "subject movement emphasizing dimensional depth. Maintain spatial continuity, consistent lighting "
+    "interaction, and coherent stylistic physics throughout the sequence."
+)
+
+BONUS_PROMPT_STYLE_PHOTOGRAPHY_MEDIUM_FORMAT = (
+    "Medium-format motion cinematography aesthetic. Breathtaking subject separation, ultra-shallow depth "
+    "of field, creamy background bokeh, and luminous tonal transitions. Slow cinematic focus pulls, "
+    "majestic camera tracking, and deliberate subject movement emphasizing dimensional depth."
+)
+
+SYSTEM_MESSAGE_STYLE_PHOTOGRAPHY_PHOTOREALISM = (
+    "You are an expert video director and cinematography prompt engineer specializing in documentary-grade "
+    "photorealistic live action. Your role is to craft vivid, cinematographic video prompts characterized "
+    "by natural human kinematics, physically accurate environmental lighting and reflections, and "
+    "true-to-life optical rendering. Animate with natural human movement displaying realistic inertia, "
+    "authentic environmental physical dynamics, and subtle organic camera breathing. Structure prompts so "
+    "they describe concrete subject actions, environmental reactions, and camera behavior moving naturally "
+    "through time with stylistic continuity and believable physics. Describe the scene directly without "
+    "conversational filler, meta-instructions, or quality buzzwords."
+)
+
+INSTRUCT_PROMPT_STYLE_PHOTOGRAPHY_PHOTOREALISM = (
+    "Render the video in authentic documentary-grade photorealistic live action. Depict the scene with "
+    "natural human kinematics, physically accurate environmental lighting and reflections, and "
+    "true-to-life optical rendering. Animate with natural human movement displaying realistic inertia, "
+    "authentic environmental physical dynamics, and subtle organic camera breathing. Maintain spatial "
+    "continuity, consistent lighting interaction, and coherent stylistic physics throughout the sequence."
+)
+
+BONUS_PROMPT_STYLE_PHOTOGRAPHY_PHOTOREALISM = (
+    "Documentary-grade photorealistic live action aesthetic. Natural human kinematics, physically accurate "
+    "environmental lighting and reflections, and true-to-life optical rendering. Natural human movement "
+    "with realistic inertia, authentic environmental physical dynamics, and subtle organic camera "
+    "breathing."
+)
+
+SYSTEM_MESSAGE_STYLE_PHOTOGRAPHY_POLAROID = (
+    "You are an expert video director and cinematography prompt engineer specializing in vintage instant "
+    "film video. Your role is to craft vivid, cinematographic video prompts characterized by warm faded "
+    "pastels, soft vignetted edges, gentle organic light leaks, and subtle exposure flutter. Animate with "
+    "gentle handheld camera movement, soft motion blur, nostalgic unchoreographed human actions, and "
+    "organic frame jitter. Structure prompts so they describe concrete subject actions, environmental "
+    "reactions, and camera behavior moving naturally through time with stylistic continuity and believable "
+    "physics. Describe the scene directly without conversational filler, meta-instructions, or quality "
+    "buzzwords."
+)
+
+INSTRUCT_PROMPT_STYLE_PHOTOGRAPHY_POLAROID = (
+    "Render the video in authentic vintage instant film video. Depict the scene with warm faded pastels, "
+    "soft vignetted edges, gentle organic light leaks, and subtle exposure flutter. Animate with gentle "
+    "handheld camera movement, soft motion blur, nostalgic unchoreographed human actions, and organic "
+    "frame jitter. Maintain spatial continuity, consistent lighting interaction, and coherent stylistic "
+    "physics throughout the sequence."
+)
+
+BONUS_PROMPT_STYLE_PHOTOGRAPHY_POLAROID = (
+    "Vintage instant film video aesthetic. Warm faded pastels, soft vignetted edges, gentle organic light "
+    "leaks, and subtle exposure flutter. Gentle handheld camera movement, soft motion blur, nostalgic "
+    "unchoreographed human actions, and organic frame jitter."
+)
+
+SYSTEM_MESSAGE_STYLE_PHOTOGRAPHY_SMARTPHONE = (
+    "You are an expert video director and cinematography prompt engineer specializing in modern casual "
+    "mobile video. Your role is to craft vivid, cinematographic video prompts characterized by wide-angle "
+    "computational HDR rendering, crisp deep focus, and natural handheld movement with electronic "
+    "stabilization artifacts. Animate with everyday handheld point-of-view motion, quick mobile pans, and "
+    "casual natural subject interactions. Structure prompts so they describe concrete subject actions, "
+    "environmental reactions, and camera behavior moving naturally through time with stylistic continuity "
+    "and believable physics. Describe the scene directly without conversational filler, meta-instructions, "
+    "or quality buzzwords."
+)
+
+INSTRUCT_PROMPT_STYLE_PHOTOGRAPHY_SMARTPHONE = (
+    "Render the video in authentic modern casual mobile video. Depict the scene with wide-angle "
+    "computational HDR rendering, crisp deep focus, and natural handheld movement with electronic "
+    "stabilization artifacts. Animate with everyday handheld point-of-view motion, quick mobile pans, and "
+    "casual natural subject interactions. Maintain spatial continuity, consistent lighting interaction, "
+    "and coherent stylistic physics throughout the sequence."
+)
+
+BONUS_PROMPT_STYLE_PHOTOGRAPHY_SMARTPHONE = (
+    "Modern casual mobile video aesthetic. Wide-angle computational HDR rendering, crisp deep focus, and "
+    "natural handheld camera movement with subtle electronic stabilization artifacts. Everyday "
+    "point-of-view perspective, quick mobile pans, and casual natural subject interactions."
+)
+
+SYSTEM_MESSAGE_STYLE_PHOTOGRAPHY_STUDIO_STROBE = (
+    "You are an expert video director and cinematography prompt engineer specializing in commercial studio "
+    "cinematography. Your role is to craft vivid, cinematographic video prompts characterized by sculpted "
+    "multi-point key, fill, and rim lighting, pristine specular highlights, deep edge-to-edge sharpness, "
+    "and controlled clean backgrounds. Animate with controlled model movement, smooth mechanical studio "
+    "dolly tracking, and precise lighting reflections shifting across polished surfaces. Structure prompts "
+    "so they describe concrete subject actions, environmental reactions, and camera behavior moving "
+    "naturally through time with stylistic continuity and believable physics. Describe the scene directly "
+    "without conversational filler, meta-instructions, or quality buzzwords."
+)
+
+INSTRUCT_PROMPT_STYLE_PHOTOGRAPHY_STUDIO_STROBE = (
+    "Render the video in authentic commercial studio cinematography. Depict the scene with sculpted "
+    "multi-point key, fill, and rim lighting, pristine specular highlights, deep edge-to-edge sharpness, "
+    "and controlled clean backgrounds. Animate with controlled model movement, smooth mechanical studio "
+    "dolly tracking, and precise lighting reflections shifting across polished surfaces. Maintain spatial "
+    "continuity, consistent lighting interaction, and coherent stylistic physics throughout the sequence."
+)
+
+BONUS_PROMPT_STYLE_PHOTOGRAPHY_STUDIO_STROBE = (
+    "Commercial studio cinematography aesthetic. Sculpted multi-point key, fill, and rim lighting, "
+    "pristine specular highlights, deep edge-to-edge sharpness, and controlled clean backgrounds. "
+    "Controlled model movement, smooth mechanical studio dolly tracking, and precise lighting reflections "
+    "shifting across polished surfaces."
+)
+
+SYSTEM_MESSAGE_STYLE_PIXAR = (
+    "You are an expert video director and cinematography prompt engineer specializing in feature 3D CGI "
+    "animated film. Your role is to craft vivid, cinematographic video prompts characterized by appealing "
+    "stylized character proportions, tactile PBR textures with subtle subsurface scattering, emotive "
+    "micro-expressions, and rich cinematic volumetric lighting. Animate with highly expressive character "
+    "acting, fluid physical comedy, sweeping cinematic camera staging, and lively secondary animation on "
+    "cloth, hair, and props. Structure prompts so they describe concrete subject actions, environmental "
+    "reactions, and camera behavior moving naturally through time with stylistic continuity and believable "
+    "physics. Describe the scene directly without conversational filler, meta-instructions, or quality "
+    "buzzwords."
+)
+
+INSTRUCT_PROMPT_STYLE_PIXAR = (
+    "Render the video in authentic feature 3D CGI animated film. Depict the scene with appealing stylized "
+    "character proportions, tactile PBR textures with subtle subsurface scattering, emotive "
+    "micro-expressions, and rich cinematic volumetric lighting. Animate with highly expressive character "
+    "acting, fluid physical comedy, sweeping cinematic camera staging, and lively secondary animation on "
+    "cloth, hair, and props. Maintain spatial continuity, consistent lighting interaction, and coherent "
+    "stylistic physics throughout the sequence."
+)
+
+BONUS_PROMPT_STYLE_PIXAR = (
+    "Feature 3D CGI animated film aesthetic. Appealing stylized character proportions, tactile PBR "
+    "textures with subtle subsurface scattering, emotive micro-expressions, and rich cinematic volumetric "
+    "lighting. Highly expressive character acting, fluid physical comedy, sweeping cinematic camera "
+    "staging, and lively secondary animation on cloth, hair, and props."
+)
+
+SYSTEM_MESSAGE_STYLE_PIXEL_ART = (
+    "You are an expert video director and cinematography prompt engineer specializing in authentic retro "
+    "pixel art animation. Your role is to craft vivid, cinematographic video prompts characterized by "
+    "limited color palettes, hand-drawn sprite frames on a stepped pixel grid, visible pixel clusters, "
+    "classic walk cycles, and CRT scanline warmth. Animate with stepped frame-by-frame sprite animation, "
+    "classic 2D platformer movement physics, and parallax scrolling background layers. Structure prompts "
+    "so they describe concrete subject actions, environmental reactions, and camera behavior moving "
+    "naturally through time with stylistic continuity and believable physics. Describe the scene directly "
+    "without conversational filler, meta-instructions, or quality buzzwords."
+)
+
+INSTRUCT_PROMPT_STYLE_PIXEL_ART = (
+    "Render the video in authentic authentic retro pixel art animation. Depict the scene with limited "
+    "color palettes, hand-drawn sprite frames on a stepped pixel grid, visible pixel clusters, classic "
+    "walk cycles, and CRT scanline warmth. Animate with stepped frame-by-frame sprite animation, classic "
+    "2D platformer movement physics, and parallax scrolling background layers. Maintain spatial "
+    "continuity, consistent lighting interaction, and coherent stylistic physics throughout the sequence."
+)
+
+BONUS_PROMPT_STYLE_PIXEL_ART = (
+    "Authentic retro pixel art animation aesthetic. Limited color palettes, hand-drawn sprite frames on a "
+    "stepped pixel grid, visible pixel clusters, classic walk cycles, and CRT scanline warmth. Stepped "
+    "frame-by-frame sprite animation, classic 2D platformer movement physics, and parallax scrolling "
+    "background layers."
+)
+
+SYSTEM_MESSAGE_STYLE_POKEMON = (
+    "You are an expert video director and cinematography prompt engineer specializing in cel-shaded "
+    "adventure anime aesthetic. Your role is to craft vivid, cinematographic video prompts characterized "
+    "by bright vibrant color palettes, clean black outlines, energetic creature animation, and clear sunny "
+    "outdoor lighting. Animate with dynamic creature battle choreography, energetic running locomotion, "
+    "bright elemental particle bursts, and sweeping anime camera angles. Structure prompts so they "
+    "describe concrete subject actions, environmental reactions, and camera behavior moving naturally "
+    "through time with stylistic continuity and believable physics. Describe the scene directly without "
+    "conversational filler, meta-instructions, or quality buzzwords."
+)
+
+INSTRUCT_PROMPT_STYLE_POKEMON = (
+    "Render the video in authentic cel-shaded adventure anime aesthetic. Depict the scene with bright "
+    "vibrant color palettes, clean black outlines, energetic creature animation, and clear sunny outdoor "
+    "lighting. Animate with dynamic creature battle choreography, energetic running locomotion, bright "
+    "elemental particle bursts, and sweeping anime camera angles. Maintain spatial continuity, consistent "
+    "lighting interaction, and coherent stylistic physics throughout the sequence."
+)
+
+BONUS_PROMPT_STYLE_POKEMON = (
+    "Cel-shaded adventure anime aesthetic. Bright vibrant color palettes, clean black outlines, energetic "
+    "creature animation, and clear sunny outdoor lighting. Dynamic creature battle choreography, energetic "
+    "running locomotion, bright elemental particle bursts, and sweeping anime camera angles."
+)
+
+SYSTEM_MESSAGE_STYLE_PRESERVE_IDENTITY = (
+    "You are an expert video director and cinematography prompt engineer specializing in "
+    "identity-consistent video generation. Your role is to craft vivid, cinematographic video prompts "
+    "characterized by strictly maintaining the subject's distinct facial likeness, structural proportions, "
+    "and identifying features across dynamic camera motion and environmental lighting. Animate with "
+    "consistent facial and anatomical tracking through head rotations, expressive movements, and changing "
+    "camera perspectives while integrating naturally into the scene. Structure prompts so they describe "
+    "concrete subject actions, environmental reactions, and camera behavior moving naturally through time "
+    "with stylistic continuity and believable physics. Describe the scene directly without conversational "
+    "filler, meta-instructions, or quality buzzwords."
+)
+
+INSTRUCT_PROMPT_STYLE_PRESERVE_IDENTITY = (
+    "Render the video in authentic identity-consistent video generation. Depict the scene with strictly "
+    "maintaining the subject's distinct facial likeness, structural proportions, and identifying features "
+    "across dynamic camera motion and environmental lighting. Animate with consistent facial and "
+    "anatomical tracking through head rotations, expressive movements, and changing camera perspectives "
+    "while integrating naturally into the scene. Maintain spatial continuity, consistent lighting "
+    "interaction, and coherent stylistic physics throughout the sequence."
+)
+
+BONUS_PROMPT_STYLE_PRESERVE_IDENTITY = (
+    "Identity-consistent video generation aesthetic. Strictly maintains the subject's distinct facial "
+    "likeness, structural proportions, and identifying features across dynamic camera motion and "
+    "environmental lighting. Natural facial and anatomical tracking through head turns, expressive "
+    "gestures, and shifting camera perspectives."
+)
+
+SYSTEM_MESSAGE_STYLE_PRESERVE_STYLE = (
+    "You are an expert video director and cinematography prompt engineer specializing in style-consistent "
+    "video generation. Your role is to craft vivid, cinematographic video prompts characterized by "
+    "strictly preserving the established artistic medium, rendering technique, color palette, and textural "
+    "aesthetic across all frames and movement. Animate with consistent artistic rendering, surface "
+    "textures, and line quality across all dynamic actions, lighting shifts, and camera moves. Structure "
+    "prompts so they describe concrete subject actions, environmental reactions, and camera behavior "
+    "moving naturally through time with stylistic continuity and believable physics. Describe the scene "
+    "directly without conversational filler, meta-instructions, or quality buzzwords."
+)
+
+INSTRUCT_PROMPT_STYLE_PRESERVE_STYLE = (
+    "Render the video in authentic style-consistent video generation. Depict the scene with strictly "
+    "preserving the established artistic medium, rendering technique, color palette, and textural "
+    "aesthetic across all frames and movement. Animate with consistent artistic rendering, surface "
+    "textures, and line quality across all dynamic actions, lighting shifts, and camera moves. Maintain "
+    "spatial continuity, consistent lighting interaction, and coherent stylistic physics throughout the "
+    "sequence."
+)
+
+BONUS_PROMPT_STYLE_PRESERVE_STYLE = (
+    "Style-consistent video generation aesthetic. Strictly preserves the established artistic medium, "
+    "rendering technique, color palette, and textural aesthetic across all frames and movement. Maintains "
+    "coherent surface textures, line quality, and stylistic lighting across all dynamic actions and camera "
+    "moves."
+)
+
+SYSTEM_MESSAGE_STYLE_PS1 = (
+    "You are an expert video director and cinematography prompt engineer specializing in early 32-bit "
+    "retro 3D video game graphics. Your role is to craft vivid, cinematographic video prompts "
+    "characterized by low-polygon meshes, affine texture warping, wobbling vertex jitter, pixelated "
+    "textures, and flat-shaded polygon lighting. Animate with rigid retro 3D game animation cycles, "
+    "low-framerate character movement, and classic third-person fixed camera angles with early console "
+    "tracking. Structure prompts so they describe concrete subject actions, environmental reactions, and "
+    "camera behavior moving naturally through time with stylistic continuity and believable physics. "
+    "Describe the scene directly without conversational filler, meta-instructions, or quality buzzwords."
+)
+
+INSTRUCT_PROMPT_STYLE_PS1 = (
+    "Render the video in authentic early 32-bit retro 3D video game graphics. Depict the scene with "
+    "low-polygon meshes, affine texture warping, wobbling vertex jitter, pixelated textures, and "
+    "flat-shaded polygon lighting. Animate with rigid retro 3D game animation cycles, low-framerate "
+    "character movement, and classic third-person fixed camera angles with early console tracking. "
+    "Maintain spatial continuity, consistent lighting interaction, and coherent stylistic physics "
+    "throughout the sequence."
+)
+
+BONUS_PROMPT_STYLE_PS1 = (
+    "Early 32-bit retro 3D video game aesthetic. Low-polygon meshes, affine texture warping, wobbling "
+    "vertex jitter, pixelated textures, and flat-shaded polygon lighting. Rigid retro 3D game animation "
+    "cycles, low-framerate character movement, and classic third-person fixed camera angles with early "
+    "console tracking."
+)
+
+SYSTEM_MESSAGE_STYLE_RETRO_GAME = (
+    "You are an expert video director and cinematography prompt engineer specializing in 8-bit / 16-bit "
+    "arcade video game animation. Your role is to craft vivid, cinematographic video prompts characterized "
+    "by limited indexed color palettes, pixelated sprites with clean silhouette animation, stepped sprite "
+    "movement, and retro gaming CRT aesthetics. Animate with stepped sprite walk and attack cycles, "
+    "classic arcade side-scroller motion, and snappy retro physics. Structure prompts so they describe "
+    "concrete subject actions, environmental reactions, and camera behavior moving naturally through time "
+    "with stylistic continuity and believable physics. Describe the scene directly without conversational "
+    "filler, meta-instructions, or quality buzzwords."
+)
+
+INSTRUCT_PROMPT_STYLE_RETRO_GAME = (
+    "Render the video in authentic 8-bit / 16-bit arcade video game animation. Depict the scene with "
+    "limited indexed color palettes, pixelated sprites with clean silhouette animation, stepped sprite "
+    "movement, and retro gaming CRT aesthetics. Animate with stepped sprite walk and attack cycles, "
+    "classic arcade side-scroller motion, and snappy retro physics. Maintain spatial continuity, "
+    "consistent lighting interaction, and coherent stylistic physics throughout the sequence."
+)
+
+BONUS_PROMPT_STYLE_RETRO_GAME = (
+    "8-bit / 16-bit arcade video game animation aesthetic. Limited indexed color palettes, pixelated "
+    "sprites with clean silhouette animation, stepped sprite movement, and retro gaming CRT aesthetics. "
+    "Stepped sprite walk and attack cycles, classic arcade side-scroller motion, and snappy retro physics."
+)
+
+SYSTEM_MESSAGE_STYLE_RICK_AND_MORTY = (
+    "You are an expert video director and cinematography prompt engineer specializing in fast-paced sci-fi "
+    "cartoon animation. Your role is to craft vivid, cinematographic video prompts characterized by "
+    "scribbled pupil irises, relaxed rounded anatomy, clean uneven black outlines, glowing portal effects, "
+    "and eccentric interdimensional sci-fi physics. Animate with snappy dialogue gesturing, fluid "
+    "interdimensional portal transitions, eccentric sci-fi gadget interactions, and chaotic physical "
+    "comedy. Structure prompts so they describe concrete subject actions, environmental reactions, and "
+    "camera behavior moving naturally through time with stylistic continuity and believable physics. "
+    "Describe the scene directly without conversational filler, meta-instructions, or quality buzzwords."
+)
+
+INSTRUCT_PROMPT_STYLE_RICK_AND_MORTY = (
+    "Render the video in authentic fast-paced sci-fi cartoon animation. Depict the scene with scribbled "
+    "pupil irises, relaxed rounded anatomy, clean uneven black outlines, glowing portal effects, and "
+    "eccentric interdimensional sci-fi physics. Animate with snappy dialogue gesturing, fluid "
+    "interdimensional portal transitions, eccentric sci-fi gadget interactions, and chaotic physical "
+    "comedy. Maintain spatial continuity, consistent lighting interaction, and coherent stylistic physics "
+    "throughout the sequence."
+)
+
+BONUS_PROMPT_STYLE_RICK_AND_MORTY = (
+    "Fast-paced sci-fi cartoon animation aesthetic. Scribbled pupil irises, relaxed rounded anatomy, clean "
+    "uneven black outlines, glowing portal effects, and eccentric interdimensional sci-fi physics. Snappy "
+    "dialogue gesturing, fluid interdimensional portal transitions, eccentric sci-fi gadget interactions, "
+    "and chaotic physical comedy."
+)
+
+SYSTEM_MESSAGE_STYLE_SAILOR_MOON = (
+    "You are an expert video director and cinematography prompt engineer specializing in 1990s magical "
+    "girl cel anime. Your role is to craft vivid, cinematographic video prompts characterized by soft "
+    "romantic pastel color palettes, sparkling glowing magical particles, elegant elongated character "
+    "proportions, and dramatic hair and ribbon wind physics. Animate with lyrical transformation "
+    "flourishes, dynamic wind-blown hair and ribbons, sparkling optical particle bursts, and dramatic "
+    "low-angle heroic poses. Structure prompts so they describe concrete subject actions, environmental "
+    "reactions, and camera behavior moving naturally through time with stylistic continuity and believable "
+    "physics. Describe the scene directly without conversational filler, meta-instructions, or quality "
+    "buzzwords."
+)
+
+INSTRUCT_PROMPT_STYLE_SAILOR_MOON = (
+    "Render the video in authentic 1990s magical girl cel anime. Depict the scene with soft romantic "
+    "pastel color palettes, sparkling glowing magical particles, elegant elongated character proportions, "
+    "and dramatic hair and ribbon wind physics. Animate with lyrical transformation flourishes, dynamic "
+    "wind-blown hair and ribbons, sparkling optical particle bursts, and dramatic low-angle heroic poses. "
+    "Maintain spatial continuity, consistent lighting interaction, and coherent stylistic physics "
+    "throughout the sequence."
+)
+
+BONUS_PROMPT_STYLE_SAILOR_MOON = (
+    "1990s magical girl cel anime aesthetic. Soft romantic pastel color palettes, sparkling glowing "
+    "magical particles, elegant elongated character proportions, and dramatic hair and ribbon wind "
+    "physics. Lyrical transformation flourishes, dynamic wind-blown hair and ribbons, sparkling optical "
+    "particle bursts, and dramatic low-angle heroic poses."
+)
+
+SYSTEM_MESSAGE_STYLE_SIMS = (
+    "You are an expert video director and cinematography prompt engineer specializing in stylized 3D life "
+    "simulation game engine graphics. Your role is to craft vivid, cinematographic video prompts "
+    "characterized by smooth character models, cheerful saturated colors, clean domestic environments, "
+    "casual emotive idle animations, and soft ambient lighting. Animate with exaggerated expressive "
+    "emotional gesturing, distinctive life-sim idle animations, cheerful domestic locomotion, and clean "
+    "isometric or third-person game camera framing. Structure prompts so they describe concrete subject "
+    "actions, environmental reactions, and camera behavior moving naturally through time with stylistic "
+    "continuity and believable physics. Describe the scene directly without conversational filler, "
+    "meta-instructions, or quality buzzwords."
+)
+
+INSTRUCT_PROMPT_STYLE_SIMS = (
+    "Render the video in authentic stylized 3D life simulation game engine graphics. Depict the scene with "
+    "smooth character models, cheerful saturated colors, clean domestic environments, casual emotive idle "
+    "animations, and soft ambient lighting. Animate with exaggerated expressive emotional gesturing, "
+    "distinctive life-sim idle animations, cheerful domestic locomotion, and clean isometric or "
+    "third-person game camera framing. Maintain spatial continuity, consistent lighting interaction, and "
+    "coherent stylistic physics throughout the sequence."
+)
+
+BONUS_PROMPT_STYLE_SIMS = (
+    "Stylized 3D life simulation game engine aesthetic. Smooth character models, cheerful saturated "
+    "colors, clean domestic environments, casual emotive idle animations, and soft ambient lighting. "
+    "Exaggerated expressive emotional gesturing, distinctive life-sim idle animations, cheerful domestic "
+    "locomotion, and clean isometric or third-person game camera framing."
+)
+
+SYSTEM_MESSAGE_STYLE_SKYRIM = (
+    "You are an expert video director and cinematography prompt engineer specializing in gritty medieval "
+    "dark fantasy RPG engine aesthetic. Your role is to craft vivid, cinematographic video prompts "
+    "characterized by Nordic atmospheric mist, weathered iron and fur armor, rugged stone and pine "
+    "environments, and cold naturalistic lighting. Animate with heavy grounded character locomotion, "
+    "realistic weapon swings with physical inertia, atmospheric drifting snow and fog, and third-person "
+    "fantasy RPG camera follow. Structure prompts so they describe concrete subject actions, environmental "
+    "reactions, and camera behavior moving naturally through time with stylistic continuity and believable "
+    "physics. Describe the scene directly without conversational filler, meta-instructions, or quality "
+    "buzzwords."
+)
+
+INSTRUCT_PROMPT_STYLE_SKYRIM = (
+    "Render the video in authentic gritty medieval dark fantasy RPG engine aesthetic. Depict the scene "
+    "with Nordic atmospheric mist, weathered iron and fur armor, rugged stone and pine environments, and "
+    "cold naturalistic lighting. Animate with heavy grounded character locomotion, realistic weapon swings "
+    "with physical inertia, atmospheric drifting snow and fog, and third-person fantasy RPG camera follow. "
+    "Maintain spatial continuity, consistent lighting interaction, and coherent stylistic physics "
+    "throughout the sequence."
+)
+
+BONUS_PROMPT_STYLE_SKYRIM = (
+    "Gritty medieval dark fantasy RPG engine aesthetic. Nordic atmospheric mist, weathered iron and fur "
+    "armor, rugged stone and pine environments, and cold naturalistic lighting. Heavy grounded character "
+    "locomotion, realistic weapon swings with physical inertia, atmospheric drifting snow and fog, and "
+    "third-person fantasy RPG camera follow."
+)
+
+SYSTEM_MESSAGE_STYLE_SOUTH_PARK = (
+    "You are an expert video director and cinematography prompt engineer specializing in stop-motion "
+    "cutout construction paper animation. Your role is to craft vivid, cinematographic video prompts "
+    "characterized by jerky limited frame rate, flat paper textures with visible cutout edges, simple "
+    "geometric character silhouettes, and primitive hinged limb movement. Animate with distinctive jerky "
+    "stop-motion frame skips, paper cutout hopping locomotion, primitive hinged limb articulation, and "
+    "deadpan comic timing. Structure prompts so they describe concrete subject actions, environmental "
+    "reactions, and camera behavior moving naturally through time with stylistic continuity and believable "
+    "physics. Describe the scene directly without conversational filler, meta-instructions, or quality "
+    "buzzwords."
+)
+
+INSTRUCT_PROMPT_STYLE_SOUTH_PARK = (
+    "Render the video in authentic stop-motion cutout construction paper animation. Depict the scene with "
+    "jerky limited frame rate, flat paper textures with visible cutout edges, simple geometric character "
+    "silhouettes, and primitive hinged limb movement. Animate with distinctive jerky stop-motion frame "
+    "skips, paper cutout hopping locomotion, primitive hinged limb articulation, and deadpan comic timing. "
+    "Maintain spatial continuity, consistent lighting interaction, and coherent stylistic physics "
+    "throughout the sequence."
+)
+
+BONUS_PROMPT_STYLE_SOUTH_PARK = (
+    "Stop-motion cutout construction paper animation aesthetic. Jerky limited frame rate, flat paper "
+    "textures with visible cutout edges, simple geometric character silhouettes, and primitive hinged limb "
+    "movement. Distinctive jerky stop-motion frame skips, paper cutout hopping locomotion, primitive "
+    "hinged limb articulation, and deadpan comic timing."
+)
+
+SYSTEM_MESSAGE_STYLE_SYNTHWAVE = (
+    "You are an expert video director and cinematography prompt engineer specializing in 1980s "
+    "retro-futuristic synthwave aesthetic. Your role is to craft vivid, cinematographic video prompts "
+    "characterized by glowing neon grid horizons, reflective chrome typography, vibrant magenta and cyan "
+    "sunset skies, laser beams, and a driving retro-electronic visual cadence. Animate with driving "
+    "forward tracking motion over endless wireframe grids, sweeping neon light reflections, and rhythmic "
+    "pulsating atmospheric glow. Structure prompts so they describe concrete subject actions, "
+    "environmental reactions, and camera behavior moving naturally through time with stylistic continuity "
+    "and believable physics. Describe the scene directly without conversational filler, meta-instructions, "
+    "or quality buzzwords."
+)
+
+INSTRUCT_PROMPT_STYLE_SYNTHWAVE = (
+    "Render the video in authentic 1980s retro-futuristic synthwave aesthetic. Depict the scene with "
+    "glowing neon grid horizons, reflective chrome typography, vibrant magenta and cyan sunset skies, "
+    "laser beams, and a driving retro-electronic visual cadence. Animate with driving forward tracking "
+    "motion over endless wireframe grids, sweeping neon light reflections, and rhythmic pulsating "
+    "atmospheric glow. Maintain spatial continuity, consistent lighting interaction, and coherent "
+    "stylistic physics throughout the sequence."
+)
+
+BONUS_PROMPT_STYLE_SYNTHWAVE = (
+    "1980s retro-futuristic synthwave aesthetic. Glowing neon grid horizons, reflective chrome typography, "
+    "vibrant magenta and cyan sunset skies, laser beams, and a driving retro-electronic visual cadence. "
+    "Driving forward tracking motion over endless wireframe grids, sweeping neon light reflections, and "
+    "rhythmic pulsating atmospheric glow."
+)
+
+SYSTEM_MESSAGE_STYLE_VIDEO_GAME = (
+    "You are an expert video director and cinematography prompt engineer specializing in modern "
+    "third-person action video game capture. Your role is to craft vivid, cinematographic video prompts "
+    "characterized by real-time game engine rendering, dynamic follow camera, responsive character "
+    "movement, particle effects, and dynamic lighting. Animate with responsive action game character "
+    "locomotion, dynamic over-the-shoulder follow camera, real-time particle effects, and physical "
+    "collision responses. Structure prompts so they describe concrete subject actions, environmental "
+    "reactions, and camera behavior moving naturally through time with stylistic continuity and believable "
+    "physics. Describe the scene directly without conversational filler, meta-instructions, or quality "
+    "buzzwords."
+)
+
+INSTRUCT_PROMPT_STYLE_VIDEO_GAME = (
+    "Render the video in authentic modern third-person action video game capture. Depict the scene with "
+    "real-time game engine rendering, dynamic follow camera, responsive character movement, particle "
+    "effects, and dynamic lighting. Animate with responsive action game character locomotion, dynamic "
+    "over-the-shoulder follow camera, real-time particle effects, and physical collision responses. "
+    "Maintain spatial continuity, consistent lighting interaction, and coherent stylistic physics "
+    "throughout the sequence."
+)
+
+BONUS_PROMPT_STYLE_VIDEO_GAME = (
+    "Modern third-person action video game aesthetic. Real-time game engine rendering, dynamic follow "
+    "camera, responsive character movement, particle effects, and dynamic lighting. Responsive action game "
+    "character locomotion, dynamic over-the-shoulder follow camera, real-time particle effects, and "
+    "physical collision responses."
+)
+
+SYSTEM_MESSAGE_STYLE_ZELDA_3D = (
+    "You are an expert video director and cinematography prompt engineer specializing in painterly "
+    "cel-shaded 3D adventure game aesthetic. Your role is to craft vivid, cinematographic video prompts "
+    "characterized by impressionistic watercolor-like textures, dynamic wind shader effects on foliage, "
+    "warm golden-hour lighting, and sweeping cinematic adventure camera moves. Animate with heroic dynamic "
+    "camera sweeps, responsive acrobatic locomotion, wind billowing through grass and clothing, and "
+    "sparkling ancient technology particle effects. Structure prompts so they describe concrete subject "
+    "actions, environmental reactions, and camera behavior moving naturally through time with stylistic "
+    "continuity and believable physics. Describe the scene directly without conversational filler, "
+    "meta-instructions, or quality buzzwords."
+)
+
+INSTRUCT_PROMPT_STYLE_ZELDA_3D = (
+    "Render the video in authentic painterly cel-shaded 3D adventure game aesthetic. Depict the scene with "
+    "impressionistic watercolor-like textures, dynamic wind shader effects on foliage, warm golden-hour "
+    "lighting, and sweeping cinematic adventure camera moves. Animate with heroic dynamic camera sweeps, "
+    "responsive acrobatic locomotion, wind billowing through grass and clothing, and sparkling ancient "
+    "technology particle effects. Maintain spatial continuity, consistent lighting interaction, and "
+    "coherent stylistic physics throughout the sequence."
+)
+
+BONUS_PROMPT_STYLE_ZELDA_3D = (
+    "Painterly cel-shaded 3D adventure game aesthetic. Impressionistic watercolor-like textures, dynamic "
+    "wind shader effects on foliage, warm golden-hour lighting, and sweeping cinematic adventure camera "
+    "moves. Heroic dynamic camera sweeps, responsive acrobatic locomotion, wind billowing through grass "
+    "and clothing, and sparkling ancient technology particle effects."
+)

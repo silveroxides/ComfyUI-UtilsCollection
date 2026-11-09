@@ -216,23 +216,33 @@ def test_every_video_preset_is_loaded_natively():
     inst_presets = preset_nodes.UC_InstructPromptVideoPresets.get_presets()
     bonus_presets = preset_nodes.UC_BonusPromptVideoPresets.get_presets()
 
-    assert len(sys_presets) >= 50
-    assert len(inst_presets) >= 50
-    assert len(bonus_presets) >= 50
+    assert len(sys_presets) == 62
+    assert len(inst_presets) == 59
+    assert len(bonus_presets) == 59
 
     for name in sys_presets:
-        if name in ("F2_SYSTEM_MESSAGE", "F2_SYSTEM_MESSAGE_UPSAMPLING_I2I", "F2_SYSTEM_MESSAGE_UPSAMPLING_T2I"):
-            continue
         res = preset_nodes.UC_SystemMessageVideoPresets.execute(name, False).args[0]
-        assert "opening frame" in res or "video generation" in res
+        assert len(res) > 30
+        assert "video" in res.lower()
+        if name not in ("F2_SYSTEM_MESSAGE", "F2_SYSTEM_MESSAGE_UPSAMPLING_I2I", "F2_SYSTEM_MESSAGE_UPSAMPLING_T2I"):
+            assert "video director" in res
+            assert "Use the reference image as the opening frame" not in res
 
     for name in inst_presets:
         res = preset_nodes.UC_InstructPromptVideoPresets.execute(name, False).args[0]
-        assert "opening frame" in res
+        assert len(res) > 30
+        assert "Render the video in authentic" in res
+        assert "Maintain spatial continuity" in res
+        assert "Use the reference image as the opening frame" not in res
+        assert "Make sure the subject is in the same position" not in res
 
     for name in bonus_presets:
         res = preset_nodes.UC_BonusPromptVideoPresets.execute(name, False).args[0]
-        assert "fluid video sequence" in res
+        assert len(res) > 30
+        assert "aesthetic" in res
+        assert "fluid video sequence in the" not in res
+        assert "Make sure" not in res
+        assert "Use the reference image" not in res
 
 
 def test_non_style_system_messages_load_natively():
