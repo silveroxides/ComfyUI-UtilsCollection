@@ -735,6 +735,147 @@ def test_continuation_encoder_list_batch_execution(monkeypatch):
     assert trim_frames == [22, 22]
 
 
+def test_ref_media_and_temporal_fusion_list_staged_execution():
+    from utils_collection_encoder_test.helpers import minimax_h3_reference_media_helpers
+
+    events = []
+
+    class RecordingVideoVAE:
+        def encode(self, frames):
+            events.append(("vae", int(frames.shape[0]), round(float(frames.mean()), 4)))
+            t_lat = 2 + max(0, (frames.shape[0] - 5) // 17) * 5
+            return torch.full((1, 24, t_lat, frames.shape[1] // 16, frames.shape[2] // 16), float(frames.mean()))
+
+    class RecordingAudioVAE:
+        audio_sample_rate = 32000
+        downscale_ratio = 800
+
+        def encode(self, samples):
+            events.append(("audio_vae", int(samples.shape[1])))
+            return torch.full((1, 32, 2, max(1, samples.shape[1] // 800)), float(samples.mean()))
+
+    class RecordingClip(_MiniMaxH3TestClip):
+        def encode_from_tokens_scheduled(self, tokens):
+            events.append(("clip", len(tokens["qwen3vl_32b"][0])))
+            return super().encode_from_tokens_scheduled(tokens)
+
+    ref_medias = [
+        UC_MiniMaxH3ReferenceMedia.execute(
+            reference_video_1=torch.full((22, 64, 64, 3), float(idx + 1) * 0.1),
+            reference_video_audio_1={"waveform": torch.full((1, 2, 16000), float(idx + 1) * 0.05), "sample_rate": 32000},
+        ).args[0]
+        for idx in range(3)
+    ]
+    prompts = ["scene one", "scene two", "scene three"]
+
+    clip = RecordingClip()
+    vae = RecordingVideoVAE()
+    audio_vae = RecordingAudioVAE()
+
+    conds, latents = UC_AdvancedMiniMaxH3RefMediaImageToVideo.execute(
+        clip=[clip],
+        vae=[vae],
+        prompt=prompts,
+        width=[64],
+        height=[64],
+        length=[22],
+        reference_media=ref_medias,
+        audio_vae=[audio_vae],
+        enable_caching=["disabled"],
+    ).args
+
+    assert [e[0] for e in events] == [
+        "vae", "vae", "vae",
+        "audio_vae", "audio_vae", "audio_vae",
+        "clip", "clip", "clip",
+    ]
+    assert len(conds) == 3
+    assert len(latents) == 3
+
+    for idx in range(3):
+        single_cond, single_lat = UC_AdvancedMiniMaxH3RefMediaImageToVideo.execute(
+            clip=_MiniMaxH3TestClip(),
+            vae=RecordingVideoVAE(),
+            prompt=prompts[idx],
+            width=64,
+            height=64,
+            length=22,
+            reference_media=ref_medias[idx],
+            audio_vae=RecordingAudioVAE(),
+            enable_caching="disabled",
+        ).args
+        assert torch.equal(conds[idx][0][0], single_cond[0][0])
+        assert conds[idx][0][1]["uc_minimax_h3_vlm_layout"] == single_cond[0][1]["uc_minimax_h3_vlm_layout"]
+        refs = conds[idx][0][1]["minimax_refs"]
+        assert [r["kind"] for r in refs] == ["video_audio"]
+        assert torch.equal(refs[0]["latent"], single_cond[0][1]["minimax_refs"][0]["latent"])
+        assert torch.equal(refs[0]["audio_latent"], single_cond[0][1]["minimax_refs"][0]["audio_latent"])
+        assert latents[idx].keys() == single_lat.keys()
+
+    # RefMedia Temporal Fusion child node: staged list execution across 3 videos
+    events.clear()
+    tf_config = encoder_helpers.build_minimax_h3_media_config(None, video_latent_mode="full video", temporal_density=2)
+    tf_conds, tf_latents = UC_AdvMiniMaxH3RefMediaImageToVideoTemporalFusion.execute(
+        clip=[RecordingClip()],
+        vae=[RecordingVideoVAE()],
+        prompt=prompts,
+        width=[64],
+        height=[64],
+        length=[22],
+        reference_media=ref_medias,
+        audio_vae=[RecordingAudioVAE()],
+        media_config=[tf_config],
+        fusion_method=["conds_fusion"],
+        enable_caching=["disabled"],
+    ).args
+    stage_order = [e[0] for e in events]
+    assert stage_order[:6] == ["vae", "vae", "vae", "audio_vae", "audio_vae", "audio_vae"]
+    assert all(stage == "clip" for stage in stage_order[6:])
+    assert len(stage_order[6:]) == 6  # 3 entries * 2 temporal lanes
+    assert len(tf_conds) == 3
+    assert len(tf_latents) == 3
+
+    # ImageToVideo Temporal Fusion (+ TokenFusion child): staged list execution & unwrapped media_config dict safety
+    events.clear()
+    videos = [torch.full((22, 64, 64, 3), 0.2), torch.full((22, 64, 64, 3), 0.4)]
+    i2v_tf_conds, i2v_tf_latents = encoder_nodes.UC_AdvMiniMaxH3ImageToVideoTemporalFusion.execute(
+        clip=[RecordingClip()],
+        vae=[RecordingVideoVAE()],
+        prompt=["shot a", "shot b"],
+        width=[64],
+        height=[64],
+        length=[22],
+        video=videos,
+        media_config=tf_config,
+        fusion_method=["conds_fusion"],
+        enable_caching=["disabled"],
+    ).args
+    i2v_stages = [e[0] for e in events]
+    assert i2v_stages[:2] == ["vae", "vae"]
+    assert i2v_stages[2:] == ["clip", "clip", "clip", "clip"]
+    assert len(i2v_tf_conds) == 2
+    assert len(i2v_tf_latents) == 2
+
+    # RefMedia prepare_minimax_h3_reference_video OOM temporal chunking fallback on 39-frame (5 + 2*17) video
+    chunk_lengths = []
+
+    class OOMAbove22VAE:
+        def encode(self, frames):
+            if frames.shape[0] > 22:
+                raise torch.OutOfMemoryError("simulated OOM on unchunked reference video")
+            chunk_lengths.append(int(frames.shape[0]))
+            t_lat = 2 + ((frames.shape[0] - 5) // 17) * 5
+            return torch.ones(1, 24, t_lat, frames.shape[1] // 16, frames.shape[2] // 16)
+
+    frames_out, ref_dict = minimax_h3_reference_media_helpers.prepare_minimax_h3_reference_video(
+        torch.zeros(39, 64, 64, 3), OOMAbove22VAE(), 124, encode_reference=True
+    )
+    assert frames_out.shape[0] == 39
+    assert chunk_lengths == [22, 22]
+    assert ref_dict["latent_t"] == 12
+    assert ref_dict["latent"].shape[2] == 12
+
+
 def test_advanced_visual_conditioning_list_batch_execution(monkeypatch):
     calls = []
 

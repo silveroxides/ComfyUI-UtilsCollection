@@ -665,9 +665,51 @@ def normalize_visual_fusion_method(method, default="conds_fusion"):
     raise ValueError(f"Unsupported visual fusion method: {method}")
 
 
+_NON_SLICED_DICT_KEYS = frozenset({
+    "media_config",
+    "reference_media",
+    "continuation_media",
+    "audio",
+    "visual_fusion_config",
+    "text_blend_config",
+})
+
+
 def is_list_batch_call(args_dict: dict) -> bool:
-    for k in ("clip", "prompt", "width", "height", "length", "vlm_resolution", "fusion_method", "video_latent_mode", "audio_vae", "vae"):
+    for k in (
+        "clip",
+        "prompt",
+        "width",
+        "height",
+        "length",
+        "vlm_resolution",
+        "vlm_video_resolution",
+        "fusion_method",
+        "video_latent_mode",
+        "audio_vae",
+        "vae",
+        "reference_media",
+        "video",
+        "audio",
+        "continuation_media",
+        "first_frame",
+        "last_frame",
+        "media_config",
+        "visual_fusion_config",
+        "text_blend_config",
+        "fusion_images",
+        "multiplier",
+        "ref_image_size",
+        "enable_caching",
+    ):
         if k in args_dict and isinstance(args_dict[k], (list, tuple)):
+            return True
+    for k, v in args_dict.items():
+        if isinstance(k, str) and k.startswith(("reference_image_", "image_")) and isinstance(v, (list, tuple)):
+            return True
+    for dict_key in ("reference_images", "image_inputs"):
+        d = args_dict.get(dict_key)
+        if isinstance(d, dict) and any(isinstance(sub_v, (list, tuple)) for sub_v in d.values()):
             return True
     return False
 
@@ -679,7 +721,7 @@ def get_list_batch_size(args_dict: dict) -> int:
             continue
         if isinstance(v, (list, tuple)) and len(v) > 0:
             batch_size = max(batch_size, len(v))
-        elif isinstance(v, dict):
+        elif isinstance(v, dict) and k not in _NON_SLICED_DICT_KEYS:
             for sub_k, sub_v in v.items():
                 if isinstance(sub_v, (list, tuple)) and len(sub_v) > 0:
                     batch_size = max(batch_size, len(sub_v))
@@ -693,7 +735,7 @@ def slice_item_inputs(args_dict: dict, index: int) -> dict:
             continue
         if isinstance(v, (list, tuple)):
             sliced[k] = None if len(v) == 0 else v[min(index, len(v) - 1)]
-        elif isinstance(v, dict):
+        elif isinstance(v, dict) and k not in _NON_SLICED_DICT_KEYS:
             sliced_dict = {}
             for sub_k, sub_v in v.items():
                 if isinstance(sub_v, (list, tuple)):
@@ -4056,10 +4098,10 @@ def _encode_minimax_h3_section(clip, tokens, visual_path, cache, *, section_kind
 def _minimax_h3_stage1_vae(item: dict, cache) -> dict:
     clip = item.get("clip")
     vae = item.get("vae")
-    while isinstance(clip, (tuple, list)) and len(clip) > 0:
-        clip = clip[0]
-    while isinstance(vae, (tuple, list)) and len(vae) > 0:
-        vae = vae[0]
+    while isinstance(clip, (tuple, list)):
+        clip = clip[0] if len(clip) > 0 else None
+    while isinstance(vae, (tuple, list)):
+        vae = vae[0] if len(vae) > 0 else None
     width = item.get("width")
     height = item.get("height")
     length = item.get("length")
@@ -4399,6 +4441,8 @@ def _minimax_h3_stage2_audio_vae(item: dict, stage1_res: dict, cache):
     audio = item.get("audio")
     continuation_media = item.get("continuation_media")
     audio_vae = item.get("audio_vae")
+    while isinstance(audio_vae, (tuple, list)):
+        audio_vae = audio_vae[0] if len(audio_vae) > 0 else None
     continuation_frames = stage1_res["continuation_frames"]
     continuation_has_latent = stage1_res["continuation_has_latent"]
 
