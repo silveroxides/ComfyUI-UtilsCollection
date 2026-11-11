@@ -2186,16 +2186,16 @@ Use the following template as guideline for constructing proper prompt and timel
 The storyboard input—whether in the form of a comic strip, a stitched-together row of images outlining the timeline progression, multiple separate images showing the progression of the timeline, or a video showing a detailed progression—is seen only by the VLM and supplies visual evidence for scene sequence, character poses, actions, interactions, dialogue, song, sound, and music. The response must never mention the storyboard, storyboard sequence, storyboard video, panels, comic strip, or stitched images, and must instead describe every single motion, action, interaction, dialogue, song, sound, and music from the storyboard directly in the response. By default, do not emit <Picture N> or <Video N> or any media identifier from the storyboard input itself, and omit `retention_analysis:`. Never infer <Picture N>, <Video N>, or <Audio N> reference tags merely from the presence of arbitrary media inputs.  
 Strict Graphic Strip Rule: Under no circumstances should comic book or graphic conventions, or the storyboard itself, be described or included in the output prompt. Never mention or write `storyboard`, `storyboard sequence`, `storyboard video`, `panels`, `panel 1`, `comic strip`, `stitched images`, `progression images`, or `input video` anywhere in `subject_definitions:`, `summary:`, `retention_analysis:`, or `Timeline:`, and never describe panel frames, borders, gutters, speech balloons, text boxes, sound effect lettering (onomatopoeia), speed lines, thought bubbles, or printed halftone patterns. The generated prompt must describe a realistic or cinematic scene as if shot on real camera, translating static panels, stitched image rows, separate progression images, or storyboard video progression into explicit, self-contained descriptions of every single motion, physical action, interaction, dialogue, song, sound, music, and real-world environment lighting.  
 Dialogue text visibly printed in speech bubbles must be transcribed into `[SPEECH]` rows and must not be described as floating graphic text.  
-Conditional User-Instructed Reference Rule: Only when the user instruction explicitly specifies that a media input or identifier (<Picture N>, <Video N>, <Audio N>) is an actual downstream reference (such as specifying a <Picture N> reference for a subject that should be retained or for a replacement subject, a frame anchor, or an <Audio N> reference) or explicitly instructs including media in `summary:` or `retention_analysis:`, you must follow that user instruction: cite `, referenced from <Picture N>.` on the corresponding <Subject N> in `subject_definitions:`, include the user-specified media reference in `summary:` when instructed, and include the `retention_analysis:` field between `summary:` and `detailed_description:`.  
+Conditional User-Instructed Reference Rule: Only when the user instruction explicitly specifies or naturally indicates that a media input or identifier (<Picture N>, <Video N>, <Audio N>) serves a downstream role (such as a <Picture N> visual reference for a retained or replacement subject, a frame anchor, an <Audio N> full soundtrack to copy/reuse, or an <Audio N> vocal timbre/voice delivery reference for a speaking subject) or instructs including media in `summary:` or `retention_analysis:`, you must autonomously construct the corresponding schema entries across all sections: define the reference in `subject_definitions:` (citing `, referenced from <Picture N>.` on the corresponding <Subject N> or adding the standalone <Audio N> / <Picture N> / <Video N> declaration line), include the applicable task type and media reference in `summary:`, and include the `retention_analysis:` field between `summary:` and `detailed_description:`. Any <Audio N>, <Picture N>, or <Video N> tag used in `Timeline:`, `overall_soundscape:`, or `non_diegetic_music:` requires its matching definition in `subject_definitions:` and relationship entry in `retention_analysis:`.  
 In-Place Character Replacement Rule (No Replacement Instructions): Because this workflow generates video without a source video input passed to the video generator, if the user requests replacing a character in the timeline, never write a prompt that instructs replacement, swapping, editing, or transfer. Instead, completely replace the character in the full description across all instances (`subject_definitions:`, `summary:`, optional `retention_analysis:`, and every segment in `Timeline:`): use the storyboard progression only for the setting, background, scene composition, framing, crop, viewing angle, subject pose, subject position, scale, orientation, limb placement, action, spatial relationships, and timeline progression, while ignoring the identity of the replaced character shown in the storyboard (never identify, name, retain, or describe that replaced subject's face, body traits, species, hair, anatomy, clothing, colors, markings, accessories, franchise, or other identifying appearance). Use the user request or designated replacement character source exclusively for the replacement subject's identity and complete visual appearance: using your broad knowledge, identify that replacement subject accurately and mention the subject by name when recognition is reliable, along with any supported intellectual property, theme, visual style, known media concept, species, costume, or character design associated with that subject, and derive the final subject's face, body traits, hair, anatomy, clothing, colors, markings, accessories, and all other identifying details only from the replacement character source without transferring any separate character reference image's setting, pose, framing, or static composition. Describe one completed target video in which the replacement subject fully occupies the poses, positions, actions, scale, orientation, and compositional role established by the storyboard progression across every instance. This is complete subject replacement, not resemblance, partial editing, costume transfer, identity blending, or a combination of both subjects; no visual trait belonging to the replaced character may survive. Write the response as a direct description of the finished result: never mention an original replaced subject, a replacement process, source-scene comparison, transfer, or the editing process, and describe the replacement subject as the only subject who was always present in that role in the resulting scene and performing the actions shown across the timeline (while still citing `, referenced from <Picture N>.` in `subject_definitions:`, mentioning <Picture N> in `summary:` if requested, and tracking <Subject N> in `retention_analysis:` if and only if the user instruction explicitly designates <Picture N> as a downstream reference for that subject).  
 
-Template:
+Default Template (Visual Storyboard Progression Only — No Downstream Media Tags Requested):
 
 subject_definitions:
 <Subject {N}> is a {visual description of the subject that will be used in the video}.
 
 summary:
-[reference generation] The target video depicts <Subject {N}> {concise overview of the concrete physical actions, motion, interactions, setting, governing visual style, and any user-specified <Picture N> / <Audio N> / <Video N> references across the video}.
+[reference generation] The target video depicts <Subject {N}> {concise overview of the concrete physical actions, motion, interactions, setting, and governing visual style across the video}.
 
 detailed_description:
 Timeline:
@@ -2203,43 +2203,114 @@ Timeline:
 [VISUAL]: [Shot 1] {Composition Shot}. <Subject {N}> {Detailed 3-5 sentence establishing description of the real-world environment, lighting, camera framing, exact subject positioning and posture, and complete chronological motion trajectory, limb movements, facial expression, and clothing dynamics from the opening moment to the end of the segment.}
 [SPEECH]: <Subject {N}> (S{N}) `<d>`[{Language}] {dialogue transcribed from speech bubble or spoken/sung vocals; omit entire row if no speech} `</d>`
 [SOUNDS]: {completely optional 3-6 words for non-musical physical sound effects only if verifiably present; omit entire row if none. Do NOT put music, beats, bass, drums, rhythm, instruments, or comic onomatopoeia here}
-[MUSIC]: {when user instruction specifies a copied or referenced soundtrack/music <Audio N>, write <Audio N>; otherwise optional segment-specific music or omit row}
+[MUSIC]: {optional segment-specific music or omit row}
 
 [{MM.SS}s-{MM.SS}s]:
 [VISUAL]: <Subject {N}> {Detailed 3-5 sentence description of continuous physical motion, step-by-step body mechanics, limb trajectories, posture shifts, clothing and prop movement, spatial positioning, and gradual camera movement from the previous segment without a cut.}
 [SPEECH]: <Subject {N}> (S{N}) `<d>`[{Language}] {dialogue transcribed from speech bubble or spoken/sung vocals; omit entire row if no speech} `</d>`
 [SOUNDS]: {completely optional 3-6 words for non-musical physical sound effects only if verifiably present; omit entire row if none. Do NOT put music, beats, bass, drums, rhythm, instruments, or comic onomatopoeia here}
-[MUSIC]: {when user instruction specifies a copied or referenced soundtrack/music <Audio N>, write <Audio N>; otherwise optional segment-specific music or omit row}
+[MUSIC]: {optional segment-specific music or omit row}
 
 [{MM.SS}s-{MM.SS}s]:
 [VISUAL]: [Shot 2] <Subject {N}> {Detailed 3-5 sentence description of instant cut or perspective shift to a new angle, establishing the new framing and spatial geometry, followed by the complete physical motion trajectory, body mechanics, and interaction to the end of the segment.}
 [SPEECH]: <Subject {N}> (S{N}) `<d>`[{Language}] {dialogue transcribed from speech bubble or spoken/sung vocals; omit entire row if no speech} `</d>`
 [SOUNDS]: {completely optional 3-6 words for non-musical physical sound effects only if verifiably present; omit entire row if none. Do NOT put music, beats, bass, drums, rhythm, instruments, or comic onomatopoeia here}
-[MUSIC]: {when user instruction specifies a copied or referenced soundtrack/music <Audio N>, write <Audio N>; otherwise optional segment-specific music or omit row}
+[MUSIC]: {optional segment-specific music or omit row}
 
 [{MM.SS}s-{MM.SS}s]:
 [VISUAL]: <Subject {N}> {Detailed 3-5 sentence description of the chronological sequence of physical actions, body weight shifts, arm and leg trajectories, facial expression, fabric and lighting dynamics, and gradual camera movement from start to end of the segment.}
 [SPEECH]: <Subject {N}> (S{N}) `<d>`[{Language}] {dialogue transcribed from speech bubble or spoken/sung vocals; omit entire row if no speech} `</d>`
 [SOUNDS]: {completely optional 3-6 words for non-musical physical sound effects only if verifiably present; omit entire row if none. Do NOT put music, beats, bass, drums, rhythm, instruments, or comic onomatopoeia here}
-[MUSIC]: {when user instruction specifies a copied or referenced soundtrack/music <Audio N>, write <Audio N>; otherwise optional segment-specific music or omit row}
+[MUSIC]: {optional segment-specific music or omit row}
 
 [{MM.SS}s-{MM.SS}s]:
 [VISUAL]: <Subject {N}> {Detailed 3-5 sentence description of continuous physical motion, detailed body mechanics, interaction with props or environment, clothing movement, and camera trajectory from start to end of the segment.}
 [SPEECH]: <Subject {N}> (S{N}) `<d>`[{Language}] {dialogue transcribed from speech bubble or spoken/sung vocals; omit entire row if no speech} `</d>`
 [SOUNDS]: {completely optional 3-6 words for non-musical physical sound effects only if verifiably present; omit entire row if none. Do NOT put music, beats, bass, drums, rhythm, instruments, or comic onomatopoeia here}
-[MUSIC]: {when user instruction specifies a copied or referenced soundtrack/music <Audio N>, write <Audio N>; otherwise optional segment-specific music or omit row}
+[MUSIC]: {optional segment-specific music or omit row}
 
 [{MM.SS}s-{MM.SS}s]:
 [VISUAL]: <Subject {N}> {Detailed 3-5 sentence description of the concluding sequence of physical movements, posture transitions, limb and prop positioning, and final stance at the end of the segment.}
 [SPEECH]: <Subject {N}> (S{N}) `<d>`[{Language}] {dialogue transcribed from speech bubble or spoken/sung vocals; omit entire row if no speech} `</d>`
 [SOUNDS]: {completely optional 3-6 words for non-musical physical sound effects only if verifiably present; omit entire row if none. Do NOT put music, beats, bass, drums, rhythm, instruments, or comic onomatopoeia here}
-[MUSIC]: {when user instruction specifies a copied or referenced soundtrack/music <Audio N>, write <Audio N>; otherwise optional segment-specific music or omit row}
+[MUSIC]: {optional segment-specific music or omit row}
 
 overall_soundscape:
-{When a soundtrack <Audio N> is specified by user instruction, begin with: <Audio N> provides the complete synchronized audio landscape consisting of ...; otherwise summarize ambient sound, physical action sounds, and non-verbal human sounds across the complete duration.}
+{Summarize ambient sound, physical action sounds, and non-verbal human sounds across the complete duration.}
 
 non_diegetic_music:
-{When a soundtrack or music <Audio N> is specified by user instruction, begin with: <Audio N> serves as the full ... throughout the video; otherwise one to three English sentences describing background music or N/A.}
+{One to three English sentences describing background music or N/A.}
+
+Conditional Downstream Reference Variants (Autonomously Constructed from User Semantic Intent):
+
+Variant A — Full Soundtrack / Audio Copy Intent (when the user instruction indicates that <Audio 1> or <Audio N> is the full soundtrack, background music, or audio track to copy or retain for the video):
+
+subject_definitions:
+<Subject {N}> is a {visual description of the subject that will be used in the video}.
+<Audio 1> is the full soundtrack containing {list of audio elements}.
+
+summary:
+[reference generation + audio reuse] The target video depicts <Subject {N}> {concise overview of the concrete physical actions, motion, interactions, setting, and governing visual style}, retaining the full audio track from <Audio 1>.
+
+retention_analysis:
+<Audio 1>: fully_copy - source audio track is copied entirely
+
+detailed_description:
+Timeline:
+[00.00s-{MM.SS}s]:
+[VISUAL]: [Shot 1] {Composition Shot}. <Subject {N}> {Detailed 3-5 sentence establishing description of the real-world environment, lighting, camera framing, exact subject positioning and posture, and complete chronological motion trajectory, limb movements, facial expression, and clothing dynamics from the opening moment to the end of the segment.}
+[SPEECH]: <Subject {N}> (S{N}) `<d>`[{Language}] {dialogue or lyrics transcribed from speech bubble or soundtrack; omit entire row if no speech} `</d>`
+[SOUNDS]: {completely optional 3-6 words for non-musical physical sound effects only if verifiably present; omit entire row if none. Do NOT put music, beats, bass, drums, rhythm, instruments, or comic onomatopoeia here}
+[MUSIC]: <Audio 1>
+
+[{MM.SS}s-{MM.SS}s]:
+[VISUAL]: <Subject {N}> {Detailed 3-5 sentence description of continuous physical motion, step-by-step body mechanics, limb trajectories, posture shifts, clothing and prop movement, spatial positioning, and gradual camera movement from the previous segment without a cut.}
+[SPEECH]: <Subject {N}> (S{N}) `<d>`[{Language}] {dialogue or lyrics transcribed from speech bubble or soundtrack; omit entire row if no speech} `</d>`
+[SOUNDS]: {completely optional 3-6 words for non-musical physical sound effects only if verifiably present; omit entire row if none. Do NOT put music, beats, bass, drums, rhythm, instruments, or comic onomatopoeia here}
+[MUSIC]: <Audio 1>
+
+overall_soundscape:
+<Audio 1> provides the complete synchronized audio landscape consisting of {description of the audio elements}.
+
+non_diegetic_music:
+<Audio 1> serves as the full {description of the music} throughout the video.
+
+Variant B — Vocal Timbre / Voice Reference Intent (when the user instruction indicates that <Audio 1> or <Audio N> provides vocal timbre, voice reference, language, or delivery style for a speaking subject without copying the audio signal):
+
+subject_definitions:
+<Subject {N}> is a {visual description of the subject that will be used in the video}.
+<Audio 1> is the vocal-timbre reference providing pitch, tone, and delivery style for <Subject {N}> (S{N}) without audio signal copying.
+
+summary:
+[reference generation + audio reference] The target video depicts <Subject {N}> {concise overview of the concrete physical actions, motion, interactions, setting, and governing visual style}, referencing vocal timbre from <Audio 1>.
+
+retention_analysis:
+<Audio 1>: reference - vocal timbre and delivery guide speech of <Subject {N}> (S{N}) without copying audio signal
+
+detailed_description:
+Timeline:
+[00.00s-{MM.SS}s]:
+[VISUAL]: [Shot 1] {Composition Shot}. <Subject {N}> {Detailed 3-5 sentence establishing description of the real-world environment, lighting, camera framing, exact subject positioning and posture, and complete chronological motion trajectory, limb movements, facial expression, and clothing dynamics from the opening moment to the end of the segment.}
+[SPEECH]: <Subject {N}> (S{N}) `<d>`[{Language}] {spoken dialogue following the referenced vocal timbre; omit entire row if no speech} `</d>`
+[SOUNDS]: {completely optional 3-6 words for non-musical physical sound effects only if verifiably present; omit entire row if none. Do NOT put music, beats, bass, drums, rhythm, instruments, or comic onomatopoeia here}
+[MUSIC]: {optional segment-specific music or omit row}
+
+overall_soundscape:
+{Summarize ambient sound, physical action sounds, and non-verbal human sounds across the complete duration. Do not copy audio from <Audio 1>.}
+
+non_diegetic_music:
+{One to three English sentences describing background music or N/A.}
+
+Variant C — Subject Visual Reference Intent (when the user instruction indicates that a retained or replacement <Subject {N}> uses <Picture {N}> for visual appearance; combine with Default, Variant A, or Variant B as applicable):
+
+subject_definitions:
+<Subject {N}> is a {visual description of the subject that will be used in the video}, referenced from <Picture {N}>.
+
+summary:
+[reference generation] The target video depicts <Subject {N}>, referenced from <Picture {N}>, {concise overview of the concrete physical actions, motion, interactions, setting, and governing visual style across the video}.
+
+retention_analysis:
+<Subject {N}>: partially_preserved - visual identity, facial features, hair, and outfit from <Picture {N}> retained while performing target scene actions
 
 #### subject_definitions
 
@@ -2293,7 +2364,7 @@ Use this block order:
 [SOUNDS]: synchronized ambience, physical sound, and non-verbal sound  
 [MUSIC]: synchronized diegetic or segment-specific music  
 
-Omit the complete [SPEECH] line when no speech occurs. Never describe a subject as singing, speaking, talking, or vocalizing inside [VISUAL] unless a corresponding [SPEECH] line is present in that exact timestamp block. Omit the complete [SOUNDS] line when no distinct non-musical physical sound effect occurs; never put music, beats, basslines, drums, rhythm, or instruments inside [SOUNDS]. Omit the complete [MUSIC] line when no segment-specific music occurs, except when a soundtrack or music <Audio N> reference is explicitly specified by the user instruction, in which case write [MUSIC]: <Audio N>.
+Omit the complete [SPEECH] line when no speech occurs. Never describe a subject as singing, speaking, talking, or vocalizing inside [VISUAL] unless a corresponding [SPEECH] line is present in that exact timestamp block. Omit the complete [SOUNDS] line when no distinct non-musical physical sound effect occurs; never put music, beats, basslines, drums, rhythm, or instruments inside [SOUNDS]. Omit the complete [MUSIC] line when no segment-specific music occurs, except when the user instruction indicates copying a full soundtrack or music <Audio N> (defined in `subject_definitions:` and tracked with `fully_copy` or `partially_copy` in `retention_analysis:`), in which case write [MUSIC]: <Audio N>.
 
 Segment Visual and Motion Density Requirement: Every `[VISUAL]` block must be a rich, comprehensive 3 to 5 sentence description (roughly 50 to 90 words per segment)—never a single short sentence. In every segment, explicitly detail: (1) the subject's exact spatial position, stance, body orientation, and posture in the environment; (2) the complete start-to-end chronological trajectory of every moving body part (head, torso, shoulders, arms, hands, hips, legs, feet) and held prop; (3) the physical dynamics of clothing folds, accessories, hair, and lighting highlights on the subject and environment; and (4) camera framing, viewing angle, and camera movement.
 

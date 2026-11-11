@@ -2004,6 +2004,14 @@ def test_minimax_h3_storyboard_any2va_contract():
         assert "summary:" in instruction
         assert "retention_analysis:" in instruction
         assert "detailed_description:" in instruction
+        assert "Default Template (Visual Storyboard Progression Only — No Downstream Media Tags Requested):" in instruction
+        assert "Conditional Downstream Reference Variants (Autonomously Constructed from User Semantic Intent):" in instruction
+        assert "Variant A — Full Soundtrack / Audio Copy Intent" in instruction
+        assert "Variant B — Vocal Timbre / Voice Reference Intent" in instruction
+        assert "Variant C — Subject Visual Reference Intent" in instruction
+        assert "when user instruction specifies a copied or referenced soundtrack/music <Audio N>" not in instruction
+        assert "<Audio 1>: fully_copy - source audio track is copied entirely" in instruction
+        assert "<Audio 1>: reference - vocal timbre and delivery guide speech of <Subject {N}> (S{N}) without copying audio signal" in instruction
         assert re.search(r"\{[^{}]*\{[^{}]*\}[^{}]*\}", instruction) is None
 
 
