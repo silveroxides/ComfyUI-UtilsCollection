@@ -216,9 +216,9 @@ def test_every_video_preset_is_loaded_natively():
     inst_presets = preset_nodes.UC_InstructPromptVideoPresets.get_presets()
     bonus_presets = preset_nodes.UC_BonusPromptVideoPresets.get_presets()
 
-    assert len(sys_presets) == 62
-    assert len(inst_presets) == 59
-    assert len(bonus_presets) == 59
+    assert len(sys_presets) == 87
+    assert len(inst_presets) == 84
+    assert len(bonus_presets) == 84
 
     for name in sys_presets:
         res = preset_nodes.UC_SystemMessageVideoPresets.execute(name, False).args[0]
@@ -243,6 +243,49 @@ def test_every_video_preset_is_loaded_natively():
         assert "fluid video sequence in the" not in res
         assert "Make sure" not in res
         assert "Use the reference image" not in res
+
+    named_checks = {
+        "STYLE_JOJO": "JoJo",
+        "STYLE_GHIBLI": "Studio Ghibli",
+        "STYLE_DRAGON_BALL_Z": "Dragon Ball Z",
+        "STYLE_MINECRAFT": "Minecraft",
+        "STYLE_SKYRIM": "Skyrim",
+        "STYLE_PIXAR": "Pixar",
+        "STYLE_DISNEY": "Disney",
+        "STYLE_SOUTH_PARK": "South Park",
+        "STYLE_BOBS_BURGERS": "Bob's Burgers",
+        "STYLE_RICK_AND_MORTY": "Rick and Morty",
+        "STYLE_MARIO": "Super Mario",
+        "STYLE_POKEMON": "Pokémon",
+        "STYLE_LOL_SPLASH": "League of Legends",
+        "STYLE_DND_ILLUSTRATION": "Dungeons & Dragons",
+        "STYLE_PHOTOGRAPHY_KODACHROME": "Kodachrome",
+        "STYLE_PHOTOGRAPHY_POLAROID": "Polaroid",
+        "STYLE_PS1": "PlayStation",
+        "STYLE_COWBOY_BEBOP": "Cowboy Bebop",
+        "STYLE_SAILOR_MOON": "Sailor Moon",
+        "STYLE_ADVENTURE_TIME": "Adventure Time",
+        "STYLE_GRAVITY_FALLS": "Gravity Falls",
+        "STYLE_GROENING": "Matt Groening",
+        "STYLE_MACFARLANE": "Seth MacFarlane",
+        "STYLE_NICKELODEON": "Nickelodeon",
+        "STYLE_CARTOON_NETWORK": "Cartoon Network",
+        "STYLE_ADULT_SWIM": "Adult Swim",
+        "STYLE_LOONEY_TUNES": "Looney Tunes",
+        "STYLE_SIMS": "The Sims",
+        "STYLE_ZELDA_3D": "The Legend of Zelda",
+        "STYLE_ZELDA_RETRO": "The Legend of Zelda",
+        "STYLE_STEAMPUNK": "steampunk",
+        "STYLE_WATERCOLOR": "watercolor",
+        "STYLE_STAINED_GLASS": "stained glass",
+    }
+    for preset_key, expected_token in named_checks.items():
+        s = preset_nodes.UC_SystemMessageVideoPresets.execute(preset_key, False).args[0]
+        i = preset_nodes.UC_InstructPromptVideoPresets.execute(preset_key, False).args[0]
+        b = preset_nodes.UC_BonusPromptVideoPresets.execute(preset_key, False).args[0]
+        assert expected_token.lower() in s.lower(), f"{expected_token} missing from system preset {preset_key}"
+        assert expected_token.lower() in i.lower(), f"{expected_token} missing from instruct preset {preset_key}"
+        assert expected_token.lower() in b.lower(), f"{expected_token} missing from bonus preset {preset_key}"
 
 
 def test_non_style_system_messages_load_natively():
