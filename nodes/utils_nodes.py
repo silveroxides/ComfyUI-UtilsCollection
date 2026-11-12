@@ -1777,8 +1777,9 @@ class UC_HighResolutionTilingGuide(io.ComfyNode):
             node_id="UC_HighResolutionTilingGuide",
             display_name="High Resolution Tiling Guide",
             category="utils/documentation",
-            inputs=[io.Combo.Input("topic", options=["workflow", "split_settings", "overlap_masks", "depth_structure_mask", "visual_conditioning", "sampling", "accumulation"], default="workflow", tooltip="Select the high-resolution tiled workflow topic.")],
-            outputs=[io.String.Output(display_name="markdown")],
+            description="Returns workflow documentation for splitting, sampling, and recombining high-resolution image tiles and MiniMax H3 latent video upscaling.",
+            inputs=[io.Combo.Input("topic", options=["workflow", "split_settings", "overlap_masks", "depth_structure_mask", "visual_conditioning", "sampling", "accumulation", "minimax_h3_latent_upscale"], default="workflow", tooltip="Select the high-resolution tiled workflow topic.")],
+            outputs=[io.String.Output(display_name="markdown", tooltip="Markdown workflow guide ready for Preview as Markdown.")],
         )
 
     @classmethod
@@ -1842,6 +1843,24 @@ class UC_HighResolutionTilingGuide(io.ComfyNode):
                 "Decode the sampled latent list with the same VAE used by the splitter. Connect that decoded image list to `images` and connect the splitter's matching `tile layout` directly to the accumulator.\n\n"
                 "`UC_HighResolutionTileAccumulator` consumes the complete image list in one execution. It removes VAE padding, places every tile at its recorded source coordinates, applies the stored feather weights, and normalizes overlapping contributions.\n\n"
                 "Do not reorder, omit, or insert list items before accumulation. The image list must contain exactly the tiles described by that layout."
+            ),
+            "minimax_h3_latent_upscale": (
+                "## MiniMax H3 latent upscale and tiled refinement\n\n"
+                "Upscale MiniMax H3 video or joint audio-video latents directly in latent space, then refine details with overlapping 2D spatial tiles at every denoising step—without decoding and re-encoding through the video VAE.\n\n"
+                "```text\n"
+                "[Base H3 Latent] ──► UC_MiniMaxH3LatentUpscale ◄── UC_MiniMaxH3LatentUpscaleLoader (2d_conv_v1 / 3d_conv_v1)\n"
+                "                               │ (upscaled video latent; attached audio unchanged)\n"
+                "[MiniMax H3 Model] ─► UC_MiniMaxH3ContextPatcher ─► UC_MiniMaxH3SpatialTilePatcher ─► UC_UnifiedAttentionPatcher ─► UC_MiniMaxH3Cache\n"
+                "                               │\n"
+                "[BasicScheduler + SplitSigmasDenoise (denoise 0.35–0.50)] + [BasicGuider / CFGGuider] + [Upscaled Latent]\n"
+                "                               ▼\n"
+                "     SamplerCustomAdvanced (or UC_MiniMaxH3ClipContinuationSampler) ──► MiniMaxH3VAEDecode\n"
+                "```\n\n"
+                "### Practical settings\n\n"
+                "- **Upscaler checkpoint (`UC_MiniMaxH3LatentUpscaleLoader`)**: `2d_conv_v1` is half the file size, covers `1.1x–4.0x` (`scale_by`, `dimensions`, or `megapixels`), and exposes `sharpness` `1` (most faithful) through `6` (crispest). `3d_conv_v1` targets `2x`, `2.25x`, `2.5x`, and `4x`.\n"
+                "- **Refinement denoise (`SplitSigmasDenoise`)**: start around `0.35–0.50` so refinement adds high-frequency texture while preserving first-pass motion, composition, and lip sync.\n"
+                "- **Spatial tiling (`UC_MiniMaxH3SpatialTilePatcher`)**: defaults (`tile_width=768`, `tile_height=768`, `overlap_ratio=0.25`, `min_tile_size=256`, `blend_profile=cosine`) fit typical 24 GB GPUs. Lower tile dimensions to `512` on tighter VRAM or raise to `960–1024` to run fewer tiles per step.\n"
+                "- **Patcher stacking**: connect `UC_MiniMaxH3ContextPatcher` for long clips, `UC_MiniMaxH3SpatialTilePatcher` for high spatial resolution, then `UC_UnifiedAttentionPatcher` and `UC_MiniMaxH3Cache` in series before the guider."
             ),
         }
         return io.NodeOutput(topics.get(topic, "Unknown topic selected."))

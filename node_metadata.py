@@ -124,7 +124,7 @@ DESCRIPTIONS = {
     "UC_Krea2LayerAblator": "Removes selected refusal-direction components from Krea2 conditioning layers.",
     "UC_EncoderNodesGuide": "Returns documentation for the node pack's advanced encoder workflows.",
     "UC_CompositeNodesGuide": "Returns documentation for background replacement, staged compositing, and MediaPipe face workflows.",
-    "UC_HighResolutionTilingGuide": "Returns documentation for splitting, sampling, and recombining high-resolution image tiles.",
+    "UC_HighResolutionTilingGuide": "Returns workflow documentation for high-resolution image tiling and MiniMax H3 latent video upscaling.",
     "UC_LoraLoaderCLIPOnly": "Loads a LoRA into the text encoder without modifying the diffusion model.",
     "UC_LoraLoaderModelOnly": "Loads a LoRA into the diffusion model with layer regex and transformer block filtering.",
     "UC_LoraStackLoaderModelOnly": "Applies a stack of LoRAs to a diffusion model using a recursive DynamicCombo template.",
@@ -270,6 +270,7 @@ EXTRA_ALIASES = {
     "UC_MiniMaxH3LatentUpscaleLoader": ["minimax h3 latent upscaler", "h3 latent upscale loader", "minimax upscaler", "latent upscale model", "2d_conv_v1", "3d_conv_v1"],
     "UC_MiniMaxH3LatentUpscale": ["minimax h3 latent upscale", "h3 latent upscaler", "minimax video upscale", "h3 hires latent", "latent super resolution"],
     "UC_MiniMaxH3SpatialTilePatcher": ["minimax spatial tiles", "h3 tiled diffusion", "spatial tile patcher", "mmh3 split upscale", "h3 hires patcher", "tiled video upscale"],
+    "UC_HighResolutionTilingGuide": ["tiling guide", "hires guide", "minimax upscale guide", "h3 spatial tile guide", "upscale wiring"],
 }
 
 

@@ -407,6 +407,18 @@ Place the `.safetensors` file in `ComfyUI/models/latent_upscale_models` (or in t
 
 For second-pass refinement of upscaled high-resolution clips that exceed single-pass GPU memory, patch the MiniMax H3 model with `UC_MiniMaxH3SpatialTilePatcher` (stackable directly onto `UC_MiniMaxH3ContextPatcher`, `UC_UnifiedAttentionPatcher`, and `UC_MiniMaxH3Cache`) and feed it through `BasicGuider` or `CFGGuider` into standard `SamplerCustomAdvanced` or `UC_MiniMaxH3ClipContinuationSampler`. Evaluating and blending overlapping 2D spatial tiles at every denoising step avoids tile seams, color drift, and custom sampler loops while preserving full reference media and cropping keyframe guides per tile.
 
+Reference wiring (paste directly into ComfyUI `MarkdownNote` / `Note`, or select `minimax_h3_latent_upscale` on `UC_HighResolutionTilingGuide` -> `UC_MarkdownPreview`):
+
+```text
+[Base H3 Latent] ──► UC_MiniMaxH3LatentUpscale ◄── UC_MiniMaxH3LatentUpscaleLoader (2d_conv_v1 / 3d_conv_v1)
+                               │ (upscaled video latent; attached audio unchanged)
+[MiniMax H3 Model] ─► UC_MiniMaxH3ContextPatcher ─► UC_MiniMaxH3SpatialTilePatcher ─► UC_UnifiedAttentionPatcher ─► UC_MiniMaxH3Cache
+                               │
+[BasicScheduler + SplitSigmasDenoise (denoise 0.35–0.50)] + [BasicGuider / CFGGuider] + [Upscaled Latent]
+                               ▼
+     SamplerCustomAdvanced (or UC_MiniMaxH3ClipContinuationSampler) ──► MiniMaxH3VAEDecode
+```
+
 ### Unified Attention Patcher
 
 `UC_UnifiedAttentionPatcher` returns a cloned model with one selected attention

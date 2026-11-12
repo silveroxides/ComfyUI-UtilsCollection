@@ -2,7 +2,6 @@ import pathlib
 import sys
 import types
 
-
 CUSTOM_NODE_ROOT = pathlib.Path(__file__).parents[1]
 PACKAGE_NAME = "utils_collection_high_resolution_tiling_guide_test"
 package = types.ModuleType(PACKAGE_NAME)
@@ -14,22 +13,11 @@ from comfy.cli_args import args as cli_args
 prior_cpu = cli_args.cpu
 cli_args.cpu = True
 try:
-    from utils_collection_high_resolution_tiling_guide_test.nodes.utils_nodes import (
-        UC_HighResolutionTilingGuide,
-    )
+    from utils_collection_high_resolution_tiling_guide_test.nodes.utils_nodes import UC_HighResolutionTilingGuide
 finally:
     cli_args.cpu = prior_cpu
 
-
-EXPECTED_TOPICS = [
-    "workflow",
-    "split_settings",
-    "overlap_masks",
-    "depth_structure_mask",
-    "visual_conditioning",
-    "sampling",
-    "accumulation",
-]
+EXPECTED_TOPICS = ["workflow", "split_settings", "overlap_masks", "depth_structure_mask", "visual_conditioning", "sampling", "accumulation", "minimax_h3_latent_upscale"]
 
 
 def test_high_resolution_tiling_guide_schema_and_topics():
@@ -50,11 +38,10 @@ def test_high_resolution_tiling_guide_documents_execution_contract():
     workflow = UC_HighResolutionTilingGuide.execute("workflow").args[0]
     masks = UC_HighResolutionTilingGuide.execute("overlap_masks").args[0]
     depth = UC_HighResolutionTilingGuide.execute("depth_structure_mask").args[0]
-    conditioning = UC_HighResolutionTilingGuide.execute(
-        "visual_conditioning"
-    ).args[0]
+    conditioning = UC_HighResolutionTilingGuide.execute("visual_conditioning").args[0]
     sampling = UC_HighResolutionTilingGuide.execute("sampling").args[0]
     accumulation = UC_HighResolutionTilingGuide.execute("accumulation").args[0]
+    minimax_upscale = UC_HighResolutionTilingGuide.execute("minimax_h3_latent_upscale").args[0]
 
     assert "true ComfyUI lists" in workflow
     assert "exact padded tensor sent to VAE encoding" in workflow
@@ -69,3 +56,8 @@ def test_high_resolution_tiling_guide_documents_execution_contract():
     assert "`differential_diffusion_value` is mode-dependent" in sampling
     assert "does not implement a sampler" in sampling
     assert "exactly the tiles described by that layout" in accumulation
+    assert "UC_MiniMaxH3LatentUpscaleLoader" in minimax_upscale
+    assert "UC_MiniMaxH3LatentUpscale" in minimax_upscale
+    assert "UC_MiniMaxH3SpatialTilePatcher" in minimax_upscale
+    assert "SplitSigmasDenoise" in minimax_upscale
+    assert "tile_width=768" in minimax_upscale
