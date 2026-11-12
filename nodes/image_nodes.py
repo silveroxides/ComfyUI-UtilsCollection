@@ -1521,17 +1521,8 @@ class UC_ImagePad(io.ComfyNode):
                 io.Int.Input("right", default=0, min=0, max=MAX_RESOLUTION, step=1, tooltip="Pixels added to the right when target dimensions are disconnected. When target dimensions are connected, weights horizontal padding direction; 0 centers unless other horizontal direction is set."),
                 io.Int.Input("top", default=0, min=0, max=MAX_RESOLUTION, step=1, tooltip="Pixels added above the image when target dimensions are disconnected. When target dimensions are connected, weights vertical padding direction; 0 centers unless other vertical direction is set."),
                 io.Int.Input("bottom", default=0, min=0, max=MAX_RESOLUTION, step=1, tooltip="Pixels added below the image when target dimensions are disconnected. When target dimensions are connected, weights vertical padding direction; 0 centers unless other vertical direction is set."),
-                io.Int.Input(
-                    "extra_padding",
-                    default=0,
-                    min=0,
-                    max=MAX_RESOLUTION,
-                    step=1,
-                    tooltip="Additional padding on all sides when target dimensions are disconnected. When target dimensions are connected, adds extra padding in directions above 0 scaled relative to the maximum directional value, or expands existing target-padded axes if all directions are 0.",
-                ),
-                io.Combo.Input(
-                    "pad_mode", default="edge", options=["edge", "edge_pixel", "color", "pillarbox_blur"], tooltip="edge: Extend the edge pixels. edge_pixel: Extend the edge pixels but keep the original edge pixel color. color: Fill with a solid color. pillarbox_blur: Fill with a blurred version of the image."
-                ),
+                io.Int.Input("extra_padding", default=0, min=0, max=MAX_RESOLUTION, step=1, tooltip="Additional padding on all sides when target dimensions are disconnected. When target dimensions are connected, adds extra padding in directions above 0 scaled relative to the maximum directional value, or expands existing target-padded axes if all directions are 0."),
+                io.Combo.Input("pad_mode", default="edge", options=["edge", "edge_pixel", "color", "pillarbox_blur"], tooltip="edge: Extend the edge pixels. edge_pixel: Extend the edge pixels but keep the original edge pixel color. color: Fill with a solid color. pillarbox_blur: Fill with a blurred version of the image."),
                 io.String.Input("color", multiline=False, default="0, 0, 0", tooltip="Color as RGB values in range 0-255 or 0.0-1.0, or color name or hex code"),
                 io.Mask.Input("mask", optional=True, tooltip="Optional source mask padded with value 1 outside the image; disconnected creates a mask for the added border."),
                 io.Int.Input("target_width", default=512, min=0, max=MAX_RESOLUTION, step=1, force_input=True, optional=True, tooltip="Optional final width. Connect both target dimensions to proportionally fit and center the image."),
@@ -1757,9 +1748,7 @@ class UC_HighResolutionTileSplit(io.ComfyNode):
                 io.Float.Input("feather_width", default=1.0, min=0.0, max=1.0, step=0.01, tooltip="Fraction of each overlap occupied by the mask transition."),
                 io.Float.Input("mask_strength", default=1.0, min=0.0, max=1.0, step=0.01, tooltip=("Overlap edge protection. 0 leaves the mask flat; 1 reaches zero at protected internal tile edges.")),
                 io.Combo.Input("differential_diffusion_mode", options=["off", "core", "advanced"], default="off", tooltip=("off leaves the model unchanged. core applies ComfyUI Core Differential Diffusion. advanced uses the threshold multiplier control.")),
-                io.Float.Input(
-                    "differential_diffusion_value", default=1.0, min=-10.0, max=10.0, step=0.001, tooltip=("Mode-dependent value. Core: strength from 0 to 1, blending its progressive binary mask with the soft mask. Advanced: nonzero threshold divisor from -10 to 10, matching KJNodes Differential Diffusion Advanced.")
-                ),
+                io.Float.Input("differential_diffusion_value", default=1.0, min=-10.0, max=10.0, step=0.001, tooltip=("Mode-dependent value. Core: strength from 0 to 1, blending its progressive binary mask with the soft mask. Advanced: nonzero threshold divisor from -10 to 10, matching KJNodes Differential Diffusion Advanced.")),
                 io.Image.Input("depth_map", optional=True, tooltip=("Optional grayscale depth image used to preserve structure across solid and feathered denoise-mask regions. It is converted to luminance and resized to the source image.")),
                 io.Float.Input("depth_influence", default=1.0, min=-1.0, max=1.0, step=0.01, tooltip=("Signed depth-mask influence. Positive values use the map as supplied, negative values use its inverse, and the magnitude controls the effect. 0 disables depth modulation.")),
             ],
