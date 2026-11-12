@@ -1,32 +1,34 @@
-import sys
-import random
-from collections.abc import Mapping
-from fractions import Fraction
-from typing import Union
 import json
 import logging
 import os
+import random
+import sys
+from collections.abc import Mapping
+from fractions import Fraction
+from typing import Union
+
 import torch
-from comfy_execution.graph import ExecutionBlocker
 from comfy_api.latest import InputImpl, Types, io
-from comfy_extras.nodes_logic import SwitchNode, SoftSwitchNode
+from comfy_execution.graph import ExecutionBlocker
+from comfy_extras.nodes_logic import SoftSwitchNode, SwitchNode
+
 from ..helpers.helper_functions import to_video_prompt
-from ..helpers.text_helpers import compile_h3_prompt, default_h3_prompt_state, compile_h3_base_prompt, default_h3_base_prompt_state
-from ..helpers.image_helpers import prepare_h3_reference_components, cached_h3_reference_components, video_source_hash, resolve_h3_reference_window, VIDEO_FRAME_TIMESTAMP_FORMATS
+from ..helpers.image_helpers import VIDEO_FRAME_TIMESTAMP_FORMATS, cached_h3_reference_components, prepare_h3_reference_components, resolve_h3_reference_window, video_source_hash
 from ..helpers.model_helpers import (
-    get_minimax_h3_clip_continuation_fingerprint,
+    accumulate_minimax_h3_clip_continuations,
+    audio_batch_to_list,
+    audio_list_to_batch,
+    concatenate_audio_list,
     get_latest_minimax_h3_clip_continuation_index,
+    get_minimax_h3_clip_continuation_fingerprint,
     load_minimax_h3_clip_continuation_media,
     save_minimax_h3_clip_continuation_media,
     snapshot_minimax_h3_clip_continuation_media,
-    accumulate_minimax_h3_clip_continuations,
-    trim_minimax_h3_clip_continuation_batch,
     transcribe_reference_audio,
     trim_minimax_h3_clip_continuation,
-    concatenate_audio_list,
-    audio_list_to_batch,
-    audio_batch_to_list,
+    trim_minimax_h3_clip_continuation_batch,
 )
+from ..helpers.text_helpers import compile_h3_base_prompt, compile_h3_prompt, default_h3_base_prompt_state, default_h3_prompt_state
 
 _MAX_SEED = 0xFFFFFFFFFFFFFFFF
 MiniMaxH3ClipContinuationMedia = io.Custom("MINIMAX_H3_CLIP_CONTINUATION_MEDIA")

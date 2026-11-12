@@ -1,59 +1,50 @@
 from __future__ import annotations
 
-import io
+import bisect
+import colorsys
 import hashlib
+import io
 import json
 import logging
+import math
+import os
 import queue
+import re
 import tempfile
 import threading
 from collections import namedtuple
 from contextlib import closing, contextmanager
-from pathlib import Path
-import bisect
-import folder_paths
-from comfy.model_management import throw_exception_if_processing_interrupted
-from unifiedefficientloader import IncrementalSafetensorsWriter, MemoryEfficientSafeOpen
-from .helper_functions import atomic_uel_writer, read_uel_safetensors_dict
-import colorsys
-import comfy.model_management
-import comfy.utils
-import math
-import os
-import re
 from dataclasses import dataclass
 from fractions import Fraction
+from pathlib import Path
 from typing import Callable, Iterator, Sequence
 
 import av
+import comfy.model_management
+import comfy.utils
 import cv2
+import folder_paths
 import numpy as np
 import torch
 import torch.nn.functional as F
 import torchaudio
+from comfy.model_management import throw_exception_if_processing_interrupted
+from comfy_api.latest import InputImpl, Types
+from comfy_api.latest._input_impl.video_types import _rotation_quadrant, last_decodable_audio_stream
+from comfy_api.latest._util import normalize_crop_rect
 from torchvision.ops import nms as torchvision_nms
 from tqdm import tqdm
+from unifiedefficientloader import MemoryEfficientSafeOpen
+
 from nodes import MAX_RESOLUTION
 
-from .helper_functions import ASPECT_RATIOS, resize_nchw
+from .helper_functions import ASPECT_RATIOS, atomic_uel_writer, read_uel_safetensors_dict, resize_nchw
 from .parameter_helpers import h3_video_length_from_seconds, select_video_resolution
-from comfy_api.latest import InputImpl, Types
-from comfy_api.latest._input_impl.video_types import last_decodable_audio_stream, _rotation_quadrant
-from comfy_api.latest._util import normalize_crop_rect
 
-
-BODY_LIMBS = ((1, 2), (1, 5), (2, 3), (3, 4), (5, 6), (6, 7), (1, 8), (8, 9),
-              (9, 10), (1, 11), (11, 12), (12, 13), (1, 0), (0, 14), (14, 16),
-              (0, 15), (15, 17), (2, 16), (5, 17))
-PAF_CHANNELS = ((12, 13), (20, 21), (14, 15), (16, 17), (22, 23), (24, 25),
-                (0, 1), (2, 3), (4, 5), (6, 7), (8, 9), (10, 11), (28, 29),
-                (30, 31), (34, 35), (32, 33), (36, 37), (18, 19), (26, 27))
-BODY_COLORS = ((255, 0, 0), (255, 85, 0), (255, 170, 0), (255, 255, 0), (170, 255, 0),
-               (85, 255, 0), (0, 255, 0), (0, 255, 85), (0, 255, 170), (0, 255, 255),
-               (0, 170, 255), (0, 85, 255), (0, 0, 255), (85, 0, 255), (170, 0, 255),
-               (255, 0, 255), (255, 0, 170), (255, 0, 85))
-HAND_LIMBS = tuple(edge for start in (1, 5, 9, 13, 17)
-                   for edge in ((0, start), (start, start + 1), (start + 1, start + 2), (start + 2, start + 3)))
+BODY_LIMBS = ((1, 2), (1, 5), (2, 3), (3, 4), (5, 6), (6, 7), (1, 8), (8, 9), (9, 10), (1, 11), (11, 12), (12, 13), (1, 0), (0, 14), (14, 16), (0, 15), (15, 17), (2, 16), (5, 17))
+PAF_CHANNELS = ((12, 13), (20, 21), (14, 15), (16, 17), (22, 23), (24, 25), (0, 1), (2, 3), (4, 5), (6, 7), (8, 9), (10, 11), (28, 29), (30, 31), (34, 35), (32, 33), (36, 37), (18, 19), (26, 27))
+BODY_COLORS = ((255, 0, 0), (255, 85, 0), (255, 170, 0), (255, 255, 0), (170, 255, 0), (85, 255, 0), (0, 255, 0), (0, 255, 85), (0, 255, 170), (0, 255, 255), (0, 170, 255), (0, 85, 255), (0, 0, 255), (85, 0, 255), (170, 0, 255), (255, 0, 255), (255, 0, 170), (255, 0, 85))
+HAND_LIMBS = tuple(edge for start in (1, 5, 9, 13, 17) for edge in ((0, start), (start, start + 1), (start + 1, start + 2), (start + 2, start + 3)))
 
 
 def resize_pose_map(image, width, height):
@@ -62,8 +53,7 @@ def resize_pose_map(image, width, height):
         return image
     interpolation = cv2.INTER_AREA if width + height < sum(image.shape[:2]) else cv2.INTER_LANCZOS4
     if interpolation == cv2.INTER_AREA and image.ndim == 3 and image.shape[2] > 4:
-        return np.concatenate([resize_pose_map(image[..., start:start + 4], width, height)
-                               for start in range(0, image.shape[2], 4)], axis=2)
+        return np.concatenate([resize_pose_map(image[..., start : start + 4], width, height) for start in range(0, image.shape[2], 4)], axis=2)
     result = cv2.resize(image, (int(width), int(height)), interpolation=interpolation)
     return result[..., None] if result.ndim == 2 and image.ndim == 3 else result
 
@@ -97,8 +87,7 @@ def score_limb_pairs(first, second, paf, channels, limb_threshold=0.05, limb_sup
 def decode_body(heatmap, paf, body_threshold=0.1, limb_threshold=0.05, limb_support=0.8, min_body_parts=4, min_body_score=0.4):
     smoothed = cv2.GaussianBlur(heatmap[..., :18], (25, 25), 3, borderType=cv2.BORDER_REFLECT)
     padded = np.pad(smoothed, ((1, 1), (1, 1), (0, 0)), mode="constant")
-    peaks = ((smoothed > body_threshold) & (smoothed >= padded[:-2, 1:-1]) & (smoothed >= padded[2:, 1:-1])
-             & (smoothed >= padded[1:-1, :-2]) & (smoothed >= padded[1:-1, 2:]))
+    peaks = (smoothed > body_threshold) & (smoothed >= padded[:-2, 1:-1]) & (smoothed >= padded[2:, 1:-1]) & (smoothed >= padded[1:-1, :-2]) & (smoothed >= padded[1:-1, 2:])
     candidates, by_part = [], []
     for part in range(18):
         y, x = np.nonzero(peaks[..., part])
@@ -136,10 +125,7 @@ def decode_body(heatmap, paf, body_threshold=0.1, limb_threshold=0.05, limb_supp
                 person[-1] = 2
                 person[-2] = candidate[first, 2] + candidate[second, 2] + score
                 people.append(person)
-    return [
-        [None if index < 0 else tuple(candidate[int(index), :2]) for index in person[:18]]
-        for person in people if person[-1] >= min_body_parts and person[-2] / person[-1] >= min_body_score
-    ]
+    return [[None if index < 0 else tuple(candidate[int(index), :2]) for index in person[:18]] for person in people if person[-1] >= min_body_parts and person[-2] / person[-1] >= min_body_score]
 
 
 def hand_boxes(body, width, height):
@@ -161,9 +147,7 @@ def face_box(body, width, height):
     if body[0] is None:
         return None
     head = np.asarray(body[0])
-    radius = max((max(abs(head - body[index])) * factor
-                  for index, factor in ((14, 3), (15, 3), (16, 1.5), (17, 1.5))
-                  if body[index] is not None), default=0)
+    radius = max((max(abs(head - body[index])) * factor for index, factor in ((14, 3), (15, 3), (16, 1.5), (17, 1.5)) if body[index] is not None), default=0)
     x, y = np.maximum(head - radius, 0)
     size = min(radius * 2, width - x, height - y)
     return (int(x), int(y), int(size)) if size >= 20 else None
@@ -203,8 +187,7 @@ def decode_face(heatmap, box, width, height, threshold=0.05):
 
 
 def encode_body(body, width, height):
-    return [value for point in body for value in
-            ((float(point[0]) / width, float(point[1]) / height, 1.0) if point is not None else (0.0, 0.0, 0.0))]
+    return [value for point in body for value in ((float(point[0]) / width, float(point[1]) / height, 1.0) if point is not None else (0.0, 0.0, 0.0))]
 
 
 def pose_overlay_mask(pose_maps):
@@ -224,8 +207,7 @@ def draw_pose_frame(people, height, width, draw_body=True, draw_hands=True, draw
                 start, end = points[[a, b], :2] * [width, height]
                 center = (start + end) / 2
                 delta = start - end
-                polygon = cv2.ellipse2Poly(tuple(center.astype(int)), (int(np.linalg.norm(delta) / 2), max(1, round(4 * stick_scale * drawing_scale))),
-                                          int(math.degrees(math.atan2(delta[1], delta[0]))), 0, 360, 1)
+                polygon = cv2.ellipse2Poly(tuple(center.astype(int)), (int(np.linalg.norm(delta) / 2), max(1, round(4 * stick_scale * drawing_scale))), int(math.degrees(math.atan2(delta[1], delta[0]))), 0, 360, 1)
                 cv2.fillConvexPoly(canvas, polygon, tuple(int(channel * 0.6) for channel in color))
             for point, color in zip(points, BODY_COLORS):
                 if point[2]:
@@ -304,9 +286,8 @@ def restore_body_maps(heatmap, paf, body_input, frame):
 
 def estimate_hand_jobs(patcher, jobs, frames, people, batch_size, forward, threshold=0.05):
     for start in range(0, len(jobs), batch_size):
-        chunk = jobs[start:start + batch_size]
-        crops = [cv2.GaussianBlur(frames[frame][y:y + size, x:x + size], (0, 0), 0.8)
-                 for frame, person, side, (x, y, size) in chunk]
+        chunk = jobs[start : start + batch_size]
+        crops = [cv2.GaussianBlur(frames[frame][y : y + size, x : x + size], (0, 0), 0.8) for frame, person, side, (x, y, size) in chunk]
         average = np.zeros((len(chunk), 128, 128, 22), dtype=np.float32)
         for side_length in (184, 368, 552, 736):
             inputs = [resize_pose_map(crop, side_length, side_length) for crop in crops]
@@ -321,9 +302,8 @@ def estimate_hand_jobs(patcher, jobs, frames, people, batch_size, forward, thres
 
 def estimate_face_jobs(patcher, jobs, frames, people, batch_size, forward, threshold=0.05):
     for start in range(0, len(jobs), batch_size):
-        chunk = jobs[start:start + batch_size]
-        inputs = [resize_pose_map(frames[frame][y:y + size, x:x + size], 384, 384)
-                  for frame, person, (x, y, size) in chunk]
+        chunk = jobs[start : start + batch_size]
+        inputs = [resize_pose_map(frames[frame][y : y + size, x : x + size], 384, 384) for frame, person, (x, y, size) in chunk]
         heatmaps = forward(patcher, inputs)
         for heatmap, (frame, person, box) in zip(heatmaps, chunk):
             height, width = frames[frame].shape[:2]
@@ -333,12 +313,31 @@ def estimate_face_jobs(patcher, jobs, frames, people, batch_size, forward, thres
             people[frame][person]["face_keypoints_2d"] = decode_face(heatmap, box, width, height, threshold)
 
 
-def run_openpose_batch(images, resolution=0, batch_size=4, detect_body=True, detect_hand=True, detect_face=True,
-                       scale_stick=False, *, loader, forward, body_decoder=decode_body,
-                       body_threshold=0.45, hand_threshold=0.45, face_threshold=0.45, limb_threshold=0.45,
-                       limb_support=0.8, min_body_parts=4, min_body_score=0.4,
-                       temporal_filter=False, temporal_radius=2, temporal_min_support=2, temporal_max_distance=0.1,
-                       temporal_match_iou=0.3):
+def run_openpose_batch(
+    images,
+    resolution=0,
+    batch_size=4,
+    detect_body=True,
+    detect_hand=True,
+    detect_face=True,
+    scale_stick=False,
+    *,
+    loader,
+    forward,
+    body_decoder=decode_body,
+    body_threshold=0.45,
+    hand_threshold=0.45,
+    face_threshold=0.45,
+    limb_threshold=0.45,
+    limb_support=0.8,
+    min_body_parts=4,
+    min_body_score=0.4,
+    temporal_filter=False,
+    temporal_radius=2,
+    temporal_min_support=2,
+    temporal_max_distance=0.1,
+    temporal_match_iou=0.3,
+):
     if images.ndim != 4 or images.shape[0] < 1 or images.shape[-1] not in (3, 4):
         raise ValueError("OpenPose requires a nonempty IMAGE batch with RGB or RGBA channels.")
     if batch_size < 1 or resolution < 0:
@@ -356,24 +355,19 @@ def run_openpose_batch(images, resolution=0, batch_size=4, detect_body=True, det
     progress = comfy.utils.ProgressBar(len(images))
     for start in range(0, len(images), batch_size):
         comfy.model_management.throw_exception_if_processing_interrupted()
-        frames, body_inputs, (target_height, target_width) = prepare_pose_frames(images[start:start + batch_size], resolution)
+        frames, body_inputs, (target_height, target_width) = prepare_pose_frames(images[start : start + batch_size], resolution)
         pafs, heatmaps = forward(models["body"], body_inputs)
         people, hand_jobs, face_jobs, chunk_boxes = [], [], [], []
         for frame_index, (frame, body_input, heatmap, paf) in enumerate(zip(frames, body_inputs, heatmaps, pafs)):
             heatmap, paf = restore_body_maps(heatmap, paf, body_input, frame)
-            bodies = body_decoder(heatmap[:target_height, :target_width], paf[:target_height, :target_width],
-                                  body_threshold=body_threshold, limb_threshold=limb_threshold, limb_support=limb_support,
-                                  min_body_parts=min_body_parts, min_body_score=min_body_score)
+            bodies = body_decoder(heatmap[:target_height, :target_width], paf[:target_height, :target_width], body_threshold=body_threshold, limb_threshold=limb_threshold, limb_support=limb_support, min_body_parts=min_body_parts, min_body_score=min_body_score)
             frame_people, frame_boxes = [], []
             for person_index, body in enumerate(bodies):
                 points = np.asarray([point for point in body if point is not None])
                 lower, upper = points.min(axis=0), points.max(axis=0)
                 margin = max(float((upper - lower).max()) * 0.05, 1)
                 frame_boxes.append(np.concatenate((lower - margin, upper + margin)))
-                frame_people.append({
-                    "pose_keypoints_2d": encode_body(body, target_width, target_height),
-                    "hand_left_keypoints_2d": None, "hand_right_keypoints_2d": None, "face_keypoints_2d": None,
-                })
+                frame_people.append({"pose_keypoints_2d": encode_body(body, target_width, target_height), "hand_left_keypoints_2d": None, "hand_right_keypoints_2d": None, "face_keypoints_2d": None})
                 if detect_hand:
                     hand_jobs.extend((frame_index, person_index, side, box) for side, box in hand_boxes(body, target_width, target_height))
                 if detect_face:
@@ -407,14 +401,14 @@ def dwpose_detector_input(frame):
     ratio = min(640 / height, 640 / width)
     resized = cv2.resize(frame, (int(width * ratio), int(height * ratio)), interpolation=cv2.INTER_LINEAR)
     padded = np.full((640, 640, 3), 114, dtype=np.uint8)
-    padded[:resized.shape[0], :resized.shape[1]] = resized
+    padded[: resized.shape[0], : resized.shape[1]] = resized
     return padded.astype(np.float32), ratio
 
 
 def decode_dwpose_boxes(prediction, ratio, classes=(0,), detection_threshold=0.3, nms_threshold=0.45):
     grids, strides = [], []
     for stride in (8, 16, 32):
-        y, x = np.mgrid[:640 // stride, :640 // stride]
+        y, x = np.mgrid[: 640 // stride, : 640 // stride]
         grids.append(np.stack((x, y), axis=-1).reshape(-1, 2))
         strides.append(np.full((x.size, 1), stride))
     grid, stride = np.concatenate(grids), np.concatenate(strides)
@@ -460,8 +454,7 @@ def prepare_dwpose_crop(frame, box, input_size=(288, 384)):
     else:
         scale[0] = scale[1] * aspect
     factor = np.array(input_size, dtype=np.float32) / scale
-    matrix = np.array([[factor[0], 0, input_size[0] / 2 - center[0] * factor[0]],
-                       [0, factor[1], input_size[1] / 2 - center[1] * factor[1]]], dtype=np.float32)
+    matrix = np.array([[factor[0], 0, input_size[0] / 2 - center[0] * factor[0]], [0, factor[1], input_size[1] / 2 - center[1] * factor[1]]], dtype=np.float32)
     crop = cv2.warpAffine(frame, matrix, input_size, flags=cv2.INTER_LINEAR)
     crop = (crop.astype(np.float32) - np.array([123.675, 116.28, 103.53], dtype=np.float32)) / np.array([58.395, 57.12, 57.375], dtype=np.float32)
     return crop, center, scale
@@ -478,18 +471,14 @@ def decode_dwpose_person(simcc_x, simcc_y, center, scale, width, height, keypoin
     neck[2] = float(np.all(scores[[5, 6]] > keypoint_threshold))
     joints = np.insert(joints, 17, neck, axis=0)
     joints[[1, 2, 3, 4, 6, 7, 8, 9, 10, 12, 13, 14, 15, 16, 17]] = joints[[17, 6, 8, 10, 7, 9, 12, 14, 16, 13, 15, 2, 1, 4, 3]]
+
     def encode(part):
         if not np.any((part[:, 2] >= keypoint_threshold) & (part[:, 2] > 0)):
             return None
-        return [value for x, y, score in part for value in
-                ((float(x) / width, float(y) / height, 1.0) if score >= keypoint_threshold and score > 0 else (0.0, 0.0, 0.0))]
+        return [value for x, y, score in part for value in ((float(x) / width, float(y) / height, 1.0) if score >= keypoint_threshold and score > 0 else (0.0, 0.0, 0.0))]
+
     face = np.concatenate((joints[24:92], joints[[14, 15]]))
-    return {
-        "pose_keypoints_2d": encode(joints[:18]) or [0.0] * 54,
-        "face_keypoints_2d": encode(face),
-        "hand_left_keypoints_2d": encode(joints[92:113]),
-        "hand_right_keypoints_2d": encode(joints[113:134]),
-    }
+    return {"pose_keypoints_2d": encode(joints[:18]) or [0.0] * 54, "face_keypoints_2d": encode(face), "hand_left_keypoints_2d": encode(joints[92:113]), "hand_right_keypoints_2d": encode(joints[113:134])}
 
 
 def decode_animal_pose(simcc_x, simcc_y, center, scale, keypoint_threshold=0.3):
@@ -503,11 +492,8 @@ def decode_animal_pose(simcc_x, simcc_y, center, scale, keypoint_threshold=0.3):
     return result.tolist()
 
 
-AP10K_LIMBS = ((1, 2), (2, 3), (1, 3), (3, 4), (4, 9), (9, 10), (10, 11), (4, 6),
-              (6, 7), (7, 8), (4, 5), (5, 15), (15, 16), (16, 17), (5, 12), (12, 13), (13, 14))
-AP10K_COLORS = ((255, 255, 255), (100, 255, 100), (150, 255, 255), (100, 50, 255), (50, 150, 200),
-               (0, 255, 255), (0, 150, 0), (0, 0, 255), (0, 0, 150), (255, 50, 255), (255, 0, 255),
-               (255, 0, 0), (150, 0, 0), (255, 255, 100), (0, 150, 0), (255, 255, 0), (150, 150, 150))
+AP10K_LIMBS = ((1, 2), (2, 3), (1, 3), (3, 4), (4, 9), (9, 10), (10, 11), (4, 6), (6, 7), (7, 8), (4, 5), (5, 15), (15, 16), (16, 17), (5, 12), (12, 13), (13, 14))
+AP10K_COLORS = ((255, 255, 255), (100, 255, 100), (150, 255, 255), (100, 50, 255), (50, 150, 200), (0, 255, 255), (0, 150, 0), (0, 0, 255), (0, 0, 150), (255, 50, 255), (255, 0, 255), (255, 0, 0), (150, 0, 0), (255, 255, 100), (0, 150, 0), (255, 255, 0), (150, 150, 150))
 
 
 def draw_animal_pose_frame(animals, height, width):
@@ -587,14 +573,30 @@ def prune_temporal_animal_keypoints(documents, boxes, radius=2, min_support=2, m
         people = [{"pose_keypoints_2d": (np.asarray(animal) / dimensions).ravel().tolist()} for animal in frame["animals"]]
         normalized.append({"people": people, "canvas_width": frame["canvas_width"], "canvas_height": frame["canvas_height"]})
     filtered = prune_temporal_pose_keypoints(normalized, boxes, radius, min_support, max_distance, match_iou)
-    return [{**original, "animals": [(np.asarray(person["pose_keypoints_2d"]).reshape(-1, 3)
-                                      * [frame["canvas_width"], frame["canvas_height"], 1]).tolist() for person in frame["people"]]}
-            for original, frame in zip(documents, filtered)]
+    return [{**original, "animals": [(np.asarray(person["pose_keypoints_2d"]).reshape(-1, 3) * [frame["canvas_width"], frame["canvas_height"], 1]).tolist() for person in frame["people"]]} for original, frame in zip(documents, filtered)]
 
 
-def run_dwpose_batch(images, resolution=0, batch_size=5, detect_body=True, detect_hand=True, detect_face=True,
-                     scale_stick=False, *, loader, forward, animal=False, detection_threshold=0.3, keypoint_threshold=0.3, nms_threshold=0.45,
-                     temporal_filter=False, temporal_radius=2, temporal_min_support=2, temporal_max_distance=0.1, temporal_match_iou=0.3):
+def run_dwpose_batch(
+    images,
+    resolution=0,
+    batch_size=5,
+    detect_body=True,
+    detect_hand=True,
+    detect_face=True,
+    scale_stick=False,
+    *,
+    loader,
+    forward,
+    animal=False,
+    detection_threshold=0.3,
+    keypoint_threshold=0.3,
+    nms_threshold=0.45,
+    temporal_filter=False,
+    temporal_radius=2,
+    temporal_min_support=2,
+    temporal_max_distance=0.1,
+    temporal_match_iou=0.3,
+):
     if images.ndim != 4 or not len(images) or images.shape[-1] not in (3, 4):
         raise ValueError("DWPose requires a nonempty RGB or RGBA IMAGE batch.")
     if batch_size < 1 or resolution < 0:
@@ -612,7 +614,7 @@ def run_dwpose_batch(images, resolution=0, batch_size=5, detect_body=True, detec
     for start in range(0, len(images), batch_size):
         comfy.model_management.throw_exception_if_processing_interrupted()
         frames = []
-        for image in images[start:start + batch_size]:
+        for image in images[start : start + batch_size]:
             pixels = (image[..., :3].detach().cpu().numpy().clip(0, 1) * 255).astype(np.uint8)
             model_pixels = pixels if animal else pixels[..., ::-1]
             frames.append(cv2.resize(model_pixels, (width, height), interpolation=cv2.INTER_CUBIC if factor > 1 else cv2.INTER_AREA))
@@ -630,13 +632,12 @@ def run_dwpose_batch(images, resolution=0, batch_size=5, detect_body=True, detec
         if jobs and "pose" not in models:
             models["pose"] = loader("pose")
         for offset in range(0, len(jobs), batch_size):
-            chunk = jobs[offset:offset + batch_size]
+            chunk = jobs[offset : offset + batch_size]
             crops = [item[1] for item in chunk]
             x, y = forward(models["pose"], crops)
             for item, simcc_x, simcc_y in zip(chunk, x, y):
                 frame, _, center, scale = item
-                people[frame].append(decode_animal_pose(simcc_x, simcc_y, center, scale, keypoint_threshold) if animal
-                                     else decode_dwpose_person(simcc_x, simcc_y, center, scale, width, height, keypoint_threshold))
+                people[frame].append(decode_animal_pose(simcc_x, simcc_y, center, scale, keypoint_threshold) if animal else decode_dwpose_person(simcc_x, simcc_y, center, scale, width, height, keypoint_threshold))
         for index, frame_people in enumerate(people):
             document = {"canvas_height": height, "canvas_width": width}
             document.update({"version": "ap10k", "animals": frame_people} if animal else {"people": frame_people})
@@ -663,24 +664,21 @@ def render_densepose_frame(result, height, width, cmap="viridis"):
     for index, box in enumerate(boxes.detach().cpu().tolist()):
         x, y = int(box[0]), int(box[1])
         box_width, box_height = max(1, int(box[2] - box[0])), max(1, int(box[3] - box[1]))
-        foreground = torch.nn.functional.interpolate(coarse[index:index + 1], (box_height, box_width), mode="bilinear", align_corners=False).argmax(1)[0] > 0
-        labels = torch.nn.functional.interpolate(fine[index:index + 1], (box_height, box_width), mode="bilinear", align_corners=False).argmax(1)[0]
+        foreground = torch.nn.functional.interpolate(coarse[index : index + 1], (box_height, box_width), mode="bilinear", align_corners=False).argmax(1)[0] > 0
+        labels = torch.nn.functional.interpolate(fine[index : index + 1], (box_height, box_width), mode="bilinear", align_corners=False).argmax(1)[0]
         labels = (labels * foreground).detach().cpu().numpy()
         left, top, right, bottom = max(0, x), max(0, y), min(width, x + box_width), min(height, y + box_height)
         if right <= left or bottom <= top:
             continue
-        labels = labels[top - y:bottom - y, left - x:right - x]
-        color = cv2.applyColorMap((labels.astype(np.float32) * (255 / 24)).clip(0, 255).astype(np.uint8),
-                                 cv2.COLORMAP_VIRIDIS if cmap == "viridis" else cv2.COLORMAP_PARULA)[..., ::-1]
+        labels = labels[top - y : bottom - y, left - x : right - x]
+        color = cv2.applyColorMap((labels.astype(np.float32) * (255 / 24)).clip(0, 255).astype(np.uint8), cv2.COLORMAP_VIRIDIS if cmap == "viridis" else cv2.COLORMAP_PARULA)[..., ::-1]
         region = canvas[top:bottom, left:right]
         mask = labels > 0
         region[mask] = color[mask]
     return canvas
 
 
-def run_densepose_batch(images, resolution=0, batch_size=2, cmap="viridis", *, loader, forward,
-                        score_threshold=0.05, detection_nms_threshold=0.5, max_detections=100,
-                        rpn_pre_nms_topk=1000, rpn_post_nms_topk=1000, rpn_nms_threshold=0.7):
+def run_densepose_batch(images, resolution=0, batch_size=2, cmap="viridis", *, loader, forward, score_threshold=0.05, detection_nms_threshold=0.5, max_detections=100, rpn_pre_nms_topk=1000, rpn_post_nms_topk=1000, rpn_nms_threshold=0.7):
     if images.ndim != 4 or not len(images) or images.shape[-1] not in (3, 4):
         raise ValueError("DensePose requires a nonempty RGB or RGBA IMAGE batch")
     if resolution < 0 or batch_size < 1 or cmap not in ("viridis", "parula"):
@@ -696,12 +694,10 @@ def run_densepose_batch(images, resolution=0, batch_size=2, cmap="viridis", *, l
     progress = comfy.utils.ProgressBar(len(images))
     for start in range(0, len(images), batch_size):
         frames = []
-        for image in images[start:start + batch_size]:
+        for image in images[start : start + batch_size]:
             pixels = (image[..., :3].detach().cpu().numpy().clip(0, 1) * 255).astype(np.uint8)
             frames.append(cv2.resize(pixels, (width, height), interpolation=cv2.INTER_CUBIC if scale > 1 else cv2.INTER_AREA))
-        predictions = forward(patcher, frames, score_threshold=score_threshold, detection_nms_threshold=detection_nms_threshold,
-                              max_detections=max_detections, rpn_pre_nms_topk=rpn_pre_nms_topk,
-                              rpn_post_nms_topk=rpn_post_nms_topk, rpn_nms_threshold=rpn_nms_threshold)
+        predictions = forward(patcher, frames, score_threshold=score_threshold, detection_nms_threshold=detection_nms_threshold, max_detections=max_detections, rpn_pre_nms_topk=rpn_pre_nms_topk, rpn_post_nms_topk=rpn_post_nms_topk, rpn_nms_threshold=rpn_nms_threshold)
         if len(predictions) != len(frames):
             raise ValueError("DensePose model did not preserve frame batch order")
         for index, result in enumerate(predictions):
@@ -756,7 +752,7 @@ def decode_yolo_predictions(prediction, proto, pad_meta, labels=("object",), con
     nc = max(1, len(labels))
     extra = max(0, prediction.shape[0] - 4 - nc)
     transposed = prediction.transpose(0, 1)
-    max_scores, class_ids = transposed[:, 4:4 + nc].max(dim=1)
+    max_scores, class_ids = transposed[:, 4 : 4 + nc].max(dim=1)
     valid = max_scores > confidence_threshold
     if not valid.any():
         return []
@@ -766,7 +762,7 @@ def decode_yolo_predictions(prediction, proto, pad_meta, labels=("object",), con
         transposed, scores, class_ids = transposed[order], scores[order], class_ids[order]
     cx, cy, bw, bh = transposed[:, :4].unbind(dim=1)
     boxes_pad = torch.stack((cx - bw * 0.5, cy - bh * 0.5, cx + bw * 0.5, cy + bh * 0.5), dim=1)
-    mask_coeffs = transposed[:, 4 + nc:4 + nc + extra]
+    mask_coeffs = transposed[:, 4 + nc : 4 + nc + extra]
     keep = torchvision_nms(boxes_pad + class_ids.unsqueeze(1).float() * 7680.0, scores, nms_threshold)[:max_detections]
     boxes_pad, scores, class_ids, mask_coeffs = boxes_pad[keep], scores[keep], class_ids[keep], mask_coeffs[keep]
 
@@ -788,9 +784,9 @@ def decode_yolo_predictions(prediction, proto, pad_meta, labels=("object",), con
         cropped_proto = raw_masks * ((rx >= px1) & (rx < px2) & (ry >= py1) & (ry < py2))
         results = []
         for start in range(0, len(boxes_np), 16):
-            sub_proto = cropped_proto[start:start + 16]
+            sub_proto = cropped_proto[start : start + 16]
             upsampled = torch.nn.functional.interpolate(sub_proto.unsqueeze(1), size=(pad_h, pad_w), mode="bilinear", align_corners=False).squeeze(1)
-            unpadded = (upsampled > 0.0).float()[:, top:pad_h - bottom, left:pad_w - right]
+            unpadded = (upsampled > 0.0).float()[:, top : pad_h - bottom, left : pad_w - right]
             scaled = torch.nn.functional.interpolate(unpadded.unsqueeze(1), size=(orig_h, orig_w), mode="bilinear", align_corners=False).squeeze(1)
             scaled_u8 = (scaled > 0.5).to(torch.uint8).cpu().numpy()
             for offset in range(len(sub_proto)):
@@ -834,7 +830,7 @@ def _local_detection_mask(det, height, width, dilation=0):
     px1, py1, px2, py2 = max(0, ix1 - pad), max(0, iy1 - pad), min(width, ix2 + pad), min(height, iy2 + pad)
     local = np.zeros((py2 - py1, px2 - px1), dtype=np.float32)
     crop_u8 = det.get("mask_crop")
-    local[iy1 - py1:iy2 - py1, ix1 - px1:ix2 - px1] = 1.0 if crop_u8 is None else crop_u8.astype(np.float32)
+    local[iy1 - py1 : iy2 - py1, ix1 - px1 : ix2 - px1] = 1.0 if crop_u8 is None else crop_u8.astype(np.float32)
     if dilation != 0:
         local = dilate_yolo_mask(local, dilation)
     return px1, py1, px2, py2, local
@@ -889,7 +885,7 @@ def _iter_yolo_batch(patcher, images, forward, threshold=0.3, nms_threshold=0.45
     use_segm = bool(use_segm and getattr(patcher.model, "task", "bbox") == "segm")
     for start in range(0, len(images), batch_size):
         comfy.model_management.throw_exception_if_processing_interrupted()
-        chunk = images[start:start + batch_size]
+        chunk = images[start : start + batch_size]
         batch_tensor, metas = letterbox_yolo_batch(chunk, imgsz=imgsz)
         raw_out = forward(patcher, batch_tensor)
         preds, protos = raw_out if isinstance(raw_out, tuple) else (raw_out, None)
@@ -897,19 +893,13 @@ def _iter_yolo_batch(patcher, images, forward, threshold=0.3, nms_threshold=0.45
             raise ValueError("YOLO model did not preserve the frame batch order.")
         for index, meta in enumerate(metas):
             proto = protos[index] if protos is not None else None
-            yield decode_yolo_predictions(
-                preds[index], proto, meta, labels=labels, confidence_threshold=threshold,
-                nms_threshold=nms_threshold, max_detections=max_detections, use_segm=use_segm,
-            )
+            yield decode_yolo_predictions(preds[index], proto, meta, labels=labels, confidence_threshold=threshold, nms_threshold=nms_threshold, max_detections=max_detections, use_segm=use_segm)
             if progress is not None:
                 progress.update(1)
 
 
 def _infer_yolo_batch(patcher, images, forward, threshold=0.3, nms_threshold=0.45, max_detections=300, batch_size=5, use_segm=True, progress=None):
-    return list(_iter_yolo_batch(
-        patcher, images, forward, threshold=threshold, nms_threshold=nms_threshold,
-        max_detections=max_detections, batch_size=batch_size, use_segm=use_segm, progress=progress,
-    ))
+    return list(_iter_yolo_batch(patcher, images, forward, threshold=threshold, nms_threshold=nms_threshold, max_detections=max_detections, batch_size=batch_size, use_segm=use_segm, progress=progress))
 
 
 def _interpolate_mask_crop(det_prev, det_next, alpha, box_coords):
@@ -1001,10 +991,7 @@ def fill_temporal_yolo_detections(batch_detections, height, width, radius=2, min
             mask_crop = _interpolate_mask_crop(det_prev, det_next, alpha, (ix1, iy1, ix2, iy2))
             if mask_crop is not None and not mask_crop.any():
                 continue
-            filled[frame_idx].append({
-                "bbox": bbox, "confidence": confidence, "class_id": cluster["class_id"],
-                "label": cluster["label"], "mask_crop": mask_crop, "mask_box": (ix1, iy1, ix2, iy2),
-            })
+            filled[frame_idx].append({"bbox": bbox, "confidence": confidence, "class_id": cluster["class_id"], "label": cluster["label"], "mask_crop": mask_crop, "mask_box": (ix1, iy1, ix2, iy2)})
     return filled
 
 
@@ -1028,7 +1015,7 @@ def _detections_to_segs(frame_tensor, detections, dilation=0, crop_factor=3.0, d
                 px1, py1, px2, py2, local = region
                 ox1, oy1, ox2, oy2 = max(px1, cx1), max(py1, cy1), min(px2, cx2), min(py2, cy2)
                 if ox2 > ox1 and oy2 > oy1:
-                    cropped_mask[oy1 - cy1:oy2 - cy1, ox1 - cx1:ox2 - cx1] = local[oy1 - py1:oy2 - py1, ox1 - px1:ox2 - px1]
+                    cropped_mask[oy1 - cy1 : oy2 - cy1, ox1 - cx1 : ox2 - cx1] = local[oy1 - py1 : oy2 - py1, ox1 - px1 : ox2 - px1]
             items.append(SEG(frame_tensor[:, cy1:cy2, cx1:cx2, :], cropped_mask, det["confidence"], crop_region, bbox, det["label"], None))
     segs = ((height, width), items)
     if detailer_hook is not None and hasattr(detailer_hook, "post_detection"):
@@ -1065,11 +1052,8 @@ class UCBBoxDetector:
         progress = comfy.utils.ProgressBar(len(frames))
         height, width = frames.shape[1], frames.shape[2]
         items = []
-        for index, detections in enumerate(_iter_yolo_batch(
-            self.patcher, frames, self.forward, threshold=threshold, nms_threshold=nms_threshold,
-            max_detections=max_detections, batch_size=chunk_size, use_segm=self.use_segm, progress=progress,
-        )):
-            items.extend(_detections_to_segs(frames[index:index + 1], detections, dilation=dilation, crop_factor=crop_factor, drop_size=drop_size)[1])
+        for index, detections in enumerate(_iter_yolo_batch(self.patcher, frames, self.forward, threshold=threshold, nms_threshold=nms_threshold, max_detections=max_detections, batch_size=chunk_size, use_segm=self.use_segm, progress=progress)):
+            items.extend(_detections_to_segs(frames[index : index + 1], detections, dilation=dilation, crop_factor=crop_factor, drop_size=drop_size)[1])
         segs = ((height, width), items)
         if detailer_hook is not None and hasattr(detailer_hook, "post_detection"):
             segs = detailer_hook.post_detection(segs)
@@ -1080,10 +1064,7 @@ class UCBBoxDetector:
         chunk_size = max(1, int(batch_size or self.batch_size))
         height, width = frames.shape[1], frames.shape[2]
         progress = comfy.utils.ProgressBar(len(frames))
-        frame_iter = _iter_yolo_batch(
-            self.patcher, frames, self.forward, threshold=threshold, nms_threshold=nms_threshold,
-            max_detections=max_detections, batch_size=chunk_size, use_segm=self.use_segm, progress=progress,
-        )
+        frame_iter = _iter_yolo_batch(self.patcher, frames, self.forward, threshold=threshold, nms_threshold=nms_threshold, max_detections=max_detections, batch_size=chunk_size, use_segm=self.use_segm, progress=progress)
         if len(frames) == 1:
             return _detections_to_combined_mask(next(frame_iter), height, width, dilation=dilation)
         masks, any_detected = [], False
@@ -1114,10 +1095,7 @@ def build_yolo_detectors(patcher, forward, batch_size=5):
     return bbox_detector, NO_SEGM_DETECTOR()
 
 
-def run_yolo_detect(images, *, bbox_detector=None, segm_detector=None, threshold=0.3, nms_threshold=0.45,
-                    dilation=0, drop_size=10, max_detections=300, batch_size=5,
-                    individual_masks=False, labels="all", temporal_filter=False, temporal_radius=2,
-                    temporal_min_support=2, temporal_match_iou=0.3):
+def run_yolo_detect(images, *, bbox_detector=None, segm_detector=None, threshold=0.3, nms_threshold=0.45, dilation=0, drop_size=10, max_detections=300, batch_size=5, individual_masks=False, labels="all", temporal_filter=False, temporal_radius=2, temporal_min_support=2, temporal_match_iou=0.3):
     if not torch.is_tensor(images) or images.ndim != 4 or not len(images) or images.shape[-1] not in (3, 4):
         raise ValueError("YOLO Detect requires a nonempty RGB or RGBA IMAGE batch.")
     if not (0.0 <= threshold <= 1.0 and 0.0 <= nms_threshold <= 1.0):
@@ -1128,10 +1106,7 @@ def run_yolo_detect(images, *, bbox_detector=None, segm_detector=None, threshold
         raise ValueError("Temporal filtering requires positive radius/support and matching IoU between 0.0 and 1.0.")
 
     allowed_labels = _filter_allowed_labels(labels)
-    active_detector = (
-        segm_detector if segm_detector is not None and not isinstance(segm_detector, NO_SEGM_DETECTOR)
-        else bbox_detector if bbox_detector is not None and not isinstance(bbox_detector, NO_BBOX_DETECTOR) else None
-    )
+    active_detector = segm_detector if segm_detector is not None and not isinstance(segm_detector, NO_SEGM_DETECTOR) else bbox_detector if bbox_detector is not None and not isinstance(bbox_detector, NO_BBOX_DETECTOR) else None
     if active_detector is None:
         raise ValueError("Connect a valid bbox_detector or segm_detector from YOLO Detector Loader to YOLO Detect.")
     height, width = images.shape[1], images.shape[2]
@@ -1159,15 +1134,10 @@ def run_yolo_detect(images, *, bbox_detector=None, segm_detector=None, threshold
     model_name = getattr(patcher.model, "model_name", type(patcher.model).__name__)
     task_label = "segm" if use_segm else "bbox"
     progress = comfy.utils.ProgressBar(len(images))
-    detections_source = _iter_yolo_batch(
-        patcher, images, forward, threshold=threshold, nms_threshold=nms_threshold,
-        max_detections=max_detections, batch_size=batch_size, use_segm=use_segm, progress=progress,
-    )
+    detections_source = _iter_yolo_batch(patcher, images, forward, threshold=threshold, nms_threshold=nms_threshold, max_detections=max_detections, batch_size=batch_size, use_segm=use_segm, progress=progress)
     temporal_filled = 0
     if temporal_filter:
-        raw_detections = [
-            det for det in tqdm(detections_source, total=len(images), desc=f"YOLO Detect ({model_name})", unit="frame")
-        ]
+        raw_detections = [det for det in tqdm(detections_source, total=len(images), desc=f"YOLO Detect ({model_name})", unit="frame")]
         raw_count = sum(len(frame_dets) for frame_dets in raw_detections)
         detections_source = fill_temporal_yolo_detections(raw_detections, height, width, radius=temporal_radius, min_support=temporal_min_support, match_iou=temporal_match_iou)
         temporal_filled = max(0, sum(len(frame_dets) for frame_dets in detections_source) - raw_count)
@@ -1202,10 +1172,7 @@ def run_yolo_detect(images, *, bbox_detector=None, segm_detector=None, threshold
     total_boxes = sum(len(b) for b in frame_bboxes)
     active_frames = sum(1 for b in frame_bboxes if b)
     temporal_note = f", temporal_filled={temporal_filled}" if temporal_filter else ""
-    logging.info(
-        "[UC_YOLODetect] Completed %s (%s): %d frame(s) at %dx%d | %d detection(s) across %d/%d frame(s)%s | masks=%s",
-        model_name, task_label, len(images), width, height, total_boxes, active_frames, len(images), temporal_note, tuple(masks_out.shape),
-    )
+    logging.info("[UC_YOLODetect] Completed %s (%s): %d frame(s) at %dx%d | %d detection(s) across %d/%d frame(s)%s | masks=%s", model_name, task_label, len(images), width, height, total_boxes, active_frames, len(images), temporal_note, tuple(masks_out.shape))
     return masks_out, bboxes_out
 
 
@@ -1247,8 +1214,7 @@ def video_source_hash(video):
                 content = _hash_stream(stream)
     # Core has no public crop accessor. Include the verified wrapper fields,
     # not just dimensions: equally sized crops can contain different pixels.
-    settings = [video._VideoFromFile__start_time, video._VideoFromFile__duration,
-                video._VideoFromFile__crop]
+    settings = [video._VideoFromFile__start_time, video._VideoFromFile__duration, video._VideoFromFile__crop]
     return hashlib.sha256(json.dumps([1, content, settings]).encode()).hexdigest()
 
 
@@ -1257,8 +1223,7 @@ def _frame_storage(video):
     with av.open(video.get_stream_source()) as container:
         context = container.streams.video[0].codec_context
         pixel_format = context.format
-        if (pixel_format is not None and all(c.bits <= 8 for c in pixel_format.components)
-                and context.color_trc not in (16, 18)):
+        if pixel_format is not None and all(c.bits <= 8 for c in pixel_format.components) and context.color_trc not in (16, 18):
             return "png8"
     return "npz"
 
@@ -1294,12 +1259,7 @@ class CachedVideoFrames:
         loaded_frames = {}
 
         with closing(MemoryEfficientSafeOpen(str(self.path), low_memory=True)) as handle:
-            stream = handle.async_stream(
-                target_keys,
-                batch_size=1,
-                prefetch_batches=1,
-                pin_memory=False,
-            )
+            stream = handle.async_stream(target_keys, batch_size=1, prefetch_batches=1, pin_memory=False)
             try:
                 for batch in stream:
                     for name, tensor in batch:
@@ -1398,16 +1358,11 @@ def read_legacy_components(path, key):
                 raise ValueError("Unsupported legacy audio dtype")
             stream.seek(8 + size + spec["data_offsets"][0])
             data = stream.read(spec["data_offsets"][1] - spec["data_offsets"][0])
-            audio = {"waveform": torch.from_numpy(np.frombuffer(data, dtype="<f4").copy().reshape(spec["shape"])),
-                     "sample_rate": int(metadata["sample_rate"])}
+            audio = {"waveform": torch.from_numpy(np.frombuffer(data, dtype="<f4").copy().reshape(spec["shape"])), "sample_rate": int(metadata["sample_rate"])}
     return Types.VideoComponents(images=frames, audio=audio, frame_rate=Fraction(metadata["frame_rate"]))
 
 
-def _prune_video_component_cache(
-    root: Path,
-    max_total_bytes: int = MAX_VIDEO_CACHE_TOTAL_BYTES,
-    keep_paths: tuple[Path, ...] = (),
-) -> None:
+def _prune_video_component_cache(root: Path, max_total_bytes: int = MAX_VIDEO_CACHE_TOTAL_BYTES, keep_paths: tuple[Path, ...] = ()) -> None:
     if max_total_bytes <= 0 or not root.is_dir():
         return
     keep_resolved = {p.resolve() for p in keep_paths}
@@ -1441,12 +1396,7 @@ def _prune_video_component_cache(
         except OSError:
             continue
     if evicted_count:
-        logging.info(
-            "[VideoComponents] Evicted %d older cache file(s) (%.1f MB) to stay within the %.0f MB cache pool.",
-            evicted_count,
-            evicted_bytes / (1024 * 1024),
-            max_total_bytes / (1024 * 1024),
-        )
+        logging.info("[VideoComponents] Evicted %d older cache file(s) (%.1f MB) to stay within the %.0f MB cache pool.", evicted_count, evicted_bytes / (1024 * 1024), max_total_bytes / (1024 * 1024))
 
 
 def _read_components(path, key):
@@ -1476,10 +1426,7 @@ def _read_components(path, key):
     if has_audio and sample_rate is not None:
         audio_tensors, _ = read_uel_safetensors_dict(path, ["audio"])
         if "audio" in audio_tensors:
-            audio = {
-                "waveform": audio_tensors["audio"],
-                "sample_rate": sample_rate,
-            }
+            audio = {"waveform": audio_tensors["audio"], "sample_rate": sample_rate}
     return Types.VideoComponents(images=frames, audio=audio, frame_rate=frame_rate)
 
 
@@ -1489,14 +1436,7 @@ def _write_components(path, key, frames, shape, audio, rate, storage, source_sec
         path = path.with_suffix(".safetensors")
     is_uint8 = storage in ("png8", "uint8")
     storage_type = "uint8" if is_uint8 else "float32"
-    metadata = {
-        "version": "4",
-        "source_hash": str(key),
-        "shape": json.dumps(list(shape)),
-        "storage": storage_type,
-        "frame_rate": str(rate),
-        "sample_rate": str(audio["sample_rate"]) if audio is not None and audio.get("sample_rate") is not None else "",
-    }
+    metadata = {"version": "4", "source_hash": str(key), "shape": json.dumps(list(shape)), "storage": storage_type, "frame_rate": str(rate), "sample_rate": str(audio["sample_rate"]) if audio is not None and audio.get("sample_rate") is not None else ""}
     if source_seconds is not None:
         metadata["source_seconds"] = repr(float(source_seconds))
     with atomic_uel_writer(path, metadata) as writer:
@@ -1566,9 +1506,7 @@ def _resize_h3_batch(source, width, height, crop="center"):
         source = source.float().div_(255)
     if tuple(source.shape[1:3]) == (height, width):
         return source
-    return comfy.utils.common_upscale(
-        source.movedim(-1, 1), width, height, "bicubic", crop,
-    ).clamp_(0, 1).movedim(1, -1)
+    return comfy.utils.common_upscale(source.movedim(-1, 1), width, height, "bicubic", crop).clamp_(0, 1).movedim(1, -1)
 
 
 @contextmanager
@@ -1699,7 +1637,7 @@ def _decode_h3_batches(video, megapixels, audio_file, details, stopped):
                                 graph.configure()
                                 align_graph = graph, src, sink
                             align_graph[1].push(frame)
-                            pixels = np.ascontiguousarray(align_graph[2].pull().to_ndarray(format=image_format)[:frame.height, :frame.width])
+                            pixels = np.ascontiguousarray(align_graph[2].pull().to_ndarray(format=image_format)[: frame.height, : frame.width])
                         else:
                             pixels = frame.to_ndarray(format=image_format)
                         rotation = _rotation_quadrant(frame)
@@ -1711,20 +1649,14 @@ def _decode_h3_batches(video, megapixels, audio_file, details, stopped):
                                 crop_resolved = True
                             if crop_rect is not None:
                                 x, y, crop_width, crop_height = crop_rect
-                                pixels = np.ascontiguousarray(pixels[y:y + crop_height, x:x + crop_width])
+                                pixels = np.ascontiguousarray(pixels[y : y + crop_height, x : x + crop_width])
                         pixels = pixels[..., :3]
                         tensor = torch.from_numpy(pixels)
                         if staging is None:
                             src_h, src_w = pixels.shape[0], pixels.shape[1]
                             width, height = _resolve_h3_dimensions(src_w, src_h, megapixels)
                             if megapixels <= 0 and (width, height) != (src_w, src_h):
-                                logging.warning(
-                                    "[VideoComponents] Source resolution %dx%d exceeds the 1.0 MP unscaled H3 reference limit; scaling proportionally to %dx%d.",
-                                    src_w,
-                                    src_h,
-                                    width,
-                                    height,
-                                )
+                                logging.warning("[VideoComponents] Source resolution %dx%d exceeds the 1.0 MP unscaled H3 reference limit; scaling proportionally to %dx%d.", src_w, src_h, width, height)
                             capacity = _h3_batch_capacity(tensor.shape, (height, width, 3), tensor.dtype)
                             staging = torch.empty((capacity, *tensor.shape), dtype=tensor.dtype)
                         staging[used].copy_(tensor)
@@ -1754,7 +1686,7 @@ def _decode_h3_batches(video, megapixels, audio_file, details, stopped):
                             samples = samples[..., skip:]
                             has_audio = True
                         if duration:
-                            samples = samples[..., :max(0, int(duration * audio_stream.sample_rate) - details["samples"])]
+                            samples = samples[..., : max(0, int(duration * audio_stream.sample_rate) - details["samples"])]
                         details["sample_rate"] = int(audio_stream.sample_rate) if audio_stream.sample_rate else 1
                         details["channels"] = samples.shape[0]
                         details["samples"] += samples.shape[1]
@@ -1832,6 +1764,7 @@ def _stream_h3_components_in_memory(video, megapixels, storage) -> Types.VideoCo
     temp_dir = Path(folder_paths.get_temp_directory()) / "utilscollection_video_components"
     temp_dir.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryFile(dir=temp_dir) as audio_file:
+
         def factory(stopped):
             return closing(_decode_h3_batches(video, megapixels, audio_file, details, stopped))
 
@@ -1851,10 +1784,7 @@ def _stream_h3_components_in_memory(video, megapixels, storage) -> Types.VideoCo
             raise ValueError("Reference video must contain non-empty frames.")
         audio = None
         if details.get("sample_rate") is not None and details.get("samples", 0) > 0:
-            audio = {
-                "waveform": _read_spooled_h3_audio_tensor(audio_file, details),
-                "sample_rate": int(details["sample_rate"]),
-            }
+            audio = {"waveform": _read_spooled_h3_audio_tensor(audio_file, details), "sample_rate": int(details["sample_rate"])}
     frames = _InMemoryVideoFrames(chunks, shape, source_seconds=details.get("source_seconds"))
     return Types.VideoComponents(images=frames, audio=audio, frame_rate=details["rate"])
 
@@ -1868,14 +1798,12 @@ def _write_streamed_h3_components(path, key, video, megapixels, storage):
     path.parent.mkdir(parents=True, exist_ok=True)
     details = {}
     with tempfile.TemporaryFile(dir=path.parent) as audio_file:
+
         def factory(stopped):
             return closing(_decode_h3_batches(video, megapixels, audio_file, details, stopped))
+
         count = 0
-        metadata = {
-            "version": "4",
-            "source_hash": str(key),
-            "storage": storage_type,
-        }
+        metadata = {"version": "4", "source_hash": str(key), "storage": storage_type}
         with atomic_uel_writer(path, metadata) as writer:
             with _prefetch_h3_batches(factory) as batches, tqdm(desc="Decoding & Caching H3 Video Components", unit="frame") as pbar:
                 for batch in batches:
@@ -1905,10 +1833,7 @@ def _write_streamed_h3_components(path, key, video, megapixels, storage):
 
         _prune_video_component_cache(path.parent.parent, keep_paths=(path,))
         audio_desc = f"{details['sample_rate']}Hz ({details.get('samples', 0)} samples)" if details.get("sample_rate") else "none"
-        logging.info(
-            "[VideoComponents] Cached %d frame(s) at %dx%d (%s fps, storage=%s, audio=%s) -> %s",
-            shape[0], shape[2], shape[1], details["rate"], storage_type, audio_desc, path.name,
-        )
+        logging.info("[VideoComponents] Cached %d frame(s) at %dx%d (%s fps, storage=%s, audio=%s) -> %s", shape[0], shape[2], shape[1], details["rate"], storage_type, audio_desc, path.name)
 
 
 def _component_payload_bytes(shape, audio, storage: str) -> int:
@@ -1948,11 +1873,7 @@ def cached_video_components(video, preparation=None, prepare=None, *, cache_larg
         megapixels = preparation["megapixels"]
         estimated = None if cache_large_clips else _estimate_h3_cache_bytes(video, megapixels, storage)
         if estimated is not None and estimated > MAX_VIDEO_CACHE_FILE_BYTES:
-            logging.warning(
-                "[VideoComponents] Prepared clip (~%.1f MB) exceeds the %.0f MB disk-cache threshold; streaming in memory without caching to disk. Enable 'cache_large_clips' on the node to cache large multi-minute clips on disk.",
-                estimated / (1024 * 1024),
-                MAX_VIDEO_CACHE_FILE_BYTES / (1024 * 1024),
-            )
+            logging.warning("[VideoComponents] Prepared clip (~%.1f MB) exceeds the %.0f MB disk-cache threshold; streaming in memory without caching to disk. Enable 'cache_large_clips' on the node to cache large multi-minute clips on disk.", estimated / (1024 * 1024), MAX_VIDEO_CACHE_FILE_BYTES / (1024 * 1024))
             return _stream_h3_components_in_memory(video, megapixels, storage)
         _write_streamed_h3_components(path, key, video, megapixels, storage)
         return _read_components(path, key)
@@ -1962,33 +1883,13 @@ def cached_video_components(video, preparation=None, prepare=None, *, cache_larg
         components = prepare(components)
     payload_bytes = _component_payload_bytes(components.images.shape, components.audio, storage)
     if not cache_large_clips and payload_bytes > MAX_VIDEO_CACHE_FILE_BYTES:
-        logging.warning(
-            "[VideoComponents] Prepared clip (%.1f MB) exceeds the %.0f MB disk-cache threshold; skipping disk cache. Enable 'cache_large_clips' on the node to cache large clips on disk.",
-            payload_bytes / (1024 * 1024),
-            MAX_VIDEO_CACHE_FILE_BYTES / (1024 * 1024),
-        )
+        logging.warning("[VideoComponents] Prepared clip (%.1f MB) exceeds the %.0f MB disk-cache threshold; skipping disk cache. Enable 'cache_large_clips' on the node to cache large clips on disk.", payload_bytes / (1024 * 1024), MAX_VIDEO_CACHE_FILE_BYTES / (1024 * 1024))
         return components
-    _write_components(
-        path,
-        key,
-        components.images,
-        components.images.shape,
-        components.audio,
-        components.frame_rate,
-        storage,
-        source_seconds=getattr(components.images, "source_seconds", None),
-    )
+    _write_components(path, key, components.images, components.images.shape, components.audio, components.frame_rate, storage, source_seconds=getattr(components.images, "source_seconds", None))
     return _read_components(path, key)
 
 
-def prepare_h3_reference_video_components(
-    video,
-    megapixels: float,
-    duration_seconds: float = 0.0,
-    start_at_timestamp: float = 0.0,
-    *,
-    cache_large_clips: bool = False,
-):
+def prepare_h3_reference_video_components(video, megapixels: float, duration_seconds: float = 0.0, start_at_timestamp: float = 0.0, *, cache_large_clips: bool = False):
     components = cached_h3_reference_components(video, megapixels, cache_large_clips=cache_large_clips)
     return prepare_h3_reference_components(components, megapixels, duration_seconds, start_at_timestamp, spatially_prepared=True)
 
@@ -2079,33 +1980,20 @@ def cached_h3_reference_components(video, megapixels, *, cache_long_window=False
         src_h, src_w = int(frames.shape[1]), int(frames.shape[2])
         width, height = _resolve_h3_dimensions(src_w, src_h, megapixels)
         if megapixels <= 0 and (width, height) != (src_w, src_h):
-            logging.warning(
-                "[VideoComponents] Source resolution %dx%d exceeds the 1.0 MP unscaled H3 reference limit; scaling proportionally to %dx%d.",
-                src_w,
-                src_h,
-                width,
-                height,
-            )
+            logging.warning("[VideoComponents] Source resolution %dx%d exceeds the 1.0 MP unscaled H3 reference limit; scaling proportionally to %dx%d.", src_w, src_h, width, height)
         if indices is None and (height, width) == (src_h, src_w):
             return components
         crop = "center" if megapixels > 0 else "disabled"
         resized = H3ResizedFrames(frames, width, height, indices=indices, crop=crop, source_seconds=source_seconds)
         return Types.VideoComponents(images=resized, audio=components.audio, frame_rate=out_rate)
 
-    prep_info = {
-        "megapixels": megapixels,
-        "max_fps": H3_MAX_CACHE_FPS,
-        "resize": "h3-bicubic-center-v2" if megapixels > 0 else "h3-native-capped-v1",
-    }
+    prep_info = {"megapixels": megapixels, "max_fps": H3_MAX_CACHE_FPS, "resize": "h3-bicubic-center-v2" if megapixels > 0 else "h3-native-capped-v1"}
     if cache_long_window:
         prep_info["cache_long_window"] = True
     return cached_video_components(video, prep_info, prepare, cache_large_clips=cache_large_clips)
 
 
-def resolve_h3_reference_window(
-    source_seconds: float, duration_seconds: float = 0.0, start_at_timestamp: float = 0.0,
-    segment_count: int = 0, segment_index: int = 0, continuation_media: dict | None = None,
-) -> tuple[int, int, int | None, int]:
+def resolve_h3_reference_window(source_seconds: float, duration_seconds: float = 0.0, start_at_timestamp: float = 0.0, segment_count: int = 0, segment_index: int = 0, continuation_media: dict | None = None) -> tuple[int, int, int | None, int]:
     """Calculate start_frame, frame_count, segment_end, prepended_t for an H3 segment."""
     prepended_t = 0
     trimmed_pad = 0
@@ -2113,6 +2001,7 @@ def resolve_h3_reference_window(
         trimmed_pad = int(continuation_media.get("padded_frames", 0) or 0)
         if continuation_media.get("video_merge_mode", "replace") == "prepend":
             from .encoder_helpers import validate_minimax_h3_clip_continuation_media
+
             c_frames = validate_minimax_h3_clip_continuation_media(continuation_media)
             if c_frames is not None:
                 prepended_t = c_frames.shape[0]
@@ -2161,12 +2050,7 @@ def resolve_h3_reference_window(
     return start_frame, frame_count, segment_end, prepended_t
 
 
-def prepare_h3_reference_components(
-    components, megapixels: float, duration_seconds: float = 0.0, start_at_timestamp: float = 0.0,
-    *, spatially_prepared=False, segment_count: int = 0, segment_index: int = 0,
-    continuation_media: dict | None = None, full_source_seconds: float | None = None,
-    window_start_frame: int = 0,
-):
+def prepare_h3_reference_components(components, megapixels: float, duration_seconds: float = 0.0, start_at_timestamp: float = 0.0, *, spatially_prepared=False, segment_count: int = 0, segment_index: int = 0, continuation_media: dict | None = None, full_source_seconds: float | None = None, window_start_frame: int = 0):
     """Prepare already-decoded components while retaining source audio provenance at the caller."""
     source_frames = components.images
     source_rate = float(components.frame_rate)
@@ -2186,9 +2070,7 @@ def prepare_h3_reference_components(
     if inferred_seconds is None:
         inferred_seconds = source_count / source_rate
     effective_source_seconds = full_source_seconds if full_source_seconds is not None else inferred_seconds
-    start_frame, frame_count, segment_end, prepended_t = resolve_h3_reference_window(
-        effective_source_seconds, duration_seconds, start_at_timestamp, segment_count, segment_index, continuation_media
-    )
+    start_frame, frame_count, segment_end, prepended_t = resolve_h3_reference_window(effective_source_seconds, duration_seconds, start_at_timestamp, segment_count, segment_index, continuation_media)
     start_seconds = start_frame / 24
     window_start_seconds = window_start_frame / 24
     frame_positions = range(start_frame, start_frame + frame_count)
@@ -2206,16 +2088,10 @@ def prepare_h3_reference_components(
         output_width, output_height = source_width, source_height
     else:
         source_aspect = source_width / source_height
-        ratio_width, ratio_height = min(
-            ASPECT_RATIOS.values(), key=lambda ratio: abs(source_aspect - ratio[0] / ratio[1]),
-        )
-        output_width, output_height = select_video_resolution(
-            ratio_width, ratio_height, megapixels, 32, 32, MAX_RESOLUTION,
-        )
+        ratio_width, ratio_height = min(ASPECT_RATIOS.values(), key=lambda ratio: abs(source_aspect - ratio[0] / ratio[1]))
+        output_width, output_height = select_video_resolution(ratio_width, ratio_height, megapixels, 32, 32, MAX_RESOLUTION)
     if (output_height, output_width) != (source_height, source_width):
-        prepared_frames = resize_nchw(
-            prepared_frames.movedim(-1, 1), output_width, output_height, "lanczos", "center",
-        ).clamp(0.0, 1.0).movedim(1, -1).contiguous()
+        prepared_frames = resize_nchw(prepared_frames.movedim(-1, 1), output_width, output_height, "lanczos", "center").clamp(0.0, 1.0).movedim(1, -1).contiguous()
 
     soundtrack = components.audio
     audio_window = round(frame_count / 24 * 32000)
@@ -2229,7 +2105,7 @@ def prepare_h3_reference_components(
         start_sample = round(start_frame / 24 * sample_rate) - round(window_start_frame / 24 * sample_rate)
         if segment_end is not None:
             sample_count = (round(segment_end / 24 * sample_rate) - round(window_start_frame / 24 * sample_rate)) - start_sample
-        audio_samples = soundtrack["waveform"][..., start_sample:start_sample + sample_count]
+        audio_samples = soundtrack["waveform"][..., start_sample : start_sample + sample_count]
         if sample_rate != 32000 and audio_samples.numel():
             audio_samples = torchaudio.functional.resample(audio_samples, sample_rate, 32000)
         audio_samples = audio_samples[..., :audio_window]
@@ -2242,13 +2118,12 @@ def prepare_h3_reference_components(
         preview.update(source_end_frame=segment_end - 1, padded_frames=frame_count - (segment_end - start_frame))
     if continuation_media is not None:
         from .encoder_helpers import validate_minimax_h3_clip_continuation_media
+
         cont_frames = validate_minimax_h3_clip_continuation_media(continuation_media)
         merge_mode = continuation_media.get("video_merge_mode", "replace")
         if cont_frames is not None:
             if cont_frames.shape[1:3] != (output_height, output_width):
-                cont_frames = resize_nchw(
-                    cont_frames.movedim(-1, 1), output_width, output_height, "lanczos", "center"
-                ).clamp(0.0, 1.0).movedim(1, -1).contiguous()
+                cont_frames = resize_nchw(cont_frames.movedim(-1, 1), output_width, output_height, "lanczos", "center").clamp(0.0, 1.0).movedim(1, -1).contiguous()
             if merge_mode == "replace":
                 tail_count = min(cont_frames.shape[0], prepared_frames.shape[0])
                 prepared_frames = torch.cat((cont_frames[:tail_count], prepared_frames[tail_count:]), dim=0)
@@ -2316,17 +2191,9 @@ def _robust_channel_stats(values: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
 
 
 def _covariance_shape(values: np.ndarray) -> tuple[np.ndarray, np.ndarray, float]:
-    clipped = np.clip(
-        values,
-        np.percentile(values, 1.0, axis=0),
-        np.percentile(values, 99.0, axis=0),
-    )
+    clipped = np.clip(values, np.percentile(values, 1.0, axis=0), np.percentile(values, 99.0, axis=0))
     center = np.median(clipped, axis=0).astype(np.float32)
-    covariance = (
-        np.cov(clipped - center, rowvar=False).astype(np.float32)
-        if len(clipped) > 1
-        else np.zeros((2, 2), dtype=np.float32)
-    )
+    covariance = np.cov(clipped - center, rowvar=False).astype(np.float32) if len(clipped) > 1 else np.zeros((2, 2), dtype=np.float32)
     covariance += np.eye(2, dtype=np.float32) * 1e-5
     spread = max(float(np.trace(covariance)), 1e-5)
     return center, covariance / spread, spread
@@ -2384,25 +2251,13 @@ def _fit_source_to_target(source_rgb: np.ndarray, target_rgb: np.ndarray) -> np.
     source_xy = np.float32([source_points[match.queryIdx].pt for match in matches])
     target_xy = np.float32([target_points[match.trainIdx].pt for match in matches])
     threshold = max(2.0, math.hypot(*target_rgb.shape[:2]) * 0.003)
-    affine, inliers = cv2.estimateAffinePartial2D(
-        source_xy,
-        target_xy,
-        method=cv2.RANSAC,
-        ransacReprojThreshold=threshold,
-        maxIters=3000,
-        confidence=0.995,
-        refineIters=20,
-    )
+    affine, inliers = cv2.estimateAffinePartial2D(source_xy, target_xy, method=cv2.RANSAC, ransacReprojThreshold=threshold, maxIters=3000, confidence=0.995, refineIters=20)
     inlier_count = 0 if inliers is None else int(inliers.sum())
     if affine is None or inliers is None or inlier_count < 4 or inlier_count / len(matches) < 0.6:
         return None
     affine_full = np.eye(3, dtype=np.float64)
     affine_full[:2] = affine
-    affine_full = (
-        np.diag([1.0 / target_scale, 1.0 / target_scale, 1.0])
-        @ affine_full
-        @ np.diag([source_scale, source_scale, 1.0])
-    )
+    affine_full = np.diag([1.0 / target_scale, 1.0 / target_scale, 1.0]) @ affine_full @ np.diag([source_scale, source_scale, 1.0])
     affine = affine_full[:2]
     scale = math.hypot(float(affine[0, 0]), float(affine[1, 0]))
     if not 0.2 <= scale <= 5.0:
@@ -2411,42 +2266,21 @@ def _fit_source_to_target(source_rgb: np.ndarray, target_rgb: np.ndarray) -> np.
     corners = np.float32([[[0, 0], [source_w, 0], [source_w, source_h], [0, source_h]]])
     mapped = cv2.transform(corners, affine)[0]
     target_h, target_w = target_rgb.shape[:2]
-    visible = cv2.intersectConvexConvex(
-        mapped.astype(np.float32),
-        np.float32([[0, 0], [target_w, 0], [target_w, target_h], [0, target_h]]),
-    )[0]
+    visible = cv2.intersectConvexConvex(mapped.astype(np.float32), np.float32([[0, 0], [target_w, 0], [target_w, target_h], [0, target_h]]))[0]
     mapped_area = abs(float(cv2.contourArea(mapped)))
     if mapped_area <= 1.0 or visible / mapped_area < 0.5:
         return None
     return affine.astype(np.float32)
 
 
-def _matched_overlap_edge_pixels(
-    source_rgb: np.ndarray,
-    target_rgb: np.ndarray,
-    source_lab: np.ndarray,
-    target_lab: np.ndarray,
-    outpaint_mask: np.ndarray | None = None,
-) -> tuple[np.ndarray, np.ndarray] | None:
+def _matched_overlap_edge_pixels(source_rgb: np.ndarray, target_rgb: np.ndarray, source_lab: np.ndarray, target_lab: np.ndarray, outpaint_mask: np.ndarray | None = None) -> tuple[np.ndarray, np.ndarray] | None:
     affine = _fit_source_to_target(source_rgb, target_rgb)
     if affine is None:
         return None
     target_h, target_w = target_rgb.shape[:2]
-    warped_source = cv2.warpAffine(
-        source_lab,
-        affine,
-        (target_w, target_h),
-        flags=cv2.INTER_LINEAR,
-        borderMode=cv2.BORDER_CONSTANT,
-    )
+    warped_source = cv2.warpAffine(source_lab, affine, (target_w, target_h), flags=cv2.INTER_LINEAR, borderMode=cv2.BORDER_CONSTANT)
     source_mask = np.ones(source_rgb.shape[:2], dtype=np.uint8)
-    overlap = cv2.warpAffine(
-        source_mask,
-        affine,
-        (target_w, target_h),
-        flags=cv2.INTER_NEAREST,
-        borderMode=cv2.BORDER_CONSTANT,
-    )
+    overlap = cv2.warpAffine(source_mask, affine, (target_w, target_h), flags=cv2.INTER_NEAREST, borderMode=cv2.BORDER_CONSTANT)
     distance = cv2.distanceTransform(overlap, cv2.DIST_L2, 3)
     overlap_area = int(np.count_nonzero(overlap))
     edge_width = max(3.0, math.sqrt(overlap_area) * 0.04)
@@ -2465,17 +2299,7 @@ def _matched_overlap_edge_pixels(
     return warped_source[source_edge], target_lab[target_edge]
 
 
-def match_image_properties(
-    source: torch.Tensor,
-    target: torch.Tensor,
-    overall_weight: float,
-    color_weight: float,
-    lighting_weight: float,
-    texture_preservation: float,
-    mask: torch.Tensor | None = None,
-    saturation_weight: float = 1.0,
-    contrast_weight: float = 1.0,
-) -> torch.Tensor:
+def match_image_properties(source: torch.Tensor, target: torch.Tensor, overall_weight: float, color_weight: float, lighting_weight: float, texture_preservation: float, mask: torch.Tensor | None = None, saturation_weight: float = 1.0, contrast_weight: float = 1.0) -> torch.Tensor:
     """Transfer global color and lighting statistics without spatial correspondence."""
     if overall_weight <= 0.0 or (color_weight <= 0.0 and lighting_weight <= 0.0 and saturation_weight <= 0.0 and contrast_weight <= 0.0):
         return target.clone()
@@ -2489,13 +2313,7 @@ def match_image_properties(
         target_lab = cv2.cvtColor(target_rgb, cv2.COLOR_RGB2LAB).astype(np.float32)
         apply_mask = _feather_outpaint_mask(_prepare_mask(mask, index, *target_rgb.shape[:2]))
 
-        matched_pixels = _matched_overlap_edge_pixels(
-            source_rgb,
-            target_rgb,
-            source_lab,
-            target_lab,
-            apply_mask,
-        )
+        matched_pixels = _matched_overlap_edge_pixels(source_rgb, target_rgb, source_lab, target_lab, apply_mask)
         if matched_pixels is None:
             source_pixels = source_lab.reshape(-1, 3)
             target_pixels = target_lab.reshape(-1, 3)
@@ -2551,29 +2369,17 @@ def _restore_match_histogram(source: np.ndarray, template: np.ndarray) -> np.nda
     oldshape = source.shape
     source_flat = source.ravel()
     template_flat = template.ravel()
-    source_values, source_bins, source_counts = np.unique(
-        source_flat, return_inverse=True, return_counts=True
-    )
+    source_values, source_bins, source_counts = np.unique(source_flat, return_inverse=True, return_counts=True)
     template_values, template_counts = np.unique(template_flat, return_counts=True)
     source_quantiles = np.cumsum(source_counts).astype(np.float64)
     source_quantiles /= source_quantiles[-1]
     template_quantiles = np.cumsum(template_counts).astype(np.float64)
     template_quantiles /= template_quantiles[-1]
-    mapped_values = np.interp(
-        source_quantiles, template_quantiles, template_values
-    )
+    mapped_values = np.interp(source_quantiles, template_quantiles, template_values)
     return mapped_values[source_bins].reshape(oldshape)
 
 
-def restore_image_color_properties(
-    original_tensor: torch.Tensor,
-    generated_tensor: torch.Tensor,
-    overall_weight: float,
-    color_weight: float,
-    lighting_weight: float,
-    texture_preservation: float,
-    mask_tensor: torch.Tensor | None = None,
-) -> torch.Tensor:
+def restore_image_color_properties(original_tensor: torch.Tensor, generated_tensor: torch.Tensor, overall_weight: float, color_weight: float, lighting_weight: float, texture_preservation: float, mask_tensor: torch.Tensor | None = None) -> torch.Tensor:
     """Restore historical global LAB color and lighting transfer behavior."""
     if overall_weight == 0.0 or (color_weight == 0.0 and lighting_weight == 0.0):
         return generated_tensor.clone()
@@ -2583,12 +2389,8 @@ def restore_image_color_properties(
     mask_batch = mask_tensor.shape[0] if mask_tensor is not None else 0
     for index in range(generated_tensor.shape[0]):
         original_index = index if index < original_batch else 0
-        original = np.clip(
-            original_tensor[original_index].detach().cpu().numpy().squeeze(), 0.0, 1.0
-        ).astype(np.float32)
-        generated = np.clip(
-            generated_tensor[index].detach().cpu().numpy().squeeze(), 0.0, 1.0
-        ).astype(np.float32)
+        original = np.clip(original_tensor[original_index].detach().cpu().numpy().squeeze(), 0.0, 1.0).astype(np.float32)
+        generated = np.clip(generated_tensor[index].detach().cpu().numpy().squeeze(), 0.0, 1.0).astype(np.float32)
         mask = None
         if mask_tensor is not None:
             mask_index = index if index < mask_batch else 0
@@ -2622,11 +2424,7 @@ def restore_image_color_properties(
     return torch.cat(outputs, dim=0).to(generated_tensor)
 
 
-def mask_to_bounding_box(
-    mask: torch.Tensor,
-    invert: bool = False,
-    image: torch.Tensor | None = None,
-) -> tuple[dict[str, int], torch.Tensor | None]:
+def mask_to_bounding_box(mask: torch.Tensor, invert: bool = False, image: torch.Tensor | None = None) -> tuple[dict[str, int], torch.Tensor | None]:
     """Return one Core bounding box covering all nonzero mask pixels."""
     if mask.ndim < 2:
         raise ValueError("Mask to Bounding Box requires a mask with at least two dimensions.")
@@ -2640,17 +2438,8 @@ def mask_to_bounding_box(
     y_max = int(nonzero[:, -2].max().item())
     x_min = int(nonzero[:, -1].min().item())
     x_max = int(nonzero[:, -1].max().item())
-    bounding_box = {
-        "x": x_min,
-        "y": y_min,
-        "width": x_max - x_min + 1,
-        "height": y_max - y_min + 1,
-    }
-    cropped_image = (
-        image[:, y_min:y_max + 1, x_min:x_max + 1, :]
-        if image is not None
-        else None
-    )
+    bounding_box = {"x": x_min, "y": y_min, "width": x_max - x_min + 1, "height": y_max - y_min + 1}
+    cropped_image = image[:, y_min : y_max + 1, x_min : x_max + 1, :] if image is not None else None
     return bounding_box, cropped_image
 
 
@@ -2714,12 +2503,12 @@ def _nohalo_subdivision(p: torch.Tensor) -> tuple[torch.Tensor, ...]:
     q1, q2, q3, q4, q5 = (p[..., 3, index] for index in range(5))
     c2, c3, c4 = p[..., 4, 1], p[..., 4, 2], p[..., 4, 3]
 
-    du2, dt2, tq2, qc2 = d2-u2, t2-d2, q2-t2, c2-q2
-    du3, dt3, tq3, qc3 = d3-u3, t3-d3, q3-t3, c3-q3
-    du4, dt4, tq4, qc4 = d4-u4, t4-d4, q4-t4, c4-q4
-    d12, d23, d34, d45 = d2-d1, d3-d2, d4-d3, d5-d4
-    t12, t23, t34, t45 = t2-t1, t3-t2, t4-t3, t5-t4
-    q12, q23, q34, q45 = q2-q1, q3-q2, q4-q3, q5-q4
+    du2, dt2, tq2, qc2 = d2 - u2, t2 - d2, q2 - t2, c2 - q2
+    du3, dt3, tq3, qc3 = d3 - u3, t3 - d3, q3 - t3, c3 - q3
+    du4, dt4, tq4, qc4 = d4 - u4, t4 - d4, q4 - t4, c4 - q4
+    d12, d23, d34, d45 = d2 - d1, d3 - d2, d4 - d3, d5 - d4
+    t12, t23, t34, t45 = t2 - t1, t3 - t2, t4 - t3, t5 - t4
+    q12, q23, q34, q45 = q2 - q1, q3 - q2, q4 - q3, q5 - q4
 
     d3y, t3y = _minmod(dt3, du3), _minmod(dt3, tq3)
     q3y = _minmod(qc3, tq3)
@@ -2729,64 +2518,64 @@ def _nohalo_subdivision(p: torch.Tensor) -> tuple[torch.Tensor, ...]:
     d3x, d4x, d2x = _minmod(d23, d34), _minmod(d45, d34), _minmod(d23, d12)
     t2y, q2y, d2y = _minmod(dt2, tq2), _minmod(qc2, tq2), _minmod(dt2, du2)
 
-    a12 = 0.5*(d3+t3) + 0.25*(d3y-t3y)
-    a32 = 0.5*(t3+q3) + 0.25*(t3y-q3y)
-    a34 = 0.5*(t4+q4) + 0.25*(t4y-q4y)
-    a14 = 0.5*(d4+t4) + 0.25*(d4y-t4y)
-    a21 = 0.5*(t2+t3) + 0.25*(t2x-t3x)
-    a23 = 0.5*(t3+t4) + 0.25*(t3x-t4x)
-    a43 = 0.5*(q3+q4) + 0.25*(q3x-q4x)
-    a41 = 0.5*(q2+q3) + 0.25*(q2x-q3x)
-    a33 = 0.125*((t3x-t4x)+(q3x-q4x)) + 0.5*(a32+a34)
-    a13 = 0.25*(d4-t3) + 0.125*(d4y-t4y+d3x-d4x) + 0.5*(a12+a23)
-    a31 = 0.25*(q2-t3) + 0.125*(q2x-q3x+t2y-q2y) + 0.5*(a21+a32)
-    a11 = 0.25*(d2+d3+t2+t3) + 0.125*(d2x-d3x+t2x-t3x+d2y+d3y-t2y-t3y)
+    a12 = 0.5 * (d3 + t3) + 0.25 * (d3y - t3y)
+    a32 = 0.5 * (t3 + q3) + 0.25 * (t3y - q3y)
+    a34 = 0.5 * (t4 + q4) + 0.25 * (t4y - q4y)
+    a14 = 0.5 * (d4 + t4) + 0.25 * (d4y - t4y)
+    a21 = 0.5 * (t2 + t3) + 0.25 * (t2x - t3x)
+    a23 = 0.5 * (t3 + t4) + 0.25 * (t3x - t4x)
+    a43 = 0.5 * (q3 + q4) + 0.25 * (q3x - q4x)
+    a41 = 0.5 * (q2 + q3) + 0.25 * (q2x - q3x)
+    a33 = 0.125 * ((t3x - t4x) + (q3x - q4x)) + 0.5 * (a32 + a34)
+    a13 = 0.25 * (d4 - t3) + 0.125 * (d4y - t4y + d3x - d4x) + 0.5 * (a12 + a23)
+    a31 = 0.25 * (q2 - t3) + 0.125 * (q2x - q3x + t2y - q2y) + 0.5 * (a21 + a32)
+    a11 = 0.25 * (d2 + d3 + t2 + t3) + 0.125 * (d2x - d3x + t2x - t3x + d2y + d3y - t2y - t3y)
     return a11, a12, a13, a14, a21, t3, a23, t4, a31, a32, a33, a34, a41, q3, a43, q4
 
 
 def _lbb(stencil: tuple[torch.Tensor, ...], x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
-    u1,u2,u3,u4,d1,d2,d3,d4,t1,t2,t3,t4,q1,q2,q3,q4 = stencil
-    min00 = torch.minimum(torch.minimum(torch.minimum(u1,u2),u3), torch.minimum(torch.minimum(d1,d2), torch.minimum(d3, torch.minimum(t1,torch.minimum(t2,t3)))))
-    max00 = torch.maximum(torch.maximum(torch.maximum(u1,u2),u3), torch.maximum(torch.maximum(d1,d2), torch.maximum(d3, torch.maximum(t1,torch.maximum(t2,t3)))))
-    min10 = torch.minimum(torch.minimum(torch.minimum(u2,u3),u4), torch.minimum(torch.minimum(d2,d3), torch.minimum(d4, torch.minimum(t2,torch.minimum(t3,t4)))))
-    max10 = torch.maximum(torch.maximum(torch.maximum(u2,u3),u4), torch.maximum(torch.maximum(d2,d3), torch.maximum(d4, torch.maximum(t2,torch.maximum(t3,t4)))))
-    min01 = torch.minimum(torch.minimum(torch.minimum(d1,d2),d3), torch.minimum(torch.minimum(t1,t2), torch.minimum(t3, torch.minimum(q1,torch.minimum(q2,q3)))))
-    max01 = torch.maximum(torch.maximum(torch.maximum(d1,d2),d3), torch.maximum(torch.maximum(t1,t2), torch.maximum(t3, torch.maximum(q1,torch.maximum(q2,q3)))))
-    min11 = torch.minimum(torch.minimum(torch.minimum(d2,d3),d4), torch.minimum(torch.minimum(t2,t3), torch.minimum(t4, torch.minimum(q2,torch.minimum(q3,q4)))))
-    max11 = torch.maximum(torch.maximum(torch.maximum(d2,d3),d4), torch.maximum(torch.maximum(t2,t3), torch.maximum(t4, torch.maximum(q2,torch.maximum(q3,q4)))))
+    u1, u2, u3, u4, d1, d2, d3, d4, t1, t2, t3, t4, q1, q2, q3, q4 = stencil
+    min00 = torch.minimum(torch.minimum(torch.minimum(u1, u2), u3), torch.minimum(torch.minimum(d1, d2), torch.minimum(d3, torch.minimum(t1, torch.minimum(t2, t3)))))
+    max00 = torch.maximum(torch.maximum(torch.maximum(u1, u2), u3), torch.maximum(torch.maximum(d1, d2), torch.maximum(d3, torch.maximum(t1, torch.maximum(t2, t3)))))
+    min10 = torch.minimum(torch.minimum(torch.minimum(u2, u3), u4), torch.minimum(torch.minimum(d2, d3), torch.minimum(d4, torch.minimum(t2, torch.minimum(t3, t4)))))
+    max10 = torch.maximum(torch.maximum(torch.maximum(u2, u3), u4), torch.maximum(torch.maximum(d2, d3), torch.maximum(d4, torch.maximum(t2, torch.maximum(t3, t4)))))
+    min01 = torch.minimum(torch.minimum(torch.minimum(d1, d2), d3), torch.minimum(torch.minimum(t1, t2), torch.minimum(t3, torch.minimum(q1, torch.minimum(q2, q3)))))
+    max01 = torch.maximum(torch.maximum(torch.maximum(d1, d2), d3), torch.maximum(torch.maximum(t1, t2), torch.maximum(t3, torch.maximum(q1, torch.maximum(q2, q3)))))
+    min11 = torch.minimum(torch.minimum(torch.minimum(d2, d3), d4), torch.minimum(torch.minimum(t2, t3), torch.minimum(t4, torch.minimum(q2, torch.minimum(q3, q4)))))
+    max11 = torch.maximum(torch.maximum(torch.maximum(d2, d3), d4), torch.maximum(torch.maximum(t2, t3), torch.maximum(t4, torch.maximum(q2, torch.maximum(q3, q4)))))
 
-    values = (d2,d3,t2,t3)
-    mins, maxs = (min00,min10,min01,min11), (max00,max10,max01,max11)
-    dx0 = (d3-d1,d4-d2,t3-t1,t4-t2)
-    dy0 = (t2-u2,t3-u3,q2-d2,q3-d3)
-    cross0 = (u1-u3+t3-t1, u2-u4+t4-t2, q3-q1-d3+d1, q4-q2-d4+d2)
+    values = (d2, d3, t2, t3)
+    mins, maxs = (min00, min10, min01, min11), (max00, max10, max01, max11)
+    dx0 = (d3 - d1, d4 - d2, t3 - t1, t4 - t2)
+    dy0 = (t2 - u2, t3 - u3, q2 - d2, q3 - d3)
+    cross0 = (u1 - u3 + t3 - t1, u2 - u4 + t4 - t2, q3 - q1 - d3 + d1, q4 - q2 - d4 + d2)
     dx, dy, cross = [], [], []
     for value, minimum, maximum, ddx, ddy, dcross in zip(values, mins, maxs, dx0, dy0, cross0):
-        limit = 6.0 * torch.minimum(value-minimum, maximum-value)
+        limit = 6.0 * torch.minimum(value - minimum, maximum - value)
         ddx = ddx.sign() * torch.minimum(ddx.abs(), limit)
         ddy = ddy.sign() * torch.minimum(ddy.abs(), limit)
-        sum12, dif12 = 6.0*(ddx+ddy), 6.0*(ddx-ddy)
-        lower = torch.maximum(sum12.abs()-36.0*(value-minimum), dif12.abs()-36.0*(maximum-value))
-        upper = torch.minimum(36.0*(maximum-value)-sum12.abs(), 36.0*(value-minimum)-dif12.abs())
+        sum12, dif12 = 6.0 * (ddx + ddy), 6.0 * (ddx - ddy)
+        lower = torch.maximum(sum12.abs() - 36.0 * (value - minimum), dif12.abs() - 36.0 * (maximum - value))
+        upper = torch.minimum(36.0 * (maximum - value) - sum12.abs(), 36.0 * (value - minimum) - dif12.abs())
         dx.append(ddx)
         dy.append(ddy)
         cross.append(dcross.clamp(min=lower, max=upper))
 
-    hx0, hx1 = 2*x**3-3*x**2+1, -2*x**3+3*x**2
-    hdx0, hdx1 = x**3-2*x**2+x, x**3-x**2
-    hy0, hy1 = 2*y**3-3*y**2+1, -2*y**3+3*y**2
-    hdy0, hdy1 = y**3-2*y**2+y, y**3-y**2
-    c = (hx0*hy0,hx1*hy0,hx0*hy1,hx1*hy1)
-    cx = (hdx0*hy0,hdx1*hy0,hdx0*hy1,hdx1*hy1)
-    cy = (hx0*hdy0,hx1*hdy0,hx0*hdy1,hx1*hdy1)
-    cxy = (hdx0*hdy0,hdx1*hdy0,hdx0*hdy1,hdx1*hdy1)
-    return sum(a*b for a,b in zip(c,values)) + 0.5*sum(a*b for a,b in zip(cx,dx)) + 0.5*sum(a*b for a,b in zip(cy,dy)) + 0.25*sum(a*b for a,b in zip(cxy,cross))
+    hx0, hx1 = 2 * x**3 - 3 * x**2 + 1, -2 * x**3 + 3 * x**2
+    hdx0, hdx1 = x**3 - 2 * x**2 + x, x**3 - x**2
+    hy0, hy1 = 2 * y**3 - 3 * y**2 + 1, -2 * y**3 + 3 * y**2
+    hdy0, hdy1 = y**3 - 2 * y**2 + y, y**3 - y**2
+    c = (hx0 * hy0, hx1 * hy0, hx0 * hy1, hx1 * hy1)
+    cx = (hdx0 * hy0, hdx1 * hy0, hdx0 * hy1, hdx1 * hy1)
+    cy = (hx0 * hdy0, hx1 * hdy0, hx0 * hdy1, hx1 * hdy1)
+    cxy = (hdx0 * hdy0, hdx1 * hdy0, hdx0 * hdy1, hdx1 * hdy1)
+    return sum(a * b for a, b in zip(c, values)) + 0.5 * sum(a * b for a, b in zip(cx, dx)) + 0.5 * sum(a * b for a, b in zip(cy, dy)) + 0.25 * sum(a * b for a, b in zip(cxy, cross))
 
 
 def _gather_halo_patch(image: torch.Tensor, x_index: torch.Tensor, y_index: torch.Tensor, offsets: torch.Tensor) -> torch.Tensor:
     batch, channels, height, width = image.shape
-    yy = (y_index[..., None, None] + offsets[:, None]).clamp(0, height-1)
-    xx = (x_index[..., None, None] + offsets[None, :]).clamp(0, width-1)
+    yy = (y_index[..., None, None] + offsets[:, None]).clamp(0, height - 1)
+    xx = (x_index[..., None, None] + offsets[None, :]).clamp(0, width - 1)
     linear = (yy * width + xx).reshape(1, 1, -1).expand(batch, channels, -1)
     return torch.gather(image.reshape(batch, channels, -1), 2, linear).reshape(batch, channels, *x_index.shape, offsets.numel(), offsets.numel())
 
@@ -2804,7 +2593,7 @@ def downscale_nohalo_lohalo(image: torch.Tensor, method: str, megapixels: float,
     x = offset_x + (torch.arange(out_width, device=image.device, dtype=torch.float32) + 0.5) / scale
     x_anchor = torch.floor(x).long()
     x_fraction = x - (x_anchor.float() + 0.5)
-    offsets = torch.arange(-support, support+1, device=image.device)
+    offsets = torch.arange(-support, support + 1, device=image.device)
     output = torch.empty((batch, channels, out_height, out_width), device=image.device, dtype=torch.float32)
 
     for y_start in range(0, out_height, tile_rows):
@@ -2821,93 +2610,58 @@ def downscale_nohalo_lohalo(image: torch.Tensor, method: str, megapixels: float,
         if method == "lohalo":
             weights = _mitchell_kernel(dx) * _mitchell_kernel(dy)
             sigmoid_patch = _inverse_sigmoidal(patch)
-            mitchell = (sigmoid_patch * weights).sum((-1,-2))
+            mitchell = (sigmoid_patch * weights).sum((-1, -2))
             if channels == 4:
                 mitchell[:, :3] = _extended_sigmoidal(mitchell[:, :3])
-                mitchell[:, 3] = (patch[:, 3] * weights).sum((-1,-2))
+                mitchell[:, 3] = (patch[:, 3] * weights).sum((-1, -2))
             else:
                 mitchell = _extended_sigmoidal(mitchell)
-            ewa_weights = _robidoux_kernel(scale*scale*(dx*dx+dy*dy))
-            ewa_total = ewa_weights.sum((-1,-2))
+            ewa_weights = _robidoux_kernel(scale * scale * (dx * dx + dy * dy))
+            ewa_total = ewa_weights.sum((-1, -2))
             ewa_total = torch.where(ewa_total.abs() < 1e-8, torch.ones_like(ewa_total), ewa_total)
-            ewa = (patch * ewa_weights).sum((-1,-2)) / ewa_total
-            tile = scale*scale*mitchell + (1.0-scale*scale)*ewa
+            ewa = (patch * ewa_weights).sum((-1, -2)) / ewa_total
+            tile = scale * scale * mitchell + (1.0 - scale * scale) * ewa
         else:
             signs_x = torch.where(x_fraction >= 0, 1, -1)
             signs_y = torch.where(y_fraction >= 0, 1, -1)
-            oriented = torch.empty((*patch.shape[:-2],5,5), device=image.device, dtype=patch.dtype)
+            oriented = torch.empty((*patch.shape[:-2], 5, 5), device=image.device, dtype=patch.dtype)
             center = support
             patch_flat = patch.flatten(-2)
             for row in range(5):
                 for column in range(5):
-                    source_row = center + (row-2) * signs_y[:, None]
-                    source_column = center + (column-2) * signs_x[None, :]
+                    source_row = center + (row - 2) * signs_y[:, None]
+                    source_column = center + (column - 2) * signs_x[None, :]
                     source_index = source_row * kernel_size + source_column
-                    gather_index = source_index[None,None].expand(batch, channels, -1, -1).unsqueeze(-1)
+                    gather_index = source_index[None, None].expand(batch, channels, -1, -1).unsqueeze(-1)
                     oriented[..., row, column] = torch.gather(patch_flat, -1, gather_index).squeeze(-1)
             subdivision = _nohalo_subdivision(oriented)
-            local_x = 2.0*x_fraction.abs()
-            local_y = 2.0*y_fraction.abs()
-            lbb = _lbb(subdivision, local_x[None,None,None,:], local_y[None,None,:,None])
-            ewa_weights = (1.0-torch.sqrt((scale*scale*(dx*dx+dy*dy)).clamp_min(0.0))).clamp_min(0.0)
-            ewa = (patch * ewa_weights).sum((-1,-2)) / ewa_weights.sum((-1,-2)).clamp_min(1e-8)
-            tile = scale*scale*lbb + (1.0-scale*scale)*ewa
-        output[:,:,y_start:y_stop] = tile
-    return output.movedim(1,-1).to(original_dtype)
+            local_x = 2.0 * x_fraction.abs()
+            local_y = 2.0 * y_fraction.abs()
+            lbb = _lbb(subdivision, local_x[None, None, None, :], local_y[None, None, :, None])
+            ewa_weights = (1.0 - torch.sqrt((scale * scale * (dx * dx + dy * dy)).clamp_min(0.0))).clamp_min(0.0)
+            ewa = (patch * ewa_weights).sum((-1, -2)) / ewa_weights.sum((-1, -2)).clamp_min(1e-8)
+            tile = scale * scale * lbb + (1.0 - scale * scale) * ewa
+        output[:, :, y_start:y_stop] = tile
+    return output.movedim(1, -1).to(original_dtype)
 
 
-VIDEO_FRAME_SAMPLING_STRATEGIES = (
-    "codec keyframes",
-    "uniform PTS",
-    "focused PTS",
-)
+VIDEO_FRAME_SAMPLING_STRATEGIES = ("codec keyframes", "uniform PTS", "focused PTS")
 
-VIDEO_FRAME_TIMESTAMP_FORMATS = (
-    "HH:MM:SS.mmm",
-    "HH:MM:SS:mmm",
-    "MM:SS.mmm",
-    "MM:SS:mmm",
-    "00.000s",
-    "0.0s",
-    "0.00s",
-)
+VIDEO_FRAME_TIMESTAMP_FORMATS = ("HH:MM:SS.mmm", "HH:MM:SS:mmm", "MM:SS.mmm", "MM:SS:mmm", "00.000s", "0.0s", "0.00s")
 
-VIDEO_FRAME_TIMELINE_STYLES = (
-    "H3 alignment prefix",
-    "H3 pictures",
-    "indexed",
-    "timestamps only",
-    "custom",
-)
+VIDEO_FRAME_TIMELINE_STYLES = ("H3 alignment prefix", "H3 pictures", "indexed", "timestamps only", "custom")
 
-VIDEO_TIMELINE_TEXT_STRUCTURE = (
-    "For the target video, at <<time>> into the target video, "
-    "<<picture>> (from <<shot>>) is fully referenced."
-)
-VIDEO_STRUCTURED_TIMELINE_TEXT_STRUCTURE = (
-    "Target video duration is <<duration>> seconds divided into "
-    "<<segments>> segments. Reference each image with <<references>>."
-)
+VIDEO_TIMELINE_TEXT_STRUCTURE = "For the target video, at <<time>> into the target video, <<picture>> (from <<shot>>) is fully referenced."
+VIDEO_STRUCTURED_TIMELINE_TEXT_STRUCTURE = "Target video duration is <<duration>> seconds divided into <<segments>> segments. Reference each image with <<references>>."
 VIDEO_TEXT_TIMELINE_TEXT_STRUCTURE = "Shot <<shot>> at <<timestamp>>."
-VIDEO_TEXT_STRUCTURED_TIMELINE_TEXT_STRUCTURE = (
-    "Target video duration is <<duration>> seconds divided into "
-    "<<segments>> segments. <<shot>> at <<timestamp>>."
-)
+VIDEO_TEXT_STRUCTURED_TIMELINE_TEXT_STRUCTURE = "Target video duration is <<duration>> seconds divided into <<segments>> segments. <<shot>> at <<timestamp>>."
 
-_VIDEO_TIMELINE_TEXT_MARKERS = frozenset(
-    {"time", "timestamp", "picture", "shot"}
-)
-_VIDEO_STRUCTURED_TIMELINE_TEXT_MARKERS = frozenset(
-    {"duration", "segments", "timestamps", "references", "shot", "timestamp"}
-)
+_VIDEO_TIMELINE_TEXT_MARKERS = frozenset({"time", "timestamp", "picture", "shot"})
+_VIDEO_STRUCTURED_TIMELINE_TEXT_MARKERS = frozenset({"duration", "segments", "timestamps", "references", "shot", "timestamp"})
 _VIDEO_TEXT_TIMELINE_TEXT_MARKERS = frozenset({"shot", "time", "timestamp"})
-_VIDEO_TEXT_STRUCTURED_TIMELINE_TEXT_MARKERS = frozenset(
-    {"duration", "segments", "timestamps", "shot", "timestamp"}
-)
+_VIDEO_TEXT_STRUCTURED_TIMELINE_TEXT_MARKERS = frozenset({"duration", "segments", "timestamps", "shot", "timestamp"})
 
-_VIDEO_TIMESTAMP_COLON_PATTERN = re.compile(
-    r"^(?:(?P<hours>\d+):)?(?P<minutes>\d+):(?P<seconds>\d+)(?P<fraction>[.:]\d+)?$"
-)
+_VIDEO_TIMESTAMP_COLON_PATTERN = re.compile(r"^(?:(?P<hours>\d+):)?(?P<minutes>\d+):(?P<seconds>\d+)(?P<fraction>[.:]\d+)?$")
 
 
 def parse_video_timestamp(value) -> Fraction:
@@ -3041,10 +2795,7 @@ def _video_source_factory(video) -> Callable[[], str | io.BytesIO]:
     return lambda: io.BytesIO(data)
 
 
-def _active_video_frames(
-    video,
-    source_factory: Callable[[], str | io.BytesIO] | None = None,
-) -> Iterator[tuple[int, Fraction, av.VideoFrame]]:
+def _active_video_frames(video, source_factory: Callable[[], str | io.BytesIO] | None = None) -> Iterator[tuple[int, Fraction, av.VideoFrame]]:
     """Yield active frames in presentation order with clip-relative PTS."""
 
     if source_factory is None:
@@ -3078,15 +2829,11 @@ def _active_video_frames(
 
         for frame in container.decode(stream):
             if frame.pts is None:
-                raise ValueError(
-                    "A decoded video frame has no PTS; exact timestamp sampling is unavailable."
-                )
+                raise ValueError("A decoded video frame has no PTS; exact timestamp sampling is unavailable.")
 
             frame_time_base = frame.time_base or stream.time_base
             if frame_time_base is None:
-                raise ValueError(
-                    "A decoded video frame has no time base for PTS conversion."
-                )
+                raise ValueError("A decoded video frame has no time base for PTS conversion.")
 
             presentation_time = Fraction(frame.pts) * Fraction(frame_time_base)
             if presentation_time < active_start:
@@ -3104,30 +2851,14 @@ def _active_video_frames(
             frame_index += 1
 
 
-def scan_video_frame_records(
-    video,
-    source_factory: Callable[[], str | io.BytesIO] | None = None,
-) -> list[VideoFrameRecord]:
-    records = [
-        VideoFrameRecord(
-            frame_index=frame_index,
-            timestamp=timestamp,
-            key_frame=bool(frame.key_frame),
-        )
-        for frame_index, timestamp, frame in tqdm(
-            _active_video_frames(video, source_factory),
-            desc="Scanning Video Stream",
-            unit="frame",
-        )
-    ]
+def scan_video_frame_records(video, source_factory: Callable[[], str | io.BytesIO] | None = None) -> list[VideoFrameRecord]:
+    records = [VideoFrameRecord(frame_index=frame_index, timestamp=timestamp, key_frame=bool(frame.key_frame)) for frame_index, timestamp, frame in tqdm(_active_video_frames(video, source_factory), desc="Scanning Video Stream", unit="frame")]
     if not records:
         raise ValueError("The active VIDEO input contains no decodable frames.")
     return records
 
 
-def _spacing_filter(
-    records: Sequence[VideoFrameRecord], minimum_spacing: Fraction
-) -> list[VideoFrameRecord]:
+def _spacing_filter(records: Sequence[VideoFrameRecord], minimum_spacing: Fraction) -> list[VideoFrameRecord]:
     selected: list[VideoFrameRecord] = []
     for record in sorted(records, key=lambda item: (item.timestamp, item.frame_index)):
         if not selected or record.timestamp - selected[-1].timestamp >= minimum_spacing:
@@ -3135,12 +2866,7 @@ def _spacing_filter(
     return selected
 
 
-def _evenly_thin(
-    records: Sequence[VideoFrameRecord],
-    count: int,
-    *,
-    single_from_end: bool,
-) -> list[VideoFrameRecord]:
+def _evenly_thin(records: Sequence[VideoFrameRecord], count: int, *, single_from_end: bool) -> list[VideoFrameRecord]:
     if count <= 0 or not records:
         return []
     if count >= len(records):
@@ -3151,20 +2877,11 @@ def _evenly_thin(
 
     denominator = count - 1
     last_index = len(records) - 1
-    indices = [
-        (position * last_index + denominator // 2) // denominator
-        for position in range(count)
-    ]
+    indices = [(position * last_index + denominator // 2) // denominator for position in range(count)]
     return [records[index] for index in indices]
 
 
-def _select_uniform_samples(
-    records: Sequence[VideoFrameRecord],
-    maximum_frames: int,
-    include_zero_time: bool,
-    minimum_spacing: Fraction,
-    timestamp_format: str | None,
-) -> tuple[list[VideoFrameRecord], list[Fraction]]:
+def _select_uniform_samples(records: Sequence[VideoFrameRecord], maximum_frames: int, include_zero_time: bool, minimum_spacing: Fraction, timestamp_format: str | None) -> tuple[list[VideoFrameRecord], list[Fraction]]:
     zero_record = records[0]
     candidates = [record for record in records if record.frame_index != zero_record.frame_index]
 
@@ -3187,68 +2904,27 @@ def _select_uniform_samples(
 
     if include_zero_time:
         target_count = maximum_frames - 1
-        targets = [
-            duration * Fraction(position, target_count)
-            for position in range(1, target_count + 1)
-        ]
+        targets = [duration * Fraction(position, target_count) for position in range(1, target_count + 1)]
         selected_pairs = [(zero_record, Fraction(0))]
     else:
         target_count = maximum_frames
-        targets = [
-            duration * Fraction(position, target_count + 1)
-            for position in range(1, target_count + 1)
-        ]
+        targets = [duration * Fraction(position, target_count + 1) for position in range(1, target_count + 1)]
         selected_pairs = []
 
     if timestamp_format is not None:
-        targets = [
-            round_video_timestamp(target, timestamp_format)
-            for target in targets
-        ]
+        targets = [round_video_timestamp(target, timestamp_format) for target in targets]
 
     for target in targets:
-        selected_pairs.append(
-            (
-                min(
-                    candidates,
-                    key=lambda record: (
-                        abs(record.timestamp - target),
-                        record.timestamp,
-                        record.frame_index,
-                    ),
-                ),
-                target,
-            )
-        )
+        selected_pairs.append((min(candidates, key=lambda record: (abs(record.timestamp - target), record.timestamp, record.frame_index)), target))
 
-    unique = {
-        record.frame_index: (record, timestamp)
-        for record, timestamp in selected_pairs
-    }
-    spaced = _spacing_filter(
-        [record for record, _ in unique.values()],
-        minimum_spacing,
-    )
-    timestamps_by_index = {
-        record.frame_index: timestamp
-        for record, timestamp in unique.values()
-    }
+    unique = {record.frame_index: (record, timestamp) for record, timestamp in selected_pairs}
+    spaced = _spacing_filter([record for record, _ in unique.values()], minimum_spacing)
+    timestamps_by_index = {record.frame_index: timestamp for record, timestamp in unique.values()}
     return spaced, [timestamps_by_index[record.frame_index] for record in spaced]
 
 
-def _select_uniform_records(
-    records: Sequence[VideoFrameRecord],
-    maximum_frames: int,
-    include_zero_time: bool,
-    minimum_spacing: Fraction,
-) -> list[VideoFrameRecord]:
-    selected, _ = _select_uniform_samples(
-        records,
-        maximum_frames,
-        include_zero_time,
-        minimum_spacing,
-        timestamp_format=None,
-    )
+def _select_uniform_records(records: Sequence[VideoFrameRecord], maximum_frames: int, include_zero_time: bool, minimum_spacing: Fraction) -> list[VideoFrameRecord]:
+    selected, _ = _select_uniform_samples(records, maximum_frames, include_zero_time, minimum_spacing, timestamp_format=None)
     return selected
 
 
@@ -3269,11 +2945,7 @@ def _select_focused_samples(records: Sequence[VideoFrameRecord], maximum_frames:
         selected = [zero_record] if include_zero_time else []
         return selected, [record.timestamp for record in selected]
 
-    targets = [
-        _as_fraction(target) for target in focused_timeline_timestamps(
-            maximum_frames, float(duration), focus_areas, focus_one, focus_two, focus_three, include_zero_time, include_zero_time
-        )
-    ]
+    targets = [_as_fraction(target) for target in focused_timeline_timestamps(maximum_frames, float(duration), focus_areas, focus_one, focus_two, focus_three, include_zero_time, include_zero_time)]
     if timestamp_format is not None:
         targets = [round_video_timestamp(target, timestamp_format) for target in targets]
 
@@ -3290,21 +2962,13 @@ def _select_focused_samples(records: Sequence[VideoFrameRecord], maximum_frames:
     return spaced, [timestamps_by_index[record.frame_index] for record in spaced]
 
 
-def _select_keyframe_records(
-    records: Sequence[VideoFrameRecord],
-    maximum_frames: int,
-    include_zero_time: bool,
-    minimum_spacing: Fraction,
-    keyframe_stride: int,
-) -> list[VideoFrameRecord]:
+def _select_keyframe_records(records: Sequence[VideoFrameRecord], maximum_frames: int, include_zero_time: bool, minimum_spacing: Fraction, keyframe_stride: int) -> list[VideoFrameRecord]:
     zero_record = records[0]
     raw_keyframes = [record for record in records if record.key_frame]
     candidates = raw_keyframes[::keyframe_stride]
 
     if include_zero_time:
-        combined = [zero_record] + [
-            record for record in candidates if record.frame_index != zero_record.frame_index
-        ]
+        combined = [zero_record] + [record for record in candidates if record.frame_index != zero_record.frame_index]
     else:
         combined = [record for record in candidates if record.timestamp > 0]
 
@@ -3314,32 +2978,14 @@ def _select_keyframe_records(
 
     if include_zero_time:
         zero = spaced[0]
-        remaining = _evenly_thin(
-            spaced[1:],
-            maximum_frames - 1,
-            single_from_end=True,
-        )
+        remaining = _evenly_thin(spaced[1:], maximum_frames - 1, single_from_end=True)
         return [zero] + remaining
 
-    return _evenly_thin(
-        spaced,
-        maximum_frames,
-        single_from_end=False,
-    )
+    return _evenly_thin(spaced, maximum_frames, single_from_end=False)
 
 
 def _select_video_frame_records_and_timestamps(
-    records: Sequence[VideoFrameRecord],
-    strategy: str,
-    maximum_frames: int,
-    include_zero_time: bool,
-    minimum_spacing_seconds: float,
-    keyframe_stride: int,
-    timestamp_format: str | None,
-    focus_areas: int = 0,
-    focus_one: float = 0.5,
-    focus_two: float = 0.5,
-    focus_three: float = 0.5,
+    records: Sequence[VideoFrameRecord], strategy: str, maximum_frames: int, include_zero_time: bool, minimum_spacing_seconds: float, keyframe_stride: int, timestamp_format: str | None, focus_areas: int = 0, focus_one: float = 0.5, focus_two: float = 0.5, focus_three: float = 0.5
 ) -> tuple[list[VideoFrameRecord], list[Fraction]]:
     if strategy not in VIDEO_FRAME_SAMPLING_STRATEGIES:
         raise ValueError(f"Unsupported video-frame sampling strategy: {strategy}")
@@ -3356,25 +3002,11 @@ def _select_video_frame_records_and_timestamps(
     minimum_spacing = _as_fraction(minimum_spacing_seconds)
 
     if strategy == "uniform PTS":
-        selected, output_timestamps = _select_uniform_samples(
-            ordered,
-            maximum_frames,
-            include_zero_time,
-            minimum_spacing,
-            timestamp_format,
-        )
+        selected, output_timestamps = _select_uniform_samples(ordered, maximum_frames, include_zero_time, minimum_spacing, timestamp_format)
     elif strategy == "focused PTS":
-        selected, output_timestamps = _select_focused_samples(
-            ordered, maximum_frames, include_zero_time, minimum_spacing, timestamp_format, focus_areas, focus_one, focus_two, focus_three
-        )
+        selected, output_timestamps = _select_focused_samples(ordered, maximum_frames, include_zero_time, minimum_spacing, timestamp_format, focus_areas, focus_one, focus_two, focus_three)
     else:
-        selected = _select_keyframe_records(
-            ordered,
-            maximum_frames,
-            include_zero_time,
-            minimum_spacing,
-            keyframe_stride,
-        )
+        selected = _select_keyframe_records(ordered, maximum_frames, include_zero_time, minimum_spacing, keyframe_stride)
         output_timestamps = [record.timestamp for record in selected]
 
     if not selected:
@@ -3382,31 +3014,8 @@ def _select_video_frame_records_and_timestamps(
     return selected, output_timestamps
 
 
-def select_video_frame_records(
-    records: Sequence[VideoFrameRecord],
-    strategy: str,
-    maximum_frames: int,
-    include_zero_time: bool,
-    minimum_spacing_seconds: float,
-    keyframe_stride: int,
-    focus_areas: int = 0,
-    focus_one: float = 0.5,
-    focus_two: float = 0.5,
-    focus_three: float = 0.5,
-) -> list[VideoFrameRecord]:
-    selected, _ = _select_video_frame_records_and_timestamps(
-        records,
-        strategy,
-        maximum_frames,
-        include_zero_time,
-        minimum_spacing_seconds,
-        keyframe_stride,
-        timestamp_format=None,
-        focus_areas=focus_areas,
-        focus_one=focus_one,
-        focus_two=focus_two,
-        focus_three=focus_three,
-    )
+def select_video_frame_records(records: Sequence[VideoFrameRecord], strategy: str, maximum_frames: int, include_zero_time: bool, minimum_spacing_seconds: float, keyframe_stride: int, focus_areas: int = 0, focus_one: float = 0.5, focus_two: float = 0.5, focus_three: float = 0.5) -> list[VideoFrameRecord]:
+    selected, _ = _select_video_frame_records_and_timestamps(records, strategy, maximum_frames, include_zero_time, minimum_spacing_seconds, keyframe_stride, timestamp_format=None, focus_areas=focus_areas, focus_one=focus_one, focus_two=focus_two, focus_three=focus_three)
     return selected
 
 
@@ -3420,19 +3029,13 @@ def _frame_to_image(frame: av.VideoFrame) -> torch.Tensor:
     return torch.from_numpy(image).to(dtype=torch.float32).div_(255.0)
 
 
-def decode_selected_video_frames(
-    video,
-    records: Sequence[VideoFrameRecord],
-    source_factory: Callable[[], str | io.BytesIO] | None = None,
-) -> tuple[torch.Tensor, list[torch.Tensor]]:
+def decode_selected_video_frames(video, records: Sequence[VideoFrameRecord], source_factory: Callable[[], str | io.BytesIO] | None = None) -> tuple[torch.Tensor, list[torch.Tensor]]:
     expected = {record.frame_index: record for record in records}
     selected_images: dict[int, torch.Tensor] = {}
     last_index = max(expected)
 
     with tqdm(total=len(records), desc="Decoding Selected Video Frames", unit="frame") as pbar:
-        for frame_index, timestamp, frame in _active_video_frames(
-            video, source_factory
-        ):
+        for frame_index, timestamp, frame in _active_video_frames(video, source_factory):
             record = expected.get(frame_index)
             if record is not None:
                 if timestamp != record.timestamp:
@@ -3464,19 +3067,11 @@ def _rounded_units(timestamp: Fraction, units_per_second: int) -> int:
     return (2 * numerator + denominator) // (2 * denominator)
 
 
-def round_video_timestamp(
-    timestamp: Fraction | float,
-    timestamp_format: str,
-) -> Fraction:
+def round_video_timestamp(timestamp: Fraction | float, timestamp_format: str) -> Fraction:
     if timestamp_format not in VIDEO_FRAME_TIMESTAMP_FORMATS:
         raise ValueError(f"Unsupported video timestamp format: {timestamp_format}")
-    units_per_second = 10 if timestamp_format == "0.0s" else (
-        100 if timestamp_format == "0.00s" else 1000
-    )
-    return Fraction(
-        _rounded_units(_as_fraction(timestamp), units_per_second),
-        units_per_second,
-    )
+    units_per_second = 10 if timestamp_format == "0.0s" else (100 if timestamp_format == "0.00s" else 1000)
+    return Fraction(_rounded_units(_as_fraction(timestamp), units_per_second), units_per_second)
 
 
 def format_video_timestamp(timestamp: Fraction | float, timestamp_format: str) -> str:
@@ -3511,131 +3106,53 @@ def format_video_timestamp(timestamp: Fraction | float, timestamp_format: str) -
     return f"{hours:02d}:{minutes:02d}:{seconds:02d}{separator}{milliseconds:03d}"
 
 
-def build_video_timeline_text(
-    timestamps: Sequence[str],
-    timeline_style: str,
-    timeline_text_structure: str,
-    index_offset: int = 0,
-) -> str:
+def build_video_timeline_text(timestamps: Sequence[str], timeline_style: str, timeline_text_structure: str, index_offset: int = 0) -> str:
     if timeline_style not in VIDEO_FRAME_TIMELINE_STYLES:
         raise ValueError(f"Unsupported video timeline style: {timeline_style}")
     if timeline_style == "timestamps only":
         return "\n".join(timestamps)
     if timeline_style == "indexed":
-        return "\n".join(
-            f"{index}: {timestamp}"
-            for index, timestamp in enumerate(timestamps)
-        )
+        return "\n".join(f"{index}: {timestamp}" for index, timestamp in enumerate(timestamps))
     if timeline_style == "H3 pictures":
-        return "\n".join(
-            f"<Picture {index + index_offset}> at {timestamp}"
-            for index, timestamp in enumerate(timestamps, start=1)
-        )
+        return "\n".join(f"<Picture {index + index_offset}> at {timestamp}" for index, timestamp in enumerate(timestamps, start=1))
     if timeline_style == "H3 alignment prefix":
         timeline_text_structure = VIDEO_TIMELINE_TEXT_STRUCTURE
-    _validate_video_timeline_structure(
-        timeline_text_structure,
-        _VIDEO_TIMELINE_TEXT_MARKERS,
-        "timeline text structure",
-    )
-    return "\n".join(
-        timeline_text_structure.replace("<<time>>", timestamp)
-        .replace("<<timestamp>>", timestamp)
-        .replace("<<picture>>", f"<Picture {index + index_offset}>")
-        .replace("<<shot>>", f"[Shot {index}]")
-        for index, timestamp in enumerate(timestamps, start=1)
-    )
+    _validate_video_timeline_structure(timeline_text_structure, _VIDEO_TIMELINE_TEXT_MARKERS, "timeline text structure")
+    return "\n".join(timeline_text_structure.replace("<<time>>", timestamp).replace("<<timestamp>>", timestamp).replace("<<picture>>", f"<Picture {index + index_offset}>").replace("<<shot>>", f"[Shot {index}]") for index, timestamp in enumerate(timestamps, start=1))
 
 
-def _expand_structured_shot_timestamps(
-    structure: str, timestamps: Sequence[str], structure_name: str
-) -> str:
+def _expand_structured_shot_timestamps(structure: str, timestamps: Sequence[str], structure_name: str) -> str:
     shot_count = structure.count("<<shot>>")
     timestamp_count = structure.count("<<timestamp>>")
     if shot_count != timestamp_count:
-        raise ValueError(
-            f"{structure_name} must use <<shot>> and <<timestamp>> together."
-        )
+        raise ValueError(f"{structure_name} must use <<shot>> and <<timestamp>> together.")
     if shot_count > 1:
-        raise ValueError(
-            f"{structure_name} may contain one <<shot>> and <<timestamp>> pair."
-        )
+        raise ValueError(f"{structure_name} may contain one <<shot>> and <<timestamp>> pair.")
     if not shot_count:
         return structure
 
     before, repeated = structure.split("<<shot>>")
     between, after = repeated.split("<<timestamp>>")
-    return before + ", ".join(
-        f"Shot {index}{between}{timestamp}"
-        for index, timestamp in enumerate(timestamps, start=1)
-    ) + after
+    return before + ", ".join(f"Shot {index}{between}{timestamp}" for index, timestamp in enumerate(timestamps, start=1)) + after
 
 
-def build_structured_video_timeline_text(
-    video_runtime: float,
-    timestamps: Sequence[str],
-    structured_timeline_text_structure: str = VIDEO_STRUCTURED_TIMELINE_TEXT_STRUCTURE,
-    index_offset: int = 0,
-) -> str:
-    _validate_video_timeline_structure(
-        structured_timeline_text_structure,
-        _VIDEO_STRUCTURED_TIMELINE_TEXT_MARKERS,
-        "structured timeline text structure",
-    )
-    references = [
-        f"<Picture {index + index_offset}> at {timestamp}"
-        for index, timestamp in enumerate(timestamps, start=1)
-    ]
-    reference_text = (
-        references[0]
-        if len(references) == 1
-        else f"{', '.join(references[:-1])} and {references[-1]}"
-        if references
-        else ""
-    )
-    structured_timeline_text_structure = _expand_structured_shot_timestamps(
-        structured_timeline_text_structure,
-        timestamps,
-        "Structured timeline text structure",
-    )
-    return (
-        structured_timeline_text_structure.replace(
-            "<<duration>>", f"{video_runtime:g}"
-        )
-        .replace("<<segments>>", str(len(timestamps)))
-        .replace("<<timestamps>>", ", ".join(timestamps))
-        .replace("<<references>>", reference_text)
-    )
+def build_structured_video_timeline_text(video_runtime: float, timestamps: Sequence[str], structured_timeline_text_structure: str = VIDEO_STRUCTURED_TIMELINE_TEXT_STRUCTURE, index_offset: int = 0) -> str:
+    _validate_video_timeline_structure(structured_timeline_text_structure, _VIDEO_STRUCTURED_TIMELINE_TEXT_MARKERS, "structured timeline text structure")
+    references = [f"<Picture {index + index_offset}> at {timestamp}" for index, timestamp in enumerate(timestamps, start=1)]
+    reference_text = references[0] if len(references) == 1 else f"{', '.join(references[:-1])} and {references[-1]}" if references else ""
+    structured_timeline_text_structure = _expand_structured_shot_timestamps(structured_timeline_text_structure, timestamps, "Structured timeline text structure")
+    return structured_timeline_text_structure.replace("<<duration>>", f"{video_runtime:g}").replace("<<segments>>", str(len(timestamps))).replace("<<timestamps>>", ", ".join(timestamps)).replace("<<references>>", reference_text)
 
 
 def build_text_video_timeline_text(timestamps: Sequence[str], structure: str) -> str:
-    _validate_video_timeline_structure(
-        structure, _VIDEO_TEXT_TIMELINE_TEXT_MARKERS, "text timeline structure"
-    )
-    return "\n".join(
-        structure.replace("<<shot>>", f"Shot {index}").replace(
-            "<<timestamp>>", timestamp
-        ).replace("<<time>>", timestamp)
-        for index, timestamp in enumerate(timestamps, start=1)
-    )
+    _validate_video_timeline_structure(structure, _VIDEO_TEXT_TIMELINE_TEXT_MARKERS, "text timeline structure")
+    return "\n".join(structure.replace("<<shot>>", f"Shot {index}").replace("<<timestamp>>", timestamp).replace("<<time>>", timestamp) for index, timestamp in enumerate(timestamps, start=1))
 
 
-def build_text_structured_video_timeline_text(
-    video_runtime: float, timestamps: Sequence[str], structure: str
-) -> str:
-    _validate_video_timeline_structure(
-        structure,
-        _VIDEO_TEXT_STRUCTURED_TIMELINE_TEXT_MARKERS,
-        "text structured timeline structure",
-    )
-    structure = _expand_structured_shot_timestamps(
-        structure, timestamps, "Text structured timeline structure"
-    )
-    return (
-        structure.replace("<<duration>>", f"{video_runtime:g}")
-        .replace("<<segments>>", str(len(timestamps)))
-        .replace("<<timestamps>>", ", ".join(timestamps))
-    )
+def build_text_structured_video_timeline_text(video_runtime: float, timestamps: Sequence[str], structure: str) -> str:
+    _validate_video_timeline_structure(structure, _VIDEO_TEXT_STRUCTURED_TIMELINE_TEXT_MARKERS, "text structured timeline structure")
+    structure = _expand_structured_shot_timestamps(structure, timestamps, "Text structured timeline structure")
+    return structure.replace("<<duration>>", f"{video_runtime:g}").replace("<<segments>>", str(len(timestamps))).replace("<<timestamps>>", ", ".join(timestamps))
 
 
 def _validate_video_timeline_structure(structure, markers, label):
@@ -3663,7 +3180,7 @@ def _timeline_input_images(image_inputs) -> list[torch.Tensor]:
             continue
         if not torch.is_tensor(value) or value.ndim != 4 or value.shape[0] < 1:
             raise ValueError("Images to Video Timeline inputs must be nonempty BHWC IMAGE batches.")
-        images.extend(value[index:index + 1] for index in range(value.shape[0]))
+        images.extend(value[index : index + 1] for index in range(value.shape[0]))
     if not images:
         raise ValueError("Images to Video Timeline requires at least one connected image.")
     return images
@@ -3685,7 +3202,7 @@ def _timeline_image_outputs(image_inputs, resize_images: bool) -> tuple[torch.Te
             image = resize_nchw(image.movedim(-1, 1), first_width, first_height, method).movedim(1, -1)
         normalized.append(image)
     image_batch = torch.cat(normalized, dim=0)
-    return image_batch, [image_batch[index:index + 1] for index in range(image_batch.shape[0])]
+    return image_batch, [image_batch[index : index + 1] for index in range(image_batch.shape[0])]
 
 
 def _truncated_normal_quantile(quantile: float, center: float) -> float:
@@ -3738,7 +3255,9 @@ def focused_timeline_timestamps(count: int, duration: float, focus_areas: int, f
     return timestamps
 
 
-def images_to_video_timeline(image_inputs, duration: float, focus_areas: int, focus_one: float, focus_two: float, focus_three: float, last_image_is_final: bool, resize_images: bool, timestamp_format: str, timeline_style: str, timeline_text_structure: str, structured_timeline_text_structure: str, index_offset: int = 0) -> SampledVideoFrames:
+def images_to_video_timeline(
+    image_inputs, duration: float, focus_areas: int, focus_one: float, focus_two: float, focus_three: float, last_image_is_final: bool, resize_images: bool, timestamp_format: str, timeline_style: str, timeline_text_structure: str, structured_timeline_text_structure: str, index_offset: int = 0
+) -> SampledVideoFrames:
     """Normalize supplied images and assign their manual video timeline timestamps."""
     duration = h3_video_length_from_seconds(duration) / 24
     image_batch, image_list = _timeline_image_outputs(image_inputs, resize_images)
@@ -3775,86 +3294,33 @@ def sample_video_frames_as_images(
     video_runtime = h3_video_length_from_seconds(float(video.get_duration())) / 24
     source_factory = _video_source_factory(video)
     records = scan_video_frame_records(video, source_factory)
-    selected, output_timestamps = _select_video_frame_records_and_timestamps(
-        records,
-        sampling_strategy,
-        maximum_frames,
-        include_zero_time,
-        minimum_spacing_seconds,
-        keyframe_stride,
-        timestamp_format,
-        focus_areas,
-        focus_one,
-        focus_two,
-        focus_three,
-    )
-    image_batch, image_list = decode_selected_video_frames(
-        video, selected, source_factory
-    )
-    timestamps = [
-        format_video_timestamp(timestamp, timestamp_format)
-        for timestamp in output_timestamps
-    ]
+    selected, output_timestamps = _select_video_frame_records_and_timestamps(records, sampling_strategy, maximum_frames, include_zero_time, minimum_spacing_seconds, keyframe_stride, timestamp_format, focus_areas, focus_one, focus_two, focus_three)
+    image_batch, image_list = decode_selected_video_frames(video, selected, source_factory)
+    timestamps = [format_video_timestamp(timestamp, timestamp_format) for timestamp in output_timestamps]
     keyframe_count = sum(1 for r in records if r.key_frame)
     out_h, out_w = int(image_batch.shape[1]), int(image_batch.shape[2])
     ts_range = f"{timestamps[0]}..{timestamps[-1]}" if timestamps else "none"
-    logging.info(
-        "[UC_SampleVideoFrames] Scanned %d frame(s) (%d keyframes) -> selected %d frame(s) via '%s' at %dx%d | runtime=%.2fs | range=%s",
-        len(records), keyframe_count, len(selected), sampling_strategy, out_w, out_h, video_runtime, ts_range,
-    )
+    logging.info("[UC_SampleVideoFrames] Scanned %d frame(s) (%d keyframes) -> selected %d frame(s) via '%s' at %dx%d | runtime=%.2fs | range=%s", len(records), keyframe_count, len(selected), sampling_strategy, out_w, out_h, video_runtime, ts_range)
 
     return SampledVideoFrames(
         image_batch=image_batch,
         image_list=image_list,
         timestamps=timestamps,
         timestamps_text=", ".join(timestamps),
-        timeline_text=build_video_timeline_text(
-            timestamps, timeline_style, timeline_text_structure, index_offset
-        ),
+        timeline_text=build_video_timeline_text(timestamps, timeline_style, timeline_text_structure, index_offset),
         video_runtime=video_runtime,
-        structured_timeline_text=build_structured_video_timeline_text(
-            video_runtime, timestamps, structured_timeline_text_structure, index_offset
-        ),
+        structured_timeline_text=build_structured_video_timeline_text(video_runtime, timestamps, structured_timeline_text_structure, index_offset),
     )
 
 
-def video_timeline_text(
-    duration: float,
-    segment_count: int,
-    focus_areas: int,
-    focus_one: float,
-    focus_two: float,
-    focus_three: float,
-    timestamp_format: str,
-    timeline_text_structure: str,
-    structured_timeline_text_structure: str,
-) -> tuple[str, str, float, str]:
+def video_timeline_text(duration: float, segment_count: int, focus_areas: int, focus_one: float, focus_two: float, focus_three: float, timestamp_format: str, timeline_text_structure: str, structured_timeline_text_structure: str) -> tuple[str, str, float, str]:
     duration = h3_video_length_from_seconds(duration) / 24
-    raw_timestamps = focused_timeline_timestamps(
-        segment_count, duration, focus_areas, focus_one, focus_two, focus_three
-    )
-    timestamps = [
-        format_video_timestamp(timestamp, timestamp_format)
-        for timestamp in raw_timestamps
-    ]
-    return (
-        ", ".join(timestamps),
-        build_text_video_timeline_text(timestamps, timeline_text_structure),
-        duration,
-        build_text_structured_video_timeline_text(
-            duration, timestamps, structured_timeline_text_structure
-        ),
-    )
+    raw_timestamps = focused_timeline_timestamps(segment_count, duration, focus_areas, focus_one, focus_two, focus_three)
+    timestamps = [format_video_timestamp(timestamp, timestamp_format) for timestamp in raw_timestamps]
+    return (", ".join(timestamps), build_text_video_timeline_text(timestamps, timeline_text_structure), duration, build_text_structured_video_timeline_text(duration, timestamps, structured_timeline_text_structure))
 
 
-def stitch_image_grid(
-    images: Sequence[torch.Tensor] | torch.Tensor,
-    max_images_per_row: int = 4,
-    max_rows: int = 0,
-    match_image_size: bool = True,
-    spacing_width: int = 0,
-    spacing_color: str = "white",
-) -> torch.Tensor:
+def stitch_image_grid(images: Sequence[torch.Tensor] | torch.Tensor, max_images_per_row: int = 4, max_rows: int = 0, match_image_size: bool = True, spacing_width: int = 0, spacing_color: str = "white") -> torch.Tensor:
     if isinstance(max_images_per_row, (list, tuple)):
         max_images_per_row = max_images_per_row[0] if max_images_per_row else 4
     if isinstance(max_rows, (list, tuple)):
@@ -3904,34 +3370,18 @@ def stitch_image_grid(
             sys.path.insert(0, comfy_root)
         from comfy_extras.nodes_images import ImageStitch
 
-    rows_images = [
-        flat_images[i : i + max_cols] for i in range(0, len(flat_images), max_cols)
-    ]
+    rows_images = [flat_images[i : i + max_cols] for i in range(0, len(flat_images), max_cols)]
 
     stitched_rows: list[torch.Tensor] = []
     for row in rows_images:
         current_row = row[0]
         for next_img in row[1:]:
-            current_row = ImageStitch.execute(
-                current_row,
-                "right",
-                match_image_size,
-                spacing_width,
-                spacing_color,
-                next_img,
-            )[0]
+            current_row = ImageStitch.execute(current_row, "right", match_image_size, spacing_width, spacing_color, next_img)[0]
         stitched_rows.append(current_row)
 
     grid = stitched_rows[0]
     for next_row in stitched_rows[1:]:
-        grid = ImageStitch.execute(
-            grid,
-            "down",
-            match_image_size,
-            spacing_width,
-            spacing_color,
-            next_row,
-        )[0]
+        grid = ImageStitch.execute(grid, "down", match_image_size, spacing_width, spacing_color, next_row)[0]
 
     return grid
 
@@ -3950,12 +3400,7 @@ def split_image_batch_into_batches(images: torch.Tensor, batch_size: int) -> lis
 
 
 DEPTH_ANYTHING_PATCH_SIZE = 14
-DEPTH_ANYTHING_RESIZE_METHODS = (
-    "upper_bound_resize",
-    "upper_bound_crop",
-    "lower_bound_resize",
-    "lower_bound_crop",
-)
+DEPTH_ANYTHING_RESIZE_METHODS = ("upper_bound_resize", "upper_bound_crop", "lower_bound_resize", "lower_bound_crop")
 DEPTH_ANYTHING_MULTI_VIEW_MODES = ("independent", "multi_view")
 DEPTH_ANYTHING_REF_VIEW_STRATEGIES = ("saddle_balanced", "saddle_sim_range", "first", "middle")
 DEPTH_ANYTHING_OUTPUT_MODES = ("disparity", "depth", "raw_depth")
@@ -3970,18 +3415,11 @@ def _nearest_patch_multiple(value: int, patch_size: int = DEPTH_ANYTHING_PATCH_S
     return up if abs(up - value) <= abs(value - down) else down
 
 
-def preprocess_depth_anything_batch(
-    images_bhwc: torch.Tensor,
-    process_res: int = 504,
-    resize_method: str = "upper_bound_resize",
-) -> torch.Tensor:
+def preprocess_depth_anything_batch(images_bhwc: torch.Tensor, process_res: int = 504, resize_method: str = "upper_bound_resize") -> torch.Tensor:
     if not torch.is_tensor(images_bhwc) or images_bhwc.ndim != 4 or images_bhwc.shape[0] < 1:
         raise ValueError("Depth Anything 3 input must be a non-empty BHWC image tensor.")
     if resize_method not in DEPTH_ANYTHING_RESIZE_METHODS:
-        raise ValueError(
-            f"Unsupported Depth Anything 3 resize_method: {resize_method!r}. "
-            f"Expected one of: {', '.join(DEPTH_ANYTHING_RESIZE_METHODS)}."
-        )
+        raise ValueError(f"Unsupported Depth Anything 3 resize_method: {resize_method!r}. Expected one of: {', '.join(DEPTH_ANYTHING_RESIZE_METHODS)}.")
     target_res = max(DEPTH_ANYTHING_PATCH_SIZE, int(process_res))
     orig_h, orig_w = int(images_bhwc.shape[1]), int(images_bhwc.shape[2])
     nchw = images_bhwc[..., :3].movedim(-1, 1).float().clamp(0.0, 1.0)
@@ -4016,14 +3454,7 @@ def preprocess_depth_anything_batch(
     return (nchw - mean) / std
 
 
-def _normalize_depth_anything_tensor(
-    values: torch.Tensor,
-    scope: str = "per_frame",
-    percentile_clip: float = 0.0,
-    invert: bool = False,
-    lower_clip_percentile: float = 0.0,
-    upper_clip_percentile: float = 0.0,
-) -> torch.Tensor:
+def _normalize_depth_anything_tensor(values: torch.Tensor, scope: str = "per_frame", percentile_clip: float = 0.0, invert: bool = False, lower_clip_percentile: float = 0.0, upper_clip_percentile: float = 0.0) -> torch.Tensor:
     symmetric_clip = max(0.0, min(49.0, float(percentile_clip)))
     lower_clip = max(symmetric_clip, max(0.0, min(99.0, float(lower_clip_percentile))))
     upper_clip = max(symmetric_clip, max(0.0, min(99.0, float(upper_clip_percentile))))
@@ -4091,13 +3522,12 @@ def run_depth_anything(
 
     if forward is None:
         from .model_helpers import depth_anything_forward
+
         forward = depth_anything_forward
 
     orig_h, orig_w = int(image.shape[1]), int(image.shape[2])
     total_frames = int(image.shape[0])
-    normalized_nchw = preprocess_depth_anything_batch(
-        image, process_res=process_res, resize_method=resize_method
-    )
+    normalized_nchw = preprocess_depth_anything_batch(image, process_res=process_res, resize_method=resize_method)
     proc_h, proc_w = int(normalized_nchw.shape[2]), int(normalized_nchw.shape[3])
 
     chunk_sz = max(1, int(batch_size))
@@ -4155,15 +3585,7 @@ def run_depth_anything(
                 fy = float(k_mat[1, 1])
                 fov_x = math.degrees(2.0 * math.atan((out_w / 2.0) / max(fx, 1e-6)))
                 fov_y = math.degrees(2.0 * math.atan((out_h / 2.0) / max(fy, 1e-6)))
-                pose_records.append(
-                    {
-                        "frame_index": start + idx,
-                        "extrinsics_w2c": [[round(float(v), 6) for v in row] for row in ext[idx]],
-                        "intrinsics": [[round(float(v), 6) for v in row] for row in k_mat],
-                        "fov_x_deg": round(fov_x, 4),
-                        "fov_y_deg": round(fov_y, 4),
-                    }
-                )
+                pose_records.append({"frame_index": start + idx, "extrinsics_w2c": [[round(float(v), 6) for v in row] for row in ext[idx]], "intrinsics": [[round(float(v), 6) for v in row] for row in k_mat], "fov_x_deg": round(fov_x, 4), "fov_y_deg": round(fov_y, 4)})
 
         depth_chunks.append(depth)
         conf_chunks.append(conf)
@@ -4175,38 +3597,15 @@ def run_depth_anything(
     all_sky = torch.cat(sky_chunks, dim=0)
 
     if not keep_model_size and (proc_h, proc_w) != (orig_h, orig_w):
-        all_depth = F.interpolate(
-            all_depth.unsqueeze(1), size=(orig_h, orig_w), mode="bilinear", align_corners=True
-        ).squeeze(1)
-        all_conf = F.interpolate(
-            all_conf.unsqueeze(1), size=(orig_h, orig_w), mode="bilinear", align_corners=True
-        ).squeeze(1)
-        all_sky = (
-            F.interpolate(
-                all_sky.unsqueeze(1), size=(orig_h, orig_w), mode="bilinear", align_corners=False
-            ).squeeze(1)
-            >= 0.5
-        ).float()
+        all_depth = F.interpolate(all_depth.unsqueeze(1), size=(orig_h, orig_w), mode="bilinear", align_corners=True).squeeze(1)
+        all_conf = F.interpolate(all_conf.unsqueeze(1), size=(orig_h, orig_w), mode="bilinear", align_corners=True).squeeze(1)
+        all_sky = (F.interpolate(all_sky.unsqueeze(1), size=(orig_h, orig_w), mode="bilinear", align_corners=False).squeeze(1) >= 0.5).float()
 
     if output_mode == "disparity":
         inv_depth = 1.0 / all_depth.clamp_min(1e-6)
-        depth_mask = _normalize_depth_anything_tensor(
-            inv_depth,
-            scope=normalization_scope,
-            percentile_clip=percentile_clip,
-            invert=invert_depth,
-            lower_clip_percentile=lower_clip_percentile,
-            upper_clip_percentile=upper_clip_percentile,
-        )
+        depth_mask = _normalize_depth_anything_tensor(inv_depth, scope=normalization_scope, percentile_clip=percentile_clip, invert=invert_depth, lower_clip_percentile=lower_clip_percentile, upper_clip_percentile=upper_clip_percentile)
     elif output_mode == "depth":
-        depth_mask = _normalize_depth_anything_tensor(
-            all_depth,
-            scope=normalization_scope,
-            percentile_clip=percentile_clip,
-            invert=not invert_depth,
-            lower_clip_percentile=lower_clip_percentile,
-            upper_clip_percentile=upper_clip_percentile,
-        )
+        depth_mask = _normalize_depth_anything_tensor(all_depth, scope=normalization_scope, percentile_clip=percentile_clip, invert=not invert_depth, lower_clip_percentile=lower_clip_percentile, upper_clip_percentile=upper_clip_percentile)
     else:
         depth_mask = all_depth
 
@@ -4216,4 +3615,3 @@ def run_depth_anything(
 
     depth_image = depth_mask.unsqueeze(-1).repeat(1, 1, 1, 3)
     return depth_image, depth_mask, conf_mask, all_sky, json.dumps(pose_records)
-

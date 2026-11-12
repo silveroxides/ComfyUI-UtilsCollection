@@ -5,8 +5,9 @@ from typing import Any
 
 import folder_paths
 import torch
-from tqdm import tqdm
 from comfy_api.latest import InputImpl, Types, io, ui
+from tqdm import tqdm
+
 from ..helpers.model_helpers import concatenate_audio_list
 from ..helpers.sampling_helpers import H3_OVERLAP_SECONDS_OPTIONS, parse_h3_seconds_option
 from ..helpers.video_helpers import generate_video_preview, is_video_file, list_video_files, normalize_video_path, save_keyframe_optimized_video, split_h3_video_components_into_segments
@@ -334,7 +335,17 @@ class UC_H3RefVideoSegments(io.ComfyNode):
     def execute(cls, video, megapixels=0.5, duration_seconds=0.0, start_at_timestamp=0.0, segment_count=0, overlap_duration="0.92s (22 frames)", whisper_model=None, timestamp_format="00.000s", enable_whisper=True, cache_large_clips=False) -> io.NodeOutput:
         of = parse_h3_seconds_option(overlap_duration, 22)
         (frames_list, audio_list, width, height, length_list, video_list, transcript_list, tail_frames_opt, trim_trailing_list) = split_h3_video_components_into_segments(
-            video=video, megapixels=megapixels, duration_seconds=duration_seconds, start_at_timestamp=start_at_timestamp, segment_count=segment_count, overlap_frames=of, whisper_model=whisper_model, timestamp_format=timestamp_format, enable_whisper=enable_whisper, return_trim_metadata=True, cache_large_clips=cache_large_clips
+            video=video,
+            megapixels=megapixels,
+            duration_seconds=duration_seconds,
+            start_at_timestamp=start_at_timestamp,
+            segment_count=segment_count,
+            overlap_frames=of,
+            whisper_model=whisper_model,
+            timestamp_format=timestamp_format,
+            enable_whisper=enable_whisper,
+            return_trim_metadata=True,
+            cache_large_clips=cache_large_clips,
         )
         durations = [float(length) / 24.0 for length in length_list]
         return io.NodeOutput(frames_list, audio_list, width, height, length_list, video_list, transcript_list, tail_frames_opt, trim_trailing_list, durations)
