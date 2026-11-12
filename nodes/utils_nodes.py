@@ -72,12 +72,7 @@ class UC_MiniMaxH3RefVid(io.ComfyNode):
                     tooltip="0 uses duration/start controls. A positive count divides the source into sequential H3-sized segments (5 + 17k frames). Non-final segments contain continuous source video and audio with zero padding, and each following segment starts on the exact next frame. Only the final segment may add padding.",
                 ),
                 io.Int.Input("segment_index", display_name="Segment index (zero-based)", default=0, min=0, step=1, optional=True, tooltip="Select 0 for the first segment, 1 for the second, through segment_count minus 1. Used only when segment_count is positive."),
-                io.Boolean.Input(
-                    "cache_large_clips",
-                    default=False,
-                    optional=True,
-                    tooltip="Caches prepared 24 fps clips larger than the normal 2 GB (2048 MB) threshold (~55s at 0.5 MP or ~28s at 1.0 MP) to disk. When disabled (default), clips above 2 GB stream in memory with a console warning instead of writing multi-GB temp files. Enable this when iterating on long reference clips so cached frames load rapidly from disk.",
-                ),
+                io.Boolean.Input("cache_large_clips", default=False, optional=True, tooltip="Caches prepared 24 fps clips above the 2 GB threshold (~55s at 0.5 MP or ~28s at 1.0 MP) to disk. Disabled by default so larger clips stream in memory with a warning; enable for fast repeat reads on 1–2 minute clips."),
             ],
             outputs=[
                 io.Image.Output("frames", tooltip="Prepared 24 fps frames. Connect to H3 Reference to Video's reference-video input."),
