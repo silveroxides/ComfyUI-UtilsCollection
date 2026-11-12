@@ -4,21 +4,7 @@ import comfy.samplers
 from comfy_api.latest import io
 
 from ..helpers.model_helpers import apply_minimax_h3_clip_continuation
-from ..helpers.sampling_helpers import (
-    H3_CHUNK_SECONDS_OPTIONS,
-    H3_MOTION_ANCHOR_OPTIONS,
-    H3_OVERLAP_SECONDS_OPTIONS,
-    build_h3_spatial_split_config,
-    build_h3_temporal_split_config,
-    parse_h3_seconds_option,
-    sample_dmad_renoise,
-    sample_minimax_h3_clip_continuation_chain,
-    sample_minimax_h3_tiled_upscale,
-    start_sampling_loop,
-)
-
-H3TemporalSplitConfig = io.Custom("UC_H3_TEMPORAL_SPLIT_CONFIG")
-H3SpatialSplitConfig = io.Custom("UC_H3_SPATIAL_SPLIT_CONFIG")
+from ..helpers.sampling_helpers import H3_CHUNK_SECONDS_OPTIONS, H3_OVERLAP_SECONDS_OPTIONS, parse_h3_seconds_option, sample_dmad_renoise, sample_minimax_h3_clip_continuation_chain, start_sampling_loop
 
 
 class UC_H3LoopSampler(io.ComfyNode):
@@ -330,95 +316,4 @@ class UC_MiniMaxH3ClipContinuationSampler(io.ComfyNode):
         return io.NodeOutput(segment_latents, trim_leading_frames, trim_trailing_frames, combined_latent, last_latent)
 
 
-class UC_MiniMaxH3TemporalSplitConfig(io.ComfyNode):
-    """Configures timeline chunking and continuity anchors for tiled MiniMax H3 refinement."""
-
-    @classmethod
-    def define_schema(cls) -> io.Schema:
-        return io.Schema(
-            node_id="UC_MiniMaxH3TemporalSplitConfig",
-            display_name="MiniMax H3 Temporal Split Config",
-            category="utils/sampling",
-            description="Configures timeline chunk length, overlap, and temporal continuity anchors for tiled high-resolution MiniMax H3 second-pass refinement.",
-            search_aliases=["mmh3 temporal split", "h3 temporal split params", "minimax tiled temporal", "h3 hires temporal"],
-            inputs=[
-                io.Int.Input("chunk_frames", default=73, min=5, max=3600, step=17, tooltip="Video frames per temporal chunk at 24 fps, automatically snapped to MiniMax H3's 17k+5 frame grid (73 frames is ~3 seconds). Lower to save VRAM on long clips."),
-                io.Int.Input("overlap_frames", default=22, min=0, max=362, step=17, tooltip="Shared video frames blended across consecutive chunks for smooth motion and sound transitions (22 frames is ~0.9 seconds). Set to 0 for minimal boundary sharing."),
-                io.Float.Input("anchor_strength", default=0.999, min=0.0, max=1.0, step=0.001, tooltip="How strongly the start frame of each later chunk is locked to the finished previous chunk (0.999 keeps cuts seamless; 0 disables start-frame pinning)."),
-                io.Combo.Input("motion_anchor_frames", options=list(H3_MOTION_ANCHOR_OPTIONS), default="22", tooltip="Number of ending frames from the previous chunk carried as motion context for the next chunk. Keep at 22 for natural motion continuity, or choose 0 to disable."),
-                io.Int.Input("identity_anchor_frames", default=24, min=0, max=240, step=1, tooltip="Frame interval between reference anchors sampled from the pre-upscaled clip to prevent subject drift under stronger denoising (24 anchors once per second; 0 disables)."),
-            ],
-            outputs=[H3TemporalSplitConfig.Output("temporal_split_config", tooltip="Connect to temporal_split_config on MiniMax H3 Tiled Upscale Sampler.")],
-        )
-
-    @classmethod
-    def execute(cls, chunk_frames: int = 73, overlap_frames: int = 22, anchor_strength: float = 0.999, motion_anchor_frames: str = "22", identity_anchor_frames: int = 24) -> io.NodeOutput:
-        return io.NodeOutput(build_h3_temporal_split_config(chunk_frames=chunk_frames, overlap_frames=overlap_frames, anchor_strength=anchor_strength, motion_anchor_frames=motion_anchor_frames, identity_anchor_frames=identity_anchor_frames))
-
-
-class UC_MiniMaxH3SpatialSplitConfig(io.ComfyNode):
-    """Configures spatial tile size, overlap feathering, and seam protection for tiled MiniMax H3 refinement."""
-
-    @classmethod
-    def define_schema(cls) -> io.Schema:
-        return io.Schema(
-            node_id="UC_MiniMaxH3SpatialSplitConfig",
-            display_name="MiniMax H3 Spatial Split Config",
-            category="utils/sampling",
-            description="Configures spatial tile dimensions, overlap feathering, and seam denoise protection for tiled high-resolution MiniMax H3 second-pass refinement.",
-            search_aliases=["mmh3 spatial split", "h3 spatial split params", "minimax tiled spatial", "h3 hires tiles"],
-            inputs=[
-                io.Int.Input("tile_width", default=512, min=64, max=16384, step=32, tooltip="Width of each spatial tile in pixels (snapped to 32-pixel multiples). Lower to fit higher output resolutions in VRAM; raise to process fewer tiles."),
-                io.Int.Input("tile_height", default=512, min=64, max=16384, step=32, tooltip="Height of each spatial tile in pixels (snapped to 32-pixel multiples). Lower to fit higher output resolutions in VRAM; raise to process fewer tiles."),
-                io.Float.Input("overlap_ratio", default=0.25, min=0.0, max=0.90, step=0.05, tooltip="Fraction of each tile shared with its top and left neighbors (0.25 shares 25% of the tile width and height). Higher values hide seams better at extra sampling cost."),
-                io.Float.Input("fade_ratio", default=0.50, min=0.0, max=1.0, step=0.05, tooltip="Portion of the overlap band that gradually transitions from frozen neighbor pixels to newly denoised content (0.50 freezes half the overlap and feathers the rest)."),
-                io.Int.Input("min_tile_size", default=256, min=0, max=16384, step=32, tooltip="Minimum allowed edge-tile width or height in pixels so narrow remainder strips are pulled inward instead of sampled as tiny slivers (0 disables)."),
-                io.Float.Input("seam_denoise", default=1.0, min=0.1, max=1.0, step=0.05, tooltip="Denoise ceiling right beside tile seams. Lower to 0.5–0.8 when fast motion + stronger denoise causes objects to split across tile borders; keep at 1.0 for normal refinement."),
-            ],
-            outputs=[H3SpatialSplitConfig.Output("spatial_split_config", tooltip="Connect to spatial_split_config on MiniMax H3 Tiled Upscale Sampler."), io.String.Output("grid_summary", tooltip="Readable summary of the aligned pixel and latent tile sizes, overlap, fade band, and seam denoise cap.")],
-        )
-
-    @classmethod
-    def execute(cls, tile_width: int = 512, tile_height: int = 512, overlap_ratio: float = 0.25, fade_ratio: float = 0.50, min_tile_size: int = 256, seam_denoise: float = 1.0) -> io.NodeOutput:
-        config, summary = build_h3_spatial_split_config(tile_width=tile_width, tile_height=tile_height, overlap_ratio=overlap_ratio, fade_ratio=fade_ratio, min_tile_size=min_tile_size, seam_denoise=seam_denoise)
-        return io.NodeOutput(config, summary)
-
-
-class UC_MiniMaxH3TiledUpscaleSampler(io.ComfyNode):
-    """Tiled temporal and spatial second-pass refinement sampler for upscaled MiniMax H3 AV latents."""
-
-    @classmethod
-    def define_schema(cls) -> io.Schema:
-        return io.Schema(
-            node_id="UC_MiniMaxH3TiledUpscaleSampler",
-            display_name="MiniMax H3 Tiled Upscale Sampler",
-            category="utils/sampling",
-            description="Refines an upscaled MiniMax H3 joint audio-video latent across temporal chunks and spatial tiles so high-resolution video finishes within VRAM without visible tile seams or color drift.",
-            search_aliases=["mmh3 split upscale", "minimax h3 tiled upscale", "h3 hires fix sampler", "minimax ultimate upscale"],
-            inputs=[
-                io.Latent.Input("latent", tooltip="Pre-upscaled MiniMax H3 joint audio-video latent (for example from MiniMax H3 Latent Upscale) with batch size 1."),
-                io.Noise.Input("noise", tooltip="Noise source (such as RandomNoise) used to generate spatially coherent noise per temporal chunk."),
-                io.Sampler.Input("sampler", tooltip="Sampling method (such as Euler) used to refine each tile."),
-                io.Sigmas.Input("sigmas", tooltip="Refinement step schedule (for example low-noise tail sigmas from SplitSigmas or ManualSigmas)."),
-                io.Model.Input("model", optional=True, tooltip="MiniMax H3 diffusion model used for refinement when an external guider is not connected."),
-                io.Conditioning.Input("conditioning", optional=True, tooltip="Positive prompt and guide conditioning matching the full clip. Optional when an external guider already supplies positive conditioning."),
-                io.Conditioning.Input("negative", optional=True, tooltip="Optional negative conditioning when CFG is above 1.0."),
-                io.Guider.Input("guider", optional=True, tooltip="Optional external guider (such as BasicGuider or CFGGuider). When connected, model and conditioning can remain disconnected."),
-                io.Float.Input("cfg", default=1.0, min=0.0, max=100.0, step=0.1, round=0.01, tooltip="Classifier-free guidance scale used when building an internal guider from model and conditioning (1.0 is standard for turbo/distilled H3 setups)."),
-                H3TemporalSplitConfig.Input("temporal_split_config", optional=True, tooltip="Optional timeline chunking settings from MiniMax H3 Temporal Split Config. Leave disconnected to sample the full clip timeline in one chunk."),
-                H3SpatialSplitConfig.Input("spatial_split_config", optional=True, tooltip="Optional spatial tiling settings from MiniMax H3 Spatial Split Config. Leave disconnected to sample the full frame without spatial tiling."),
-                io.Combo.Input("seam_polish", options=["off", "auto", "all"], default="off", tooltip="Optional extra pass over tile borders: off skips extra passes, auto re-samples only seams where color or structure disagrees, and all re-samples every tile border."),
-                io.Boolean.Input("color_match", default=True, tooltip="Matches brightness and color balance across neighboring spatial tiles and temporal chunks while pinning each chunk back to the upscaled source latent."),
-            ],
-            outputs=[io.Latent.Output("latent", tooltip="Refined and stitched MiniMax H3 joint audio-video latent ready for VAEDecode and VAEDecodeAudio.")],
-        )
-
-    @classmethod
-    def execute(cls, latent, noise, sampler, sigmas, model=None, conditioning=None, negative=None, guider=None, cfg: float = 1.0, temporal_split_config=None, spatial_split_config=None, seam_polish: str = "off", color_match: bool = True) -> io.NodeOutput:
-        out = sample_minimax_h3_tiled_upscale(
-            latent=latent, noise=noise, sampler=sampler, sigmas=sigmas, model=model, conditioning=conditioning, negative=negative, guider=guider, cfg=cfg, temporal_split_config=temporal_split_config, spatial_split_config=spatial_split_config, seam_polish=seam_polish, color_match=color_match
-        )
-        return io.NodeOutput(out)
-
-
-SAMPLING_NODES = [UC_H3LoopSampler, UC_H3RefVideoSegments, UC_SamplerDMADReNoise, UC_MiniMaxH3ClipContinuationApply, UC_MiniMaxH3ClipContinuationSampler, UC_MiniMaxH3TemporalSplitConfig, UC_MiniMaxH3SpatialSplitConfig, UC_MiniMaxH3TiledUpscaleSampler]
+SAMPLING_NODES = [UC_H3LoopSampler, UC_H3RefVideoSegments, UC_SamplerDMADReNoise, UC_MiniMaxH3ClipContinuationApply, UC_MiniMaxH3ClipContinuationSampler]

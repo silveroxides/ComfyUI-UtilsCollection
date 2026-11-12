@@ -5,26 +5,27 @@ from comfy_api.latest import io
 
 from ..helpers.patcher_helpers import (
     CUSTOM_SAGE_MODES,
-    MiniMaxH3RadialAttentionConfig,
-    MiniMaxH3SlaAttentionConfig,
-    SLA_DENSE_BACKENDS,
-    SLA_REFERENCE_PROTECTION_MODES,
-    list_minimax_h3_projections,
-    patch_ideogram4_debanner,
-    patch_krea2_nag_model,
-    patch_minimax_h3_clip_projection,
-    patch_minimax_h3_pdd_model,
-    patch_unified_attention_model,
-    patch_minimax_h3_cache_model,
-    patch_minimax_h3_diffusion_cache_model,
-    MOSS_IMAGE_EDIT_PRESETS,
-    patch_moss_image_edit_model,
+    H3_SPATIAL_BLEND_PROFILES,
     KREA2_EDIT_BOOST_MODES,
     KREA2_EDIT_ROPE_POSITIONS,
+    MOSS_IMAGE_EDIT_PRESETS,
+    SLA_DENSE_BACKENDS,
+    SLA_REFERENCE_PROTECTION_MODES,
+    MiniMaxH3RadialAttentionConfig,
+    MiniMaxH3SlaAttentionConfig,
+    list_minimax_h3_projections,
+    patch_ideogram4_debanner,
     patch_krea2_edit_model,
+    patch_krea2_nag_model,
+    patch_minimax_h3_cache_model,
+    patch_minimax_h3_clip_projection,
     patch_minimax_h3_context_windows,
+    patch_minimax_h3_diffusion_cache_model,
+    patch_minimax_h3_pdd_model,
+    patch_minimax_h3_spatial_tiles,
+    patch_moss_image_edit_model,
+    patch_unified_attention_model,
 )
-
 
 MiniMaxH3RadialAttentionConfigType = io.Custom("MINIMAX_H3_RADIAL_ATTENTION_CONFIG")
 MiniMaxH3SlaAttentionConfigType = io.Custom("MINIMAX_H3_SLA_ATTENTION_CONFIG")
@@ -533,4 +534,30 @@ class UC_MiniMaxH3ContextPatcher(io.ComfyNode):
     @classmethod
     def execute(cls, model, window_size="124 frames (~5.2s - Standard)", overlap="39 frames (~1.6s - Standard)", blend_profile="pyramid", freenoise=True) -> io.NodeOutput:
         patched = patch_minimax_h3_context_windows(model=model, window_size=window_size, overlap=overlap, blend_profile=blend_profile, freenoise=freenoise)
+        return io.NodeOutput(patched)
+
+
+class UC_MiniMaxH3SpatialTilePatcher(io.ComfyNode):
+    @classmethod
+    def define_schema(cls) -> io.Schema:
+        return io.Schema(
+            node_id="UC_MiniMaxH3SpatialTilePatcher",
+            display_name="MiniMax H3 Spatial Tile Patcher",
+            category="advanced/model/patches",
+            description="Patches a MiniMax H3 model to evaluate overlapping 2D spatial tiles at every denoising step, preventing out-of-memory errors during high-resolution refinement without tile seams or color drift.",
+            search_aliases=["minimax spatial tiles", "h3 tiled diffusion", "spatial tile patcher", "mmh3 split upscale", "h3 hires patcher"],
+            inputs=[
+                io.Model.Input("model", tooltip="MiniMax H3 model to patch with per-step 2D spatial tiling. Can be stacked directly with MiniMax H3 Context Patcher, Unified Attention Patcher, and MiniMax H3 Cache."),
+                io.Int.Input("tile_width", default=768, min=128, max=16384, step=32, tooltip="Maximum spatial tile width in pixels evaluated per pass (snapped to 32-pixel multiples). If the video is already at or below tile_width x tile_height, no tiling overhead is added."),
+                io.Int.Input("tile_height", default=768, min=128, max=16384, step=32, tooltip="Maximum spatial tile height in pixels evaluated per pass (snapped to 32-pixel multiples). Lower to 512 on tighter VRAM; raise to 960 or 1024 to run fewer tiles per step."),
+                io.Float.Input("overlap_ratio", default=0.25, min=0.05, max=0.75, step=0.05, tooltip="Fraction of each tile shared with neighboring tiles and blended at every denoising step (0.25 shares 25% of tile width and height for seamless borders)."),
+                io.Int.Input("min_tile_size", default=256, min=0, max=16384, step=32, tooltip="Minimum edge-tile width or height in pixels so narrow remainder strips are pulled inward instead of evaluated as tiny slivers (0 disables)."),
+                io.Combo.Input("blend_profile", options=list(H3_SPATIAL_BLEND_PROFILES), default="cosine", optional=True, advanced=True, tooltip="Spatial overlap weighting curve: cosine uses a smooth raised-cosine blend across shared borders; pyramid uses a linear ramp."),
+            ],
+            outputs=[io.Model.Output("model", display_name="model", tooltip="Spatially tiled MiniMax H3 model ready for BasicGuider, CFGGuider, SamplerCustomAdvanced, or MiniMax H3 Clip Continuation Sampler.")],
+        )
+
+    @classmethod
+    def execute(cls, model, tile_width: int = 768, tile_height: int = 768, overlap_ratio: float = 0.25, min_tile_size: int = 256, blend_profile: str = "cosine") -> io.NodeOutput:
+        patched = patch_minimax_h3_spatial_tiles(model=model, tile_width=tile_width, tile_height=tile_height, overlap_ratio=overlap_ratio, min_tile_size=min_tile_size, blend_profile=blend_profile)
         return io.NodeOutput(patched)

@@ -190,6 +190,7 @@ class SamplingUtils(ComfyExtension):
                 UC_MOSSImageEditPatcher,
                 UC_MiniMaxH3ClipProjectionPatcher,
                 UC_MiniMaxH3ContextPatcher,
+                UC_MiniMaxH3SpatialTilePatcher,
                 UC_MiniMaxH3PDDAcc,
                 UC_MiniMaxH3Cache,
                 UC_MiniMaxH3DiffusionCache,
@@ -307,9 +308,6 @@ class SamplingUtils(ComfyExtension):
                 UC_MiniMaxH3ClipContinuationApply,
                 UC_MiniMaxH3ClipContinuationSampler,
                 UC_MiniMaxH3ClipContinuationAccumulateList,
-                UC_MiniMaxH3TemporalSplitConfig,
-                UC_MiniMaxH3SpatialSplitConfig,
-                UC_MiniMaxH3TiledUpscaleSampler,
                 *LOGIC_MATH_NODES,
                 *SCHEDULER_NODES,
             ]

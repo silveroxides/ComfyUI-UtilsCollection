@@ -16,7 +16,7 @@ package = types.ModuleType(PACKAGE_NAME)
 package.__path__ = [str(PACKAGE_ROOT)]
 sys.modules.setdefault(PACKAGE_NAME, package)
 
-from utils_collection_h3_upscaler_test.helpers import model_helpers, sampling_helpers  # noqa: E402
+from utils_collection_h3_upscaler_test.helpers import model_helpers, patcher_helpers  # noqa: E402
 from utils_collection_h3_upscaler_test.helpers.helper_functions import atomic_uel_writer  # noqa: E402
 from utils_collection_h3_upscaler_test.models import minimax_h3_latent_upscaler as upscaler_mod  # noqa: E402
 from utils_collection_h3_upscaler_test.models.minimax_h3_latent_upscaler import MiniMaxH3LatentUpscaler2D  # noqa: E402
@@ -137,88 +137,71 @@ def test_upscale_minimax_h3_latent_preserves_av_audio_and_aligns_modes(monkeypat
         model_helpers.compute_minimax_h3_upscale_latent_hw(20, 20, {"mode": "dimensions", "width": 160, "height": 160}, align=32)
 
 
-def test_tiled_sampler_enforces_h3_token_phase_audio_trim_and_seam_stitching(monkeypatch):
-    for tv in (7, 12, 17, 22, 27, 37, 42):
-        for chunk_f, ov_f in ((22, 0), (22, 5), (22, 22), (39, 22), (56, 39), (73, 22)):
-            segs = sampling_helpers.compute_h3_tiled_segments(tv, chunk_f, ov_f)
-            assert segs[0][0] == 0
-            assert segs[-1][2] == tv
-            for k0, f0, k1, f1 in segs:
-                assert k0 % 5 == 0
-                assert k1 - k0 >= 2
-                assert (k1 - k0 - 2) % 5 == 0
-                assert f0 == sampling_helpers._h3_tiled_frames_for_tokens(k0)
-                assert f1 == sampling_helpers._h3_tiled_frames_for_tokens(k1)
+def test_spatial_tile_patcher_fuses_packed_av_crops_payload_and_isolates_cache_keys():
+    import comfy.conds
+    import comfy.patcher_extension
+    import comfy.utils
 
-    kf = {"resolved_frame_index": 0, "audio_latent": torch.ones(1, 32, 2, 80)}
-    trimmed_kf = sampling_helpers.trim_h3_tiled_keyframe(kf, 0, 24)
-    assert trimmed_kf is not None
-    assert trimmed_kf["audio_latent"].shape[-1] == 40
+    class _DummyInnerModel(torch.nn.Module):
+        def __init__(self, shapes):
+            super().__init__()
+            self.latent_shapes = shapes
 
-    mask = sampling_helpers.build_h3_spatial_fade_mask(16, 16, ovh=4, ovw=4, done_top=True, done_left=True, fade_h=2, fade_w=2, seam_cap=0.6)
-    assert float(mask[0, 0]) == 0.0
-    assert float(mask[1, 1]) == 0.0
-    assert 0.0 < float(mask[3, 3]) <= 0.6 + 1e-5
-    assert float(mask[-1, -1]) == 1.0
+    with pytest.raises(ValueError, match="blend_profile"):
+        patcher_helpers.patch_minimax_h3_spatial_tiles(comfy.model_patcher.CoreModelPatcher(_DummyInnerModel(None), load_device=torch.device("cpu"), offload_device=torch.device("cpu")), blend_profile="invalid")
 
-    recorded_kf_shapes = []
-    cache_resets = []
+    video = torch.linspace(0.1, 1.0, 1 * 24 * 2 * 12 * 16, dtype=torch.float32).reshape(1, 24, 2, 12, 16)
+    audio = torch.linspace(-0.5, 0.5, 1 * 32 * 2 * 8, dtype=torch.float32).reshape(1, 32, 2, 8)
+    packed_x, full_shapes = comfy.utils.pack_latents([video, audio])
 
-    class _DummyModelObj:
-        latent_format = None
+    kf_lat = torch.ones(1, 24, 1, 12, 16, dtype=torch.float32)
+    ref_lat = torch.ones(1, 24, 1, 10, 10, dtype=torch.float32)
+    dm_lat = torch.ones(1, 1, 2, 12, 16, dtype=torch.float32) * 0.75
+    payload = {"layout": "stale_full_frame_layout", "keyframes": [{"resolved_frame_index": 0, "latent": kf_lat}], "refs": [{"kind": "image", "latent": ref_lat}], "cond_video_latents": [kf_lat, ref_lat], "cond_audio_latents": []}
+    conds = [[{"model_conds": {"latent_shapes": comfy.conds.CONDConstant(full_shapes), "denoise_mask": comfy.conds.CONDRegular(dm_lat), "minimax_payload": comfy.conds.CONDConstant(payload)}}], None]
 
-    class _DummyPatcher:
-        load_device = torch.device("cpu")
-        model = _DummyModelObj()
-        model_options = {}
+    inner = _DummyInnerModel(full_shapes)
+    base_patcher = comfy.model_patcher.CoreModelPatcher(inner, load_device=torch.device("cpu"), offload_device=torch.device("cpu"))
 
-    class _DummyGuider:
-        def __init__(self):
-            self.model_patcher = _DummyPatcher()
-            self.model_options = {}
-            base_kf = {"resolved_frame_index": 0, "latent": torch.ones(1, 24, 1, 12, 12)}
-            pos = [[torch.zeros(1, 4, 8), {"minimax_keyframes": [base_kf]}]]
-            self.original_conds = {"positive": pos, "negative": None}
-            self.raw_conds = (pos, None)
+    calls_noop = []
 
-        def inner_set_conds(self, conds):
-            self.original_conds = dict(conds)
+    def _noop_exec(m, c, x, t, opts):
+        calls_noop.append(x.shape)
+        return [x, x]
 
-        def sample(self, noise_t, latent_image, sampler, sigmas, denoise_mask=None, callback=None, disable_pbar=True, seed=0):
-            pos_list = self.original_conds["positive"]
-            kfs = pos_list[0][1].get("minimax_keyframes", [])
-            for entry in kfs:
-                if "latent" in entry:
-                    recorded_kf_shapes.append(tuple(entry["latent"].shape[-2:]))
-            v, a = latent_image.tensors
-            assert denoise_mask is not None and denoise_mask.is_nested
-            if callback is not None:
-                callback(0, latent_image, latent_image, 1)
-            return NestedTensor((v + 0.01, a))
+    patched_large = patcher_helpers.patch_minimax_h3_spatial_tiles(base_patcher, tile_width=512, tile_height=512)
+    exec_noop = comfy.patcher_extension.WrapperExecutor.new_executor(_noop_exec, patched_large.get_all_wrappers(comfy.patcher_extension.WrappersMP.CALC_COND_BATCH))
+    out_noop = exec_noop.execute(inner, conds, packed_x, torch.tensor([0.5]), patched_large.model_options)
+    assert len(calls_noop) == 1
+    torch.testing.assert_close(out_noop[0], packed_x)
 
-    class _DummyNoise:
-        seed = 123
+    seen_cache_keys = set()
+    seen_kf_shapes = []
 
-        def generate_noise(self, input_latent):
-            return torch.zeros_like(input_latent["samples"])
+    def _tile_exec(m, c, x, t, opts):
+        key = patcher_helpers._extract_window_key({"transformer_options": opts.get("transformer_options", {})})
+        seen_cache_keys.add(key)
+        mc = c[0][0]["model_conds"]
+        tile_shapes = mc["latent_shapes"].cond
+        mp = mc["minimax_payload"].cond
+        assert "layout" not in mp
+        assert tuple(mp["refs"][0]["latent"].shape[-2:]) == (10, 10)
+        kf_crop = mp["keyframes"][0]["latent"]
+        seen_kf_shapes.append(tuple(kf_crop.shape[-2:]))
+        assert tuple(kf_crop.shape[-2:]) == tuple(tile_shapes[0][-2:])
+        assert tuple(mc["denoise_mask"].cond.shape[-2:]) == tuple(tile_shapes[0][-2:])
+        assert tuple(mp["cond_video_latents"][0].shape[-2:]) == tuple(tile_shapes[0][-2:])
+        assert tuple(mp["cond_video_latents"][1].shape[-2:]) == (10, 10)
+        m.latent_shapes = tile_shapes
+        return [x * 2.0, x * 0.0]
 
-    import comfy.sample
-    import latent_preview
-
-    monkeypatch.setattr(comfy.sample, "fix_empty_latent_channels", lambda model, latent_image: latent_image)
-    monkeypatch.setattr(latent_preview, "get_previewer", lambda device, fmt: None)
-    monkeypatch.setattr(comfy.model_management, "intermediate_device", lambda: torch.device("cpu"))
-    orig_reset = sampling_helpers.reset_model_caches
-    monkeypatch.setattr(sampling_helpers, "reset_model_caches", lambda g: (cache_resets.append(1), orig_reset(g)))
-
-    video_in = torch.zeros(1, 24, 12, 12, 12)
-    audio_in = torch.zeros(1, 32, 2, 65)
-    t_cfg = sampling_helpers.build_h3_temporal_split_config(chunk_frames=22, overlap_frames=5, anchor_strength=0.999, motion_anchor_frames="5", identity_anchor_frames=12)
-    s_cfg, _ = sampling_helpers.build_h3_spatial_split_config(tile_width=128, tile_height=128, overlap_ratio=0.25, fade_ratio=0.5, min_tile_size=64, seam_denoise=0.7)
-
-    stitched = sampling_helpers.sample_minimax_h3_tiled_upscale(latent={"samples": NestedTensor((video_in, audio_in))}, noise=_DummyNoise(), sampler=object(), sigmas=torch.tensor([0.5, 0.0]), guider=_DummyGuider(), temporal_split_config=t_cfg, spatial_split_config=s_cfg, seam_polish="all", color_match=True)
-    out_v, out_a = stitched["samples"].tensors
-    assert tuple(out_v.shape) == (1, 24, 12, 12, 12)
-    assert tuple(out_a.shape) == (1, 32, 2, 65)
-    assert len(cache_resets) > 4
-    assert (8, 8) in recorded_kf_shapes
+    for profile in ("cosine", "pyramid"):
+        seen_cache_keys.clear()
+        seen_kf_shapes.clear()
+        patched = patcher_helpers.patch_minimax_h3_spatial_tiles(base_patcher, tile_width=128, tile_height=128, overlap_ratio=0.25, min_tile_size=64, blend_profile=profile)
+        executor = comfy.patcher_extension.WrapperExecutor.new_executor(_tile_exec, patched.get_all_wrappers(comfy.patcher_extension.WrappersMP.CALC_COND_BATCH))
+        res_branches = executor.execute(inner, conds, packed_x, torch.tensor([0.5]), patched.model_options)
+        assert len(seen_cache_keys) == 6
+        assert all(4 <= h <= 8 and 4 <= w <= 8 and h % 2 == 0 and w % 2 == 0 for h, w in seen_kf_shapes)
+        assert inner.latent_shapes == full_shapes
+        torch.testing.assert_close(res_branches[0], packed_x * 2.0, rtol=1e-5, atol=1e-5)

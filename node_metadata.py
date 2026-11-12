@@ -194,11 +194,8 @@ DESCRIPTIONS = {
     "UC_MermaidPreview": "Displays connected text containing Mermaid diagrams or Markdown using pure Canvas2D rendering with smooth pan and zoom.",
     "UC_MiniMaxH3LatentUpscaleLoader": "Loads a MiniMax H3 2D or 3D neural latent upscaler safetensors model from models/latent_upscale_models through Unified Efficient Loader.",
     "UC_MiniMaxH3LatentUpscale": "Upscales a MiniMax H3 video or joint audio-video latent directly in latent space by scale multiplier, pixel dimensions, or megapixels while keeping attached audio unchanged.",
-    "UC_MiniMaxH3TemporalSplitConfig": "Configures timeline chunk length, overlap, and continuity anchors for tiled high-resolution MiniMax H3 second-pass refinement.",
-    "UC_MiniMaxH3SpatialSplitConfig": "Configures spatial tile size, overlap feathering, and seam denoise protection for tiled high-resolution MiniMax H3 second-pass refinement.",
-    "UC_MiniMaxH3TiledUpscaleSampler": "Refines an upscaled MiniMax H3 joint audio-video latent across temporal chunks and spatial tiles so high-resolution video finishes within VRAM without tile seams or color drift.",
+    "UC_MiniMaxH3SpatialTilePatcher": "Patches a MiniMax H3 model to evaluate overlapping 2D spatial tiles at every denoising step so high-resolution video finishes within VRAM without tile seams or color drift.",
 }
-
 
 EXTRA_ALIASES = {
     "UC_LoadVideo": ["load video uc", "uc load video", "upload video", "import video"],
@@ -272,9 +269,7 @@ EXTRA_ALIASES = {
     "UC_MermaidPreview": ["preview as mermaid", "mermaid preview", "diagram preview", "render mermaid", "mermaid viewer"],
     "UC_MiniMaxH3LatentUpscaleLoader": ["minimax h3 latent upscaler", "h3 latent upscale loader", "minimax upscaler", "latent upscale model", "2d_conv_v1", "3d_conv_v1"],
     "UC_MiniMaxH3LatentUpscale": ["minimax h3 latent upscale", "h3 latent upscaler", "minimax video upscale", "h3 hires latent", "latent super resolution"],
-    "UC_MiniMaxH3TemporalSplitConfig": ["mmh3 temporal split", "h3 temporal split params", "minimax tiled temporal", "h3 hires temporal"],
-    "UC_MiniMaxH3SpatialSplitConfig": ["mmh3 spatial split", "h3 spatial split params", "minimax tiled spatial", "h3 hires tiles"],
-    "UC_MiniMaxH3TiledUpscaleSampler": ["mmh3 split upscale", "minimax h3 tiled upscale", "h3 hires fix sampler", "minimax ultimate upscale", "tiled video upscale"],
+    "UC_MiniMaxH3SpatialTilePatcher": ["minimax spatial tiles", "h3 tiled diffusion", "spatial tile patcher", "mmh3 split upscale", "h3 hires patcher", "tiled video upscale"],
 }
 
 

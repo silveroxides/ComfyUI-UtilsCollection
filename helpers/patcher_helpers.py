@@ -2,17 +2,15 @@
 
 from __future__ import annotations
 
-import bisect
 import contextvars
 import hashlib
 import logging
 import math
 import os
 import re
-import time
 import types
 from collections.abc import Callable, Sequence
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
@@ -27,11 +25,12 @@ except ImportError:
     triton = None
     tl = None
 
-import comfy.lora
 import comfy.ldm.common_dit
+import comfy.lora
 from comfy.ldm.flux.math import apply_rope
 from comfy.ldm.ideogram4 import model as ideogram4_model
 from comfy.ldm.krea2 import model as krea2_model
+
 try:
     from comfy.ldm.moss_image import model as moss_image_model
 except ImportError:
@@ -43,10 +42,10 @@ import comfy.model_prefetch
 import comfy.patcher_extension
 import comfy.utils
 import folder_paths
-from comfy.text_encoders.minimax import process_video_block, token_tags_from_embeds_info
 from comfy.ldm.minimax import model as minimax_model
-from .helper_functions import read_uel_safetensors_dict
+from comfy.text_encoders.minimax import process_video_block, token_tags_from_embeds_info
 
+from .helper_functions import read_uel_safetensors_dict
 
 MINIMAX_H3_CACHE_OWNER_KEY = "utilscollection_minimax_h3_cache"
 MINIMAX_H3_PDD_OWNER_KEY = "utilscollection_minimax_h3_pdd_acc"
@@ -75,79 +74,24 @@ KREA2_NAG_CFG_SCALE_KEY = "utilscollection_krea2_nag_cfg_scale"
 KREA2_NAG_ATTN_STEP_KEY = "utilscollection_krea2_nag_attn_step"
 KREA2_EDIT_OWNER_KEY = "utilscollection_krea2_edit"
 KREA2_EDIT_OUTER_SAMPLE_WRAPPER_KEY = "utilscollection_krea2_edit_outer_sample"
-KREA2_EDIT_ROPE_POSITIONS = (
-    "aligned (trained)",
-    "beside (right of target)",
-    "bag of features",
-)
-KREA2_EDIT_BOOST_MODES = (
-    "Fast / Key Scaling (FlashAttention)",
-    "Exact / Logit Bias",
-)
+KREA2_EDIT_ROPE_POSITIONS = ("aligned (trained)", "beside (right of target)", "bag of features")
+KREA2_EDIT_BOOST_MODES = ("Fast / Key Scaling (FlashAttention)", "Exact / Logit Bias")
 MOSS_IMAGE_EDIT_DIFFUSION_WRAPPER_KEY = "utilscollection_moss_image_edit_diffusion"
 MOSS_IMAGE_EDIT_OUTER_SAMPLE_WRAPPER_KEY = "utilscollection_moss_image_edit_outer_sample"
 MOSS_IMAGE_EDIT_ROPE_MODES = ("spatial_aligned", "reference_axis")
 MOSS_IMAGE_EDIT_PRESETS: dict[str, dict[str, Any]] = {
-    "balanced_edit": {
-        "rope_mode": "spatial_aligned",
-        "ref_kv_scale": 1.0,
-        "structure_scale": 1.0,
-        "structure_end_sigma": 0.35,
-        "lowpass_kernel": 5,
-        "uncond_ref_anchor": 0.35,
-        "noise_anchor": 0.25,
-        "end_percent": 0.95,
-    },
-    "preserve_structure": {
-        "rope_mode": "spatial_aligned",
-        "ref_kv_scale": 1.15,
-        "structure_scale": 1.35,
-        "structure_end_sigma": 0.20,
-        "lowpass_kernel": 3,
-        "uncond_ref_anchor": 0.55,
-        "noise_anchor": 0.40,
-        "end_percent": 1.0,
-    },
-    "subject_reference": {
-        "rope_mode": "reference_axis",
-        "ref_kv_scale": 1.10,
-        "structure_scale": 0.0,
-        "structure_end_sigma": 0.60,
-        "lowpass_kernel": 7,
-        "uncond_ref_anchor": 0.0,
-        "noise_anchor": 0.0,
-        "end_percent": 0.92,
-    },
-    "style_reference": {
-        "rope_mode": "reference_axis",
-        "ref_kv_scale": 0.85,
-        "structure_scale": 0.0,
-        "structure_end_sigma": 0.70,
-        "lowpass_kernel": 9,
-        "uncond_ref_anchor": 0.0,
-        "noise_anchor": 0.0,
-        "end_percent": 0.85,
-    },
-    "inpaint_only": {
-        "rope_mode": "spatial_aligned",
-        "ref_kv_scale": 0.95,
-        "structure_scale": 0.25,
-        "structure_end_sigma": 0.50,
-        "lowpass_kernel": 5,
-        "uncond_ref_anchor": 0.20,
-        "noise_anchor": 0.15,
-        "end_percent": 1.0,
-    },
+    "balanced_edit": {"rope_mode": "spatial_aligned", "ref_kv_scale": 1.0, "structure_scale": 1.0, "structure_end_sigma": 0.35, "lowpass_kernel": 5, "uncond_ref_anchor": 0.35, "noise_anchor": 0.25, "end_percent": 0.95},
+    "preserve_structure": {"rope_mode": "spatial_aligned", "ref_kv_scale": 1.15, "structure_scale": 1.35, "structure_end_sigma": 0.20, "lowpass_kernel": 3, "uncond_ref_anchor": 0.55, "noise_anchor": 0.40, "end_percent": 1.0},
+    "subject_reference": {"rope_mode": "reference_axis", "ref_kv_scale": 1.10, "structure_scale": 0.0, "structure_end_sigma": 0.60, "lowpass_kernel": 7, "uncond_ref_anchor": 0.0, "noise_anchor": 0.0, "end_percent": 0.92},
+    "style_reference": {"rope_mode": "reference_axis", "ref_kv_scale": 0.85, "structure_scale": 0.0, "structure_end_sigma": 0.70, "lowpass_kernel": 9, "uncond_ref_anchor": 0.0, "noise_anchor": 0.0, "end_percent": 0.85},
+    "inpaint_only": {"rope_mode": "spatial_aligned", "ref_kv_scale": 0.95, "structure_scale": 0.25, "structure_end_sigma": 0.50, "lowpass_kernel": 5, "uncond_ref_anchor": 0.20, "noise_anchor": 0.15, "end_percent": 1.0},
 }
 
 
 def _register_minimax_h3_projection_folder() -> None:
     path = os.path.join(folder_paths.models_dir, MINIMAX_H3_PROJECTION_FOLDER)
     if MINIMAX_H3_PROJECTION_FOLDER not in folder_paths.folder_names_and_paths:
-        folder_paths.folder_names_and_paths[MINIMAX_H3_PROJECTION_FOLDER] = (
-            [path],
-            {".safetensors"},
-        )
+        folder_paths.folder_names_and_paths[MINIMAX_H3_PROJECTION_FOLDER] = ([path], {".safetensors"})
     else:
         folder_paths.add_model_folder_path(MINIMAX_H3_PROJECTION_FOLDER, path)
 
@@ -156,11 +100,7 @@ _register_minimax_h3_projection_folder()
 
 
 def list_minimax_h3_projections() -> list[str]:
-    return [
-        name
-        for name in folder_paths.get_filename_list(MINIMAX_H3_PROJECTION_FOLDER)
-        if name.lower().endswith(".safetensors")
-    ]
+    return [name for name in folder_paths.get_filename_list(MINIMAX_H3_PROJECTION_FOLDER) if name.lower().endswith(".safetensors")]
 
 
 def _projection_scalar(data: dict[str, Any], metadata: dict[str, str], key: str) -> int:
@@ -222,9 +162,7 @@ class MiniMaxH3ProjectionModel(torch.nn.Module):
         weight = data.get("W")
         if weight is not None:
             if weight.ndim != 2 or tuple(weight.shape) != (d_in, d_out):
-                raise ValueError(
-                    f"Projection W must have shape [{d_in}, {d_out}]."
-                )
+                raise ValueError(f"Projection W must have shape [{d_in}, {d_out}].")
             self.linear_weight = torch.nn.Parameter(weight.float())
         else:
             self.register_parameter("linear_weight", None)
@@ -240,12 +178,7 @@ class MiniMaxH3ProjectionModel(torch.nn.Module):
             residual_weight = data[weight_key]
             if residual_weight.ndim != 2 or residual_weight.shape[1] != previous_out:
                 raise ValueError(f"Projection residual layer {index} has incompatible dimensions.")
-            linear = torch.nn.Linear(
-                residual_weight.shape[1],
-                residual_weight.shape[0],
-                bias=bias_key in data,
-                dtype=residual_weight.dtype,
-            )
+            linear = torch.nn.Linear(residual_weight.shape[1], residual_weight.shape[0], bias=bias_key in data, dtype=residual_weight.dtype)
             linear.weight = torch.nn.Parameter(residual_weight)
             if bias_key in data:
                 bias = data[bias_key]
@@ -278,9 +211,7 @@ class MiniMaxH3ProjectionModel(torch.nn.Module):
     def forward(self, hidden: torch.Tensor) -> torch.Tensor:
         hidden = hidden.float()
         if hidden.shape[-1] != self.input_dimensions:
-            raise ValueError(
-                f"Connected encoder produces {hidden.shape[-1]} dimensions, but projection expects {self.input_dimensions}."
-            )
+            raise ValueError(f"Connected encoder produces {hidden.shape[-1]} dimensions, but projection expects {self.input_dimensions}.")
         normalized = (hidden - self.mean_in) / self.std_in
         projected = normalized @ self.linear_weight if self.linear_weight is not None else None
         if self.residual is not None:
@@ -304,11 +235,7 @@ class _MiniMaxH3ProjectedTokenizer:
     def _text_entries(self, text: str) -> list[tuple]:
         if not text:
             return []
-        batches = self.raw_tokenizer.tokenize_with_weights(
-            text,
-            return_word_ids=False,
-            disable_weights=True,
-        )
+        batches = self.raw_tokenizer.tokenize_with_weights(text, return_word_ids=False, disable_weights=True)
         if len(batches) != 1:
             raise ValueError("MiniMax H3 projected text exceeds the supported prompt length.")
         return list(batches[0])
@@ -320,14 +247,7 @@ class _MiniMaxH3ProjectedTokenizer:
             entry["minimax_video_block"] = True
         return entry
 
-    def tokenize_with_weights(
-        self,
-        text: str,
-        return_word_ids: bool = False,
-        images: list = [],
-        minimax_ref_items=None,
-        **_kwargs,
-    ) -> dict[str, list[list[tuple]]]:
+    def tokenize_with_weights(self, text: str, return_word_ids: bool = False, images: list = [], minimax_ref_items=None, **_kwargs) -> dict[str, list[list[tuple]]]:
         entries = []
 
         def add_text(value: str) -> None:
@@ -364,7 +284,7 @@ class _MiniMaxH3ProjectedTokenizer:
                     for index in range(0, frames.shape[0], 2):
                         midpoint = (timestamps[index] + timestamps[index + 1]) / 2.0
                         add_text(f"<{float(midpoint):.1f} seconds>")
-                        add_vision(frames[index:index + 2], video_block=True)
+                        add_vision(frames[index : index + 2], video_block=True)
         else:
             for index, image in enumerate(images, start=1):
                 add_text(f"<Picture {index}>: ")
@@ -378,27 +298,13 @@ class _MiniMaxH3ProjectedTokenizer:
 
 
 class MiniMaxH3ProjectedCLIP:
-    def __init__(
-        self,
-        base: Any,
-        projection_name: str,
-        projection_model: MiniMaxH3ProjectionModel | None = None,
-        projection_patcher: Any = None,
-        original_methods: tuple[Callable, Callable] | None = None,
-    ):
+    def __init__(self, base: Any, projection_name: str, projection_model: MiniMaxH3ProjectionModel | None = None, projection_patcher: Any = None, original_methods: tuple[Callable, Callable] | None = None):
         source_key = getattr(base.cond_stage_model, "clip_name", None)
         if source_key not in MINIMAX_H3_SOURCE_KEYS:
             raise ValueError("MiniMax H3 projection requires a Qwen3-VL 4B or 8B text encoder.")
-        source_model = getattr(
-            base.cond_stage_model,
-            getattr(base.cond_stage_model, "clip", ""),
-            None,
-        )
+        source_model = getattr(base.cond_stage_model, getattr(base.cond_stage_model, "clip", ""), None)
         if type(source_model).__module__ != "comfy.text_encoders.qwen3vl":
-            raise ValueError(
-                "MiniMax H3 projection requires the generic Qwen3-VL wrapper. "
-                "Load the 4B or 8B encoder with CLIP type minimax."
-            )
+            raise ValueError("MiniMax H3 projection requires the generic Qwen3-VL wrapper. Load the 4B or 8B encoder with CLIP type minimax.")
         if projection_model is None:
             data, tap = load_minimax_h3_projection(projection_name)
             projection_model = MiniMaxH3ProjectionModel(data, tap)
@@ -414,20 +320,14 @@ class MiniMaxH3ProjectedCLIP:
             offload_device = comfy.model_management.text_encoder_offload_device()
             projection_model.to(offload_device)
             projection_model.device = offload_device
-            projection_patcher = comfy.model_patcher.CoreModelPatcher(
-                projection_model,
-                load_device=base.patcher.load_device,
-                offload_device=offload_device,
-            )
+            projection_patcher = comfy.model_patcher.CoreModelPatcher(projection_model, load_device=base.patcher.load_device, offload_device=offload_device)
         self._projection_patcher = projection_patcher
         self._install_encoder_patches(original_methods)
 
     def __getattr__(self, name: str) -> Any:
         return getattr(self._base, name)
 
-    def _install_encoder_patches(
-        self, original_methods: tuple[Callable, Callable] | None
-    ) -> None:
+    def _install_encoder_patches(self, original_methods: tuple[Callable, Callable] | None) -> None:
         owner_name = self._base.cond_stage_model.clip
         submodel = getattr(self._base.cond_stage_model, owner_name)
         transformer = submodel.transformer
@@ -442,9 +342,7 @@ class MiniMaxH3ProjectedCLIP:
         def preprocess_embed(current, embed, device):
             if embed.get("type") == "image" and embed.get("minimax_video_block", False):
                 flattened, grid = process_video_block(embed["data"])
-                merged, deepstack = current.visual(
-                    flattened.to(device, dtype=torch.float32), grid
-                )
+                merged, deepstack = current.visual(flattened.to(device, dtype=torch.float32), grid)
                 return merged, {"grid": grid, "deepstack": deepstack}
             return original_preprocess(embed, device)
 
@@ -453,35 +351,18 @@ class MiniMaxH3ProjectedCLIP:
                 embeds_info = kwargs.get("embeds_info", [])
                 embeds = kwargs.get("embeds")
                 if embeds is not None:
-                    self._capture["tags"] = token_tags_from_embeds_info(
-                        embeds.shape[1], embeds_info
-                    )
+                    self._capture["tags"] = token_tags_from_embeds_info(embeds.shape[1], embeds_info)
             return original_forward(*args, **kwargs)
 
-        self._cache_owned_methods = {
-            f"{prefix}.preprocess_embed": types.MethodType(preprocess_embed, transformer),
-            f"{prefix}.forward": types.MethodType(forward, transformer),
-        }
+        self._cache_owned_methods = {f"{prefix}.preprocess_embed": types.MethodType(preprocess_embed, transformer), f"{prefix}.forward": types.MethodType(forward, transformer)}
         for path, method in self._cache_owned_methods.items():
             self._base.patcher.add_object_patch(path, method)
 
     def h3_cache_identity(self):
-        return {
-            "base": self._base, "model": self._projection_model,
-            "patcher": self._projection_patcher, "name": self._projection_name,
-            "source": self._source_key, "tap": self._projection_model.tap,
-            "original_methods": self._original_methods,
-            "owned_methods": self._cache_owned_methods,
-        }
+        return {"base": self._base, "model": self._projection_model, "patcher": self._projection_patcher, "name": self._projection_name, "source": self._source_key, "tap": self._projection_model.tap, "original_methods": self._original_methods, "owned_methods": self._cache_owned_methods}
 
     def clone(self):
-        return MiniMaxH3ProjectedCLIP(
-            self._base.clone(),
-            self._projection_name,
-            projection_model=self._projection_model,
-            projection_patcher=self._projection_patcher.clone(),
-            original_methods=self._original_methods,
-        )
+        return MiniMaxH3ProjectedCLIP(self._base.clone(), self._projection_name, projection_model=self._projection_model, projection_patcher=self._projection_patcher.clone(), original_methods=self._original_methods)
 
     def tokenize(self, text: str, return_word_ids: bool = False, **kwargs):
         return self.tokenizer.tokenize_with_weights(text, return_word_ids, **kwargs)
@@ -513,12 +394,7 @@ class MiniMaxH3ProjectedCLIP:
         return projected.to(comfy.model_management.intermediate_device())
 
     def encode_from_tokens(self, tokens, return_pooled=False, return_dict=False):
-        output, tags = self._capture_encode(
-            lambda source: self._base.encode_from_tokens(
-                source, return_pooled=True, return_dict=True
-            ),
-            tokens,
-        )
+        output, tags = self._capture_encode(lambda source: self._base.encode_from_tokens(source, return_pooled=True, return_dict=True), tokens)
         output["cond"] = self._project(output["cond"])
         output["minimax_token_tags"] = tags
         if return_dict:
@@ -528,18 +404,8 @@ class MiniMaxH3ProjectedCLIP:
             return output["cond"], pooled
         return output["cond"]
 
-    def encode_from_tokens_scheduled(
-        self, tokens, unprojected=False, add_dict={}, show_pbar=True
-    ):
-        conditioning, tags = self._capture_encode(
-            lambda source: self._base.encode_from_tokens_scheduled(
-                source,
-                unprojected=unprojected,
-                add_dict=add_dict,
-                show_pbar=show_pbar,
-            ),
-            tokens,
-        )
+    def encode_from_tokens_scheduled(self, tokens, unprojected=False, add_dict={}, show_pbar=True):
+        conditioning, tags = self._capture_encode(lambda source: self._base.encode_from_tokens_scheduled(source, unprojected=unprojected, add_dict=add_dict, show_pbar=show_pbar), tokens)
         projected = []
         for hidden, metadata in conditioning:
             metadata = metadata.copy()
@@ -555,11 +421,7 @@ def patch_minimax_h3_clip_projection(clip: Any, projection_name: str) -> MiniMax
 PDD_VIDEO_SHIFT = 12.0
 PDD_AUDIO_SHIFT = 3.0
 PDD_KNOT_TOLERANCE = 1e-4
-PDD_DEFAULT_PARTITIONS = {
-    5: (8, 8, 8, 4, 4),
-    6: (8, 8, 4, 4, 4, 4),
-    7: (8, 4, 4, 4, 4, 4, 4),
-}
+PDD_DEFAULT_PARTITIONS = {5: (8, 8, 8, 4, 4), 6: (8, 8, 4, 4, 4, 4), 7: (8, 4, 4, 4, 4, 4, 4)}
 PDD_HEAD_KEYS = ("proj_out.weight", "proj_out.bias", "audio_proj_out.weight", "audio_proj_out.bias")
 PDD_WRAPPER_KEY = "utilscollection_minimax_h3_pdd_acc"
 PDD_ADDITIONAL_MODEL_KEY = "utilscollection_minimax_h3_pdd_heads"
@@ -667,7 +529,7 @@ def convert_pdd_lora(state_dict: dict[str, torch.Tensor], alpha: float) -> tuple
         down = torch.cat([part[0] for part in parts], dim=0)
         up = torch.zeros(output * 3, rank * 3, dtype=parts[0][1].dtype)
         for index, (_, value) in enumerate(parts):
-            up[index * output:(index + 1) * output, index * rank:(index + 1) * rank] = value
+            up[index * output : (index + 1) * output, index * rank : (index + 1) * rank] = value
         emit(f"{destination}.attn.qkv_proj", down, up, alpha * 3.0)
 
     def convert_linear(source, destination, half_swap=False):
@@ -738,7 +600,7 @@ def rebase_pdd_adaln(lora_state: dict[str, torch.Tensor], center: torch.Tensor, 
     for key in list(rebased):
         if not key.endswith(".adaln_proj.linear.lora_A.weight"):
             continue
-        module = key[:-len(".lora_A.weight")]
+        module = key[: -len(".lora_A.weight")]
         down = rebased.pop(f"{module}.lora_A.weight").to(torch.float64)
         up = rebased.pop(f"{module}.lora_B.weight").to(torch.float64)
         alpha = rebased.pop(f"{module}.alpha", None)
@@ -788,6 +650,7 @@ class MiniMaxH3PDDExecutionState:
 
 
 def make_pdd_diffusion_wrapper(state: MiniMaxH3PDDExecutionState):
+
     def pdd_diffusion_wrapper(executor, x, timestep, context, transformer_options=None, **kwargs):
         options = transformer_options or {}
         diffusion_model = executor.class_obj
@@ -804,10 +667,12 @@ def make_pdd_diffusion_wrapper(state: MiniMaxH3PDDExecutionState):
             return executor(x, timestep, context, options, **kwargs)
         finally:
             state.sigma.reset(token)
+
     return pdd_diffusion_wrapper
 
 
 def make_pdd_final_forward(final_layer: Any, head_bank: MiniMaxH3PDDHeadBank, state: MiniMaxH3PDDExecutionState, bounds: tuple[float, ...], on_off_grid: str, strength: float):
+
     def pdd_final_forward(self, x, t_emb, video_seg, audio_seg):
         sigma = state.sigma.get()
         if sigma is None:
@@ -828,6 +693,7 @@ def make_pdd_final_forward(final_layer: Any, head_bank: MiniMaxH3PDDHeadBank, st
             video = native_video + (video - native_video) * strength
             audio = native_audio + (audio - native_audio) * strength
         return video, audio
+
     return types.MethodType(pdd_final_forward, final_layer)
 
 
@@ -894,10 +760,13 @@ def _extract_window_key(args: dict[str, Any]) -> Any:
             win_part = tuple(int(x) for x in index_list)
         else:
             win_part = id(context_window)
+    tile_part = transformer_options.get("uc_spatial_tile")
     cond_part = tuple(transformer_options.get("cond_or_uncond", ()))
-    if win_part is None and not cond_part:
+    if win_part is None and tile_part is None and not cond_part:
         return None
-    return (win_part, cond_part)
+    if tile_part is None:
+        return (win_part, cond_part)
+    return (win_part, tile_part, cond_part)
 
 
 class _MiniMaxH3WindowState:
@@ -929,15 +798,7 @@ class _MiniMaxH3WindowState:
 class MiniMaxH3Cache:
     """Reuse the residual produced by the complete MiniMax H3 block stack."""
 
-    def __init__(
-        self,
-        reuse_threshold: float,
-        start_percent: float,
-        end_percent: float,
-        max_steps: int,
-        device: str,
-        verbose: bool,
-    ) -> None:
+    def __init__(self, reuse_threshold: float, start_percent: float, end_percent: float, max_steps: int, device: str, verbose: bool) -> None:
         self.reuse_threshold = reuse_threshold
         self.start_percent = start_percent
         self.end_percent = end_percent
@@ -1051,21 +912,11 @@ class MiniMaxH3Cache:
             total = self.run_count + self.skip_count
             speedup = total / max(1, self.run_count)
             win_count = max(1, len(self._window_states))
-            logging.info(
-                "[UtilsCollection MiniMax H3 Cache] Skipped %s/%s block-stack "
-                "executions (%.2fx theoretical block-stack speedup across %s window(s)).",
-                self.skip_count,
-                total,
-                speedup,
-                win_count,
-            )
+            logging.info("[UtilsCollection MiniMax H3 Cache] Skipped %s/%s block-stack executions (%.2fx theoretical block-stack speedup across %s window(s)).", self.skip_count, total, speedup, win_count)
         self.reset()
 
     @staticmethod
-    def _feature_signature(
-        hidden_states: torch.Tensor,
-        cache_ranges: tuple[tuple[int, int], ...],
-    ) -> torch.Tensor:
+    def _feature_signature(hidden_states: torch.Tensor, cache_ranges: tuple[tuple[int, int], ...]) -> torch.Tensor:
         max_dim = min(64, hidden_states.shape[-1])
         signatures = []
         for start, end in cache_ranges:
@@ -1096,9 +947,7 @@ class MiniMaxH3Cache:
         if state is None:
             state = self._active_state
         if self.device == "cuda" and residual.device.type != "cuda":
-            raise ValueError(
-                "MiniMax H3 cache device is set to cuda, but the model is not running on CUDA."
-            )
+            raise ValueError("MiniMax H3 cache device is set to cuda, but the model is not running on CUDA.")
 
         if self.device == "cpu":
             target_device = torch.device("cpu")
@@ -1114,12 +963,7 @@ class MiniMaxH3Cache:
         residual = residual.detach()
         try:
             buffer = state.residual_buffer
-            if (
-                buffer is None
-                or buffer.shape != residual.shape
-                or buffer.dtype != residual.dtype
-                or buffer.device != target_device
-            ):
+            if buffer is None or buffer.shape != residual.shape or buffer.dtype != residual.dtype or buffer.device != target_device:
                 buffer = torch.empty(residual.shape, dtype=residual.dtype, device=target_device)
                 state.residual_buffer = buffer
             buffer.copy_(residual, non_blocking=(target_device.type == "cuda"))
@@ -1137,11 +981,7 @@ class MiniMaxH3Cache:
         if residual is None:
             return hidden_states
         if residual.device != hidden_states.device or residual.dtype != hidden_states.dtype:
-            residual = residual.to(
-                device=hidden_states.device,
-                dtype=hidden_states.dtype,
-                non_blocking=True,
-            )
+            residual = residual.to(device=hidden_states.device, dtype=hidden_states.dtype, non_blocking=True)
         return hidden_states + residual
 
     def __call__(self, args: dict[str, Any], extra_options: dict[str, Any]) -> dict[str, Any]:
@@ -1151,13 +991,7 @@ class MiniMaxH3Cache:
         state = self._get_window_state(window_key)
 
         cache_ranges = tuple(tuple(pair) for pair in args.get("cache_ranges", ()))
-        current_layout = (
-            tuple(hidden_states.shape),
-            hidden_states.dtype,
-            hidden_states.device,
-            args.get("block_count"),
-            cache_ranges,
-        )
+        current_layout = (tuple(hidden_states.shape), hidden_states.dtype, hidden_states.device, args.get("block_count"), cache_ranges)
 
         if state.layout_signature is None:
             state.layout_signature = current_layout
@@ -1191,14 +1025,7 @@ class MiniMaxH3Cache:
                 state.consecutive_skips += 1
                 if self.verbose:
                     win_tag = f" [window {window_key[0][0]}..{window_key[0][1]}]" if (window_key and window_key[0]) else ""
-                    logging.info(
-                        "[UtilsCollection MiniMax H3 Cache%s] Step %s SKIP "
-                        "(relative L1 %.4f < %.4f).",
-                        win_tag,
-                        state.step_counter,
-                        state.accumulated_relative_l1,
-                        self.reuse_threshold,
-                    )
+                    logging.info("[UtilsCollection MiniMax H3 Cache%s] Step %s SKIP (relative L1 %.4f < %.4f).", win_tag, state.step_counter, state.accumulated_relative_l1, self.reuse_threshold)
                 return {"img": self._apply_residual(hidden_states, state)}
 
             reasons = []
@@ -1212,12 +1039,7 @@ class MiniMaxH3Cache:
 
         if self.verbose:
             win_tag = f" [window {window_key[0][0]}..{window_key[0][1]}]" if (window_key and window_key[0]) else ""
-            logging.info(
-                "[UtilsCollection MiniMax H3 Cache%s] Step %s RUN (%s).",
-                win_tag,
-                state.step_counter,
-                skip_reason,
-            )
+            logging.info("[UtilsCollection MiniMax H3 Cache%s] Step %s RUN (%s).", win_tag, state.step_counter, skip_reason)
 
         self.run_count += 1
         state.consecutive_skips = 0
@@ -1230,18 +1052,10 @@ class MiniMaxH3Cache:
         except Exception:
             offload_baseline = self.device == "cpu"
 
-        start_hidden_states = (
-            hidden_states.detach().cpu()
-            if offload_baseline
-            else hidden_states.detach().clone()
-        )
+        start_hidden_states = hidden_states.detach().cpu() if offload_baseline else hidden_states.detach().clone()
         result = original_block(args)
         output = result["img"]
-        diff = output - (
-            start_hidden_states.to(output.device)
-            if offload_baseline
-            else start_hidden_states
-        )
+        diff = output - (start_hidden_states.to(output.device) if offload_baseline else start_hidden_states)
         del start_hidden_states
         self._store_residual(diff, state)
         del diff
@@ -1270,76 +1084,30 @@ class MiniMaxH3SamplingScope:
             self.cache.finish()
 
 
-def run_minimax_h3_blocks(
-    model: minimax_model.MiniMaxH3Model,
-    hidden_states: torch.Tensor,
-    timestep_embedding: torch.Tensor,
-    mod_segments: list[tuple[int, int, int]],
-    rope_freqs: torch.Tensor,
-    transformer_options: dict[str, Any],
-    start: int = 0,
-    end: int | None = None,
-) -> torch.Tensor:
+def run_minimax_h3_blocks(model: minimax_model.MiniMaxH3Model, hidden_states: torch.Tensor, timestep_embedding: torch.Tensor, mod_segments: list[tuple[int, int, int]], rope_freqs: torch.Tensor, transformer_options: dict[str, Any], start: int = 0, end: int | None = None) -> torch.Tensor:
     """Run a bounded H3 block range while preserving Core block replacements."""
 
     blocks_replace = transformer_options.get("patches_replace", {}).get("dit", {})
     end = len(model.blocks) if end is None else end
     blocks = list(model.blocks[start:end])
-    prefetch_queue = comfy.model_prefetch.make_prefetch_queue(
-        blocks, hidden_states.device, transformer_options
-    )
+    prefetch_queue = comfy.model_prefetch.make_prefetch_queue(blocks, hidden_states.device, transformer_options)
     for index in range(start, end):
         block = model.blocks[index]
-        comfy.model_prefetch.prefetch_queue_pop(
-            prefetch_queue, hidden_states.device, block, malloc_scope="block"
-        )
+        comfy.model_prefetch.prefetch_queue_pop(prefetch_queue, hidden_states.device, block, malloc_scope="block")
         if ("double_block", index) in blocks_replace:
 
             def block_wrapper(block_args: dict[str, Any]) -> dict[str, torch.Tensor]:
-                return {
-                    "img": block(
-                        block_args["img"],
-                        block_args["t_emb"],
-                        block_args["mod_segments"],
-                        block_args["rope_freqs"],
-                        transformer_options=block_args["transformer_options"],
-                    )
-                }
+                return {"img": block(block_args["img"], block_args["t_emb"], block_args["mod_segments"], block_args["rope_freqs"], transformer_options=block_args["transformer_options"])}
 
-            hidden_states = blocks_replace[("double_block", index)](
-                {
-                    "img": hidden_states,
-                    "t_emb": timestep_embedding,
-                    "mod_segments": mod_segments,
-                    "rope_freqs": rope_freqs,
-                    "transformer_options": transformer_options,
-                },
-                {"original_block": block_wrapper},
-            )["img"]
+            hidden_states = blocks_replace[("double_block", index)]({"img": hidden_states, "t_emb": timestep_embedding, "mod_segments": mod_segments, "rope_freqs": rope_freqs, "transformer_options": transformer_options}, {"original_block": block_wrapper})["img"]
         else:
-            hidden_states = block(
-                hidden_states,
-                timestep_embedding,
-                mod_segments,
-                rope_freqs,
-                transformer_options=transformer_options,
-            )
+            hidden_states = block(hidden_states, timestep_embedding, mod_segments, rope_freqs, transformer_options=transformer_options)
     if prefetch_queue is not None:
-        comfy.model_prefetch.prefetch_queue_pop(
-            prefetch_queue, hidden_states.device, None, malloc_scope="block"
-        )
+        comfy.model_prefetch.prefetch_queue_pop(prefetch_queue, hidden_states.device, None, malloc_scope="block")
     return hidden_states
 
 
-def minimax_h3_block_patch_forward(
-    self: minimax_model.MiniMaxH3Model,
-    x: list[torch.Tensor],
-    timestep: torch.Tensor,
-    context: torch.Tensor,
-    transformer_options: dict[str, Any] = {},
-    minimax_payload: dict[str, Any] | None = None,
-    **kwargs: Any,
-) -> list[torch.Tensor]:
+def minimax_h3_block_patch_forward(self: minimax_model.MiniMaxH3Model, x: list[torch.Tensor], timestep: torch.Tensor, context: torch.Tensor, transformer_options: dict[str, Any] = {}, minimax_payload: dict[str, Any] | None = None, **kwargs: Any) -> list[torch.Tensor]:
     """Current Core H3 forward with one model-patchable block-loop boundary."""
 
     del kwargs
@@ -1357,58 +1125,22 @@ def minimax_h3_block_patch_forward(
     text_len = context.shape[1]
     layout = payload.get("layout")
     if layout is None or layout.signature != (text_len, latent_t, lat_h, lat_w, audio_t):
-        layout = minimax_model.PackedLayout(
-            text_len,
-            latent_t,
-            lat_h,
-            lat_w,
-            audio_t,
-            keyframes=payload.get("keyframes"),
-            refs=payload.get("refs"),
-        )
+        layout = minimax_model.PackedLayout(text_len, latent_t, lat_h, lat_w, audio_t, keyframes=payload.get("keyframes"), refs=payload.get("refs"))
 
-    shift_v = float(
-        transformer_options.get("minimax_h3_sigma_shift_video", self.sigma_shift_video)
-    )
-    shift_a = float(
-        transformer_options.get("minimax_h3_sigma_shift_audio", self.sigma_shift_audio)
-    )
+    shift_v = float(transformer_options.get("minimax_h3_sigma_shift_video", self.sigma_shift_video))
+    shift_a = float(transformer_options.get("minimax_h3_sigma_shift_audio", self.sigma_shift_audio))
     sigma_v = (timestep.flatten()[0] / 1000.0).float().clamp(min=1e-6)
     t_v = float(1.0 - sigma_v)
     t_a = float(1.0 - minimax_model.time_shift_sigma(sigma_v, shift_v, shift_a))
 
-    vis_aug = float(
-        payload.get("visual_cond_noise_aug", minimax_model.VISUAL_COND_TIMESTEP)
-    )
-    aud_aug = float(
-        payload.get("audio_cond_noise_aug", minimax_model.AUDIO_COND_TIMESTEP)
-    )
+    vis_aug = float(payload.get("visual_cond_noise_aug", minimax_model.VISUAL_COND_TIMESTEP))
+    aud_aug = float(payload.get("audio_cond_noise_aug", minimax_model.AUDIO_COND_TIMESTEP))
     has_vis_cond = any(kind in ("cond", "ref_img") for _, _, kind in layout.segments)
     has_aud_cond = any(kind in ("cond_audio", "ref_audio") for _, _, kind in layout.segments)
-    seg_t = {
-        "text": t_v,
-        "video": t_v,
-        "audio": t_a,
-        "cond": max(t_v, vis_aug),
-        "ref_img": max(t_v, vis_aug),
-        "cond_audio": max(t_a, aud_aug),
-        "ref_audio": max(t_a, aud_aug),
-    }
-    unique_t = sorted(
-        {t_v, t_a}
-        | ({seg_t["cond"]} if has_vis_cond else set())
-        | ({seg_t["cond_audio"]} if has_aud_cond else set())
-    )
+    seg_t = {"text": t_v, "video": t_v, "audio": t_a, "cond": max(t_v, vis_aug), "ref_img": max(t_v, vis_aug), "cond_audio": max(t_a, aud_aug), "ref_audio": max(t_a, aud_aug)}
+    unique_t = sorted({t_v, t_a} | ({seg_t["cond"]} if has_vis_cond else set()) | ({seg_t["cond_audio"]} if has_aud_cond else set()))
     t_row = {value: index for index, value in enumerate(unique_t)}
-    seg_tag = {
-        "text": 1,
-        "video": 0,
-        "audio": 2,
-        "cond": 0,
-        "ref_img": 0,
-        "cond_audio": 2,
-        "ref_audio": 2,
-    }
+    seg_tag = {"text": 1, "video": 0, "audio": 2, "cond": 0, "ref_img": 0, "cond_audio": 2, "ref_audio": 2}
 
     text_tags = payload.get("text_token_tags")
     mod_segments = []
@@ -1419,17 +1151,13 @@ def minimax_h3_block_patch_forward(
             run_start = 0
             for index in range(1, end - start + 1):
                 if index == end - start or tags[index] != tags[run_start]:
-                    mod_segments.append(
-                        (start + run_start, start + index, row_base + int(tags[run_start]))
-                    )
+                    mod_segments.append((start + run_start, start + index, row_base + int(tags[run_start])))
                     run_start = index
         else:
             mod_segments.append((start, end, row_base + seg_tag[kind]))
 
     if hasattr(self, "_embed_and_pack"):
-        hidden_states = self._embed_and_pack(
-            video_x, audio_x, context, layout, payload, transformer_options
-        )
+        hidden_states = self._embed_and_pack(video_x, audio_x, context, layout, payload, transformer_options)
     else:
         img_update = layout.img_update.to(device)
         audio_update = layout.audio_update.to(device)
@@ -1440,16 +1168,12 @@ def minimax_h3_block_patch_forward(
 
         all_video_rows = video_rows
         if cond_video_rows is not None:
-            all_video_rows = torch.empty(
-                img_update.shape[0], video_rows.shape[1], dtype=torch.float32, device=device
-            )
+            all_video_rows = torch.empty(img_update.shape[0], video_rows.shape[1], dtype=torch.float32, device=device)
             all_video_rows[~img_update] = cond_video_rows
             all_video_rows[img_update] = video_rows
         all_audio_rows = audio_rows
         if cond_audio_rows is not None:
-            all_audio_rows = torch.empty(
-                audio_update.shape[0], audio_rows.shape[1], dtype=torch.float32, device=device
-            )
+            all_audio_rows = torch.empty(audio_update.shape[0], audio_rows.shape[1], dtype=torch.float32, device=device)
             all_audio_rows[~audio_update] = cond_audio_rows
             all_audio_rows[audio_update] = audio_rows
 
@@ -1457,13 +1181,9 @@ def minimax_h3_block_patch_forward(
         audio_embed = self.audio_patch_proj(all_audio_rows).to(dtype)
         text_states = context[0]
         if text_states.shape[-1] != self.hidden_size:
-            text_states = self.token_refiner(
-                self.condition_proj(text_states), transformer_options=transformer_options
-            )
+            text_states = self.token_refiner(self.condition_proj(text_states), transformer_options=transformer_options)
 
-        hidden_states = torch.empty(
-            layout.seq_len, self.hidden_size, dtype=dtype, device=device
-        )
+        hidden_states = torch.empty(layout.seq_len, self.hidden_size, dtype=dtype, device=device)
         video_offset = audio_offset = 0
         for start, end, kind in layout.segments:
             length = end - start
@@ -1484,36 +1204,17 @@ def minimax_h3_block_patch_forward(
         table = comfy.model_management.cast_to(self.adaln_t_table, device=device)
         position = t_values.clamp(0.0, 1.0) * (table.shape[0] - 1)
         lower = position.floor().long().clamp(max=table.shape[0] - 2)
-        timestep_embedding = torch.lerp(
-            table[lower], table[lower + 1], (position - lower).unsqueeze(1)
-        )
+        timestep_embedding = torch.lerp(table[lower], table[lower + 1], (position - lower).unsqueeze(1))
     else:
         timestep_embedding = self.time_embedder(t_values).to(dtype)
 
-    rope_freqs = minimax_model.rope_rotation_table(
-        self.rope_freqs(layout.position_ids, device), dtype
-    )
+    rope_freqs = minimax_model.rope_rotation_table(self.rope_freqs(layout.position_ids, device), dtype)
     blocks_replace = transformer_options.get("patches_replace", {}).get("dit", {})
-    cache_ranges = tuple(
-        (start, end)
-        for start, end, kind in layout.segments
-        if kind in ("audio", "video")
-    )
+    cache_ranges = tuple((start, end) for start, end, kind in layout.segments if kind in ("audio", "video"))
     if ("block_loop", 0) in blocks_replace:
 
         def block_loop_wrapper(block_args: dict[str, Any]) -> dict[str, torch.Tensor]:
-            return {
-                "img": run_minimax_h3_blocks(
-                    self,
-                    block_args["img"],
-                    block_args["t_emb"],
-                    block_args["mod_segments"],
-                    block_args["rope_freqs"],
-                    block_args["transformer_options"],
-                    block_args.get("start", 0),
-                    block_args.get("end"),
-                )
-            }
+            return {"img": run_minimax_h3_blocks(self, block_args["img"], block_args["t_emb"], block_args["mod_segments"], block_args["rope_freqs"], block_args["transformer_options"], block_args.get("start", 0), block_args.get("end"))}
 
         hidden_states = blocks_replace[("block_loop", 0)](
             {
@@ -1524,69 +1225,24 @@ def minimax_h3_block_patch_forward(
                 "rope_freqs": rope_freqs,
                 "transformer_options": transformer_options,
                 "cache_ranges": cache_ranges,
-                "target_ranges": tuple(
-                    (start, end, kind)
-                    for start, end, kind in layout.segments
-                    if kind in ("audio", "video")
-                ),
+                "target_ranges": tuple((start, end, kind) for start, end, kind in layout.segments if kind in ("audio", "video")),
                 "block_count": len(self.blocks),
             },
             {"original_block": block_loop_wrapper},
         )["img"]
     else:
-        hidden_states = run_minimax_h3_blocks(
-            self,
-            hidden_states,
-            timestep_embedding,
-            mod_segments,
-            rope_freqs,
-            transformer_options,
-        )
+        hidden_states = run_minimax_h3_blocks(self, hidden_states, timestep_embedding, mod_segments, rope_freqs, transformer_options)
 
-    video_seg = next(
-        (start, end, t_row[seg_t["video"]])
-        for start, end, kind in layout.segments
-        if kind == "video"
-    )
-    audio_seg = next(
-        (start, end, t_row[seg_t["audio"]])
-        for start, end, kind in layout.segments
-        if kind == "audio"
-    )
-    video_result, audio_result = self.final_layer(
-        hidden_states,
-        timestep_embedding,
-        video_seg,
-        audio_seg,
-        sigma_v,
-        transformer_options.get("sample_sigmas"),
-        (shift_v, shift_a),
-    )
-    video_out = minimax_model.unpatchify_video(
-        video_result,
-        latent_t,
-        lat_h // 2,
-        lat_w // 2,
-        self.latents_dim,
-        self.patch_size,
-    )
+    video_seg = next((start, end, t_row[seg_t["video"]]) for start, end, kind in layout.segments if kind == "video")
+    audio_seg = next((start, end, t_row[seg_t["audio"]]) for start, end, kind in layout.segments if kind == "audio")
+    video_result, audio_result = self.final_layer(hidden_states, timestep_embedding, video_seg, audio_seg, sigma_v, transformer_options.get("sample_sigmas"), (shift_v, shift_a))
+    video_out = minimax_model.unpatchify_video(video_result, latent_t, lat_h // 2, lat_w // 2, self.latents_dim, self.patch_size)
     video_out = video_out[:, :, :orig_t, :orig_h, :orig_w]
     audio_out = minimax_model.unpack_audio(audio_result)
-    return [
-        -video_out.to(out_v_dtype),
-        -audio_out.to(out_a_dtype),
-    ]
+    return [-video_out.to(out_v_dtype), -audio_out.to(out_a_dtype)]
 
 
-def patch_minimax_h3_cache_model(
-    model: Any,
-    reuse_threshold: float,
-    start_percent: float,
-    end_percent: float,
-    max_steps: int,
-    device: str,
-    verbose: bool,
-) -> Any:
+def patch_minimax_h3_cache_model(model: Any, reuse_threshold: float, start_percent: float, end_percent: float, max_steps: int, device: str, verbose: bool) -> Any:
     """Return a cloned patcher with a reversible H3 block-loop cache."""
 
     if start_percent > end_percent:
@@ -1595,66 +1251,29 @@ def patch_minimax_h3_cache_model(
     patched_model = model.clone()
     diffusion_model = patched_model.model.diffusion_model
     if not isinstance(diffusion_model, minimax_model.MiniMaxH3Model):
-        raise ValueError(
-            "MiniMax H3 Cache requires a MiniMax H3 diffusion model; "
-            f"received {diffusion_model.__class__.__name__}."
-        )
+        raise ValueError(f"MiniMax H3 Cache requires a MiniMax H3 diffusion model; received {diffusion_model.__class__.__name__}.")
 
-    cache = MiniMaxH3Cache(
-        reuse_threshold=reuse_threshold,
-        start_percent=start_percent,
-        end_percent=end_percent,
-        max_steps=max_steps,
-        device=device,
-        verbose=verbose,
-    )
+    cache = MiniMaxH3Cache(reuse_threshold=reuse_threshold, start_percent=start_percent, end_percent=end_percent, max_steps=max_steps, device=device, verbose=verbose)
     if hasattr(patched_model, "model_options"):
         patched_model.model_options[MINIMAX_H3_CACHE_OWNER_KEY] = True
     bound_forward = types.MethodType(minimax_h3_block_patch_forward, diffusion_model)
     patched_model.add_object_patch("diffusion_model._forward", bound_forward)
     patched_model.set_model_patch_replace(cache, "dit", "block_loop", 0)
-    patched_model.add_wrapper(
-        comfy.patcher_extension.WrappersMP.OUTER_SAMPLE,
-        MiniMaxH3SamplingScope(cache),
-    )
+    patched_model.add_wrapper(comfy.patcher_extension.WrappersMP.OUTER_SAMPLE, MiniMaxH3SamplingScope(cache))
     return patched_model
 
 
 DIFFUSION_CACHE_PRESETS = {
-    "balanced": {
-        "composition_cutoff": 0.75,
-        "detail_protection": 0.15,
-        "base_threshold": 0.05,
-        "max_noise_span": 0.20,
-    },
-    "high_fidelity": {
-        "composition_cutoff": 0.65,
-        "detail_protection": 0.25,
-        "base_threshold": 0.03,
-        "max_noise_span": 0.12,
-    },
-    "high_speed": {
-        "composition_cutoff": 0.85,
-        "detail_protection": 0.10,
-        "base_threshold": 0.08,
-        "max_noise_span": 0.30,
-    },
+    "balanced": {"composition_cutoff": 0.75, "detail_protection": 0.15, "base_threshold": 0.05, "max_noise_span": 0.20},
+    "high_fidelity": {"composition_cutoff": 0.65, "detail_protection": 0.25, "base_threshold": 0.03, "max_noise_span": 0.12},
+    "high_speed": {"composition_cutoff": 0.85, "detail_protection": 0.10, "base_threshold": 0.08, "max_noise_span": 0.30},
 }
 
 
 class MiniMaxH3DiffusionCache(MiniMaxH3Cache):
     """Reuse MiniMax H3 block residual anchored to physical diffusion noise phases."""
 
-    def __init__(
-        self,
-        preset: str = "balanced",
-        composition_cutoff: float = 0.75,
-        detail_protection: float = 0.15,
-        drift_tolerance: float = 1.0,
-        max_noise_span: float = 0.20,
-        device: str = "auto",
-        verbose: bool = False,
-    ) -> None:
+    def __init__(self, preset: str = "balanced", composition_cutoff: float = 0.75, detail_protection: float = 0.15, drift_tolerance: float = 1.0, max_noise_span: float = 0.20, device: str = "auto", verbose: bool = False) -> None:
         self.preset = preset
         self.device = device
         self.verbose = verbose
@@ -1719,14 +1338,7 @@ class MiniMaxH3DiffusionCache(MiniMaxH3Cache):
             total = self.run_count + self.skip_count
             speedup = total / max(1, self.run_count)
             win_count = max(1, len(self._window_states))
-            logging.info(
-                "[UtilsCollection MiniMax H3 Diffusion Cache] Skipped %s/%s block-stack "
-                "executions (%.2fx speedup across %s window(s)).",
-                self.skip_count,
-                total,
-                speedup,
-                win_count,
-            )
+            logging.info("[UtilsCollection MiniMax H3 Diffusion Cache] Skipped %s/%s block-stack executions (%.2fx speedup across %s window(s)).", self.skip_count, total, speedup, win_count)
         self.reset()
 
     def _normalize_sigma(self, timestep: float) -> float:
@@ -1755,13 +1367,7 @@ class MiniMaxH3DiffusionCache(MiniMaxH3Cache):
         state = self._get_window_state(window_key)
 
         cache_ranges = tuple(tuple(pair) for pair in args.get("cache_ranges", ()))
-        current_layout = (
-            tuple(hidden_states.shape),
-            hidden_states.dtype,
-            hidden_states.device,
-            args.get("block_count"),
-            cache_ranges,
-        )
+        current_layout = (tuple(hidden_states.shape), hidden_states.dtype, hidden_states.device, args.get("block_count"), cache_ranges)
 
         if state.layout_signature is None:
             state.layout_signature = current_layout
@@ -1799,48 +1405,24 @@ class MiniMaxH3DiffusionCache(MiniMaxH3Cache):
                 state.consecutive_skips += 1
                 if self.verbose:
                     win_tag = f" [window {window_key[0][0]}..{window_key[0][1]}]" if (window_key and window_key[0]) else ""
-                    logging.info(
-                        "[UtilsCollection MiniMax H3 Diffusion Cache%s] Step %s (noise %.3f) SKIP "
-                        "(relative L1 %.4f < %.4f, delta noise %.3f <= %.3f).",
-                        win_tag,
-                        state.step_counter,
-                        normalized_noise,
-                        state.accumulated_relative_l1,
-                        self.reuse_threshold,
-                        noise_delta,
-                        self.max_noise_span,
-                    )
+                    logging.info("[UtilsCollection MiniMax H3 Diffusion Cache%s] Step %s (noise %.3f) SKIP (relative L1 %.4f < %.4f, delta noise %.3f <= %.3f).", win_tag, state.step_counter, normalized_noise, state.accumulated_relative_l1, self.reuse_threshold, noise_delta, self.max_noise_span)
                 return {"img": self._apply_residual(hidden_states, state)}
 
             reasons = []
             if not in_cache_phase:
                 if normalized_noise > self.composition_cutoff:
-                    reasons.append(
-                        f"macro composition phase (noise {normalized_noise:.3f} > {self.composition_cutoff:.3f})"
-                    )
+                    reasons.append(f"macro composition phase (noise {normalized_noise:.3f} > {self.composition_cutoff:.3f})")
                 else:
-                    reasons.append(
-                        f"micro detail phase (noise {normalized_noise:.3f} < {self.detail_protection:.3f})"
-                    )
+                    reasons.append(f"micro detail phase (noise {normalized_noise:.3f} < {self.detail_protection:.3f})")
             if not within_noise_budget:
-                reasons.append(
-                    f"max noise span reached (delta {noise_delta:.3f} > {self.max_noise_span:.3f})"
-                )
+                reasons.append(f"max noise span reached (delta {noise_delta:.3f} > {self.max_noise_span:.3f})")
             if not below_threshold:
-                reasons.append(
-                    f"drift threshold reached (L1 {state.accumulated_relative_l1:.4f} >= {self.reuse_threshold:.4f})"
-                )
+                reasons.append(f"drift threshold reached (L1 {state.accumulated_relative_l1:.4f} >= {self.reuse_threshold:.4f})")
             skip_reason = ", ".join(reasons)
 
         if self.verbose:
             win_tag = f" [window {window_key[0][0]}..{window_key[0][1]}]" if (window_key and window_key[0]) else ""
-            logging.info(
-                "[UtilsCollection MiniMax H3 Diffusion Cache%s] Step %s (noise %.3f) RUN (%s).",
-                win_tag,
-                state.step_counter,
-                normalized_noise,
-                skip_reason,
-            )
+            logging.info("[UtilsCollection MiniMax H3 Diffusion Cache%s] Step %s (noise %.3f) RUN (%s).", win_tag, state.step_counter, normalized_noise, skip_reason)
 
         self.run_count += 1
         state.consecutive_skips = 0
@@ -1854,18 +1436,10 @@ class MiniMaxH3DiffusionCache(MiniMaxH3Cache):
         except Exception:
             offload_baseline = self.device == "cpu"
 
-        start_hidden_states = (
-            hidden_states.detach().cpu()
-            if offload_baseline
-            else hidden_states.detach().clone()
-        )
+        start_hidden_states = hidden_states.detach().cpu() if offload_baseline else hidden_states.detach().clone()
         result = original_block(args)
         output = result["img"]
-        diff = output - (
-            start_hidden_states.to(output.device)
-            if offload_baseline
-            else start_hidden_states
-        )
+        diff = output - (start_hidden_states.to(output.device) if offload_baseline else start_hidden_states)
         del start_hidden_states
         self._store_residual(diff, state)
         del diff
@@ -1894,23 +1468,11 @@ class MiniMaxH3DiffusionSamplingScope:
             self.cache.finish()
 
 
-def patch_minimax_h3_diffusion_cache_model(
-    model: Any,
-    preset: str = "balanced",
-    composition_cutoff: float = 0.75,
-    detail_protection: float = 0.15,
-    drift_tolerance: float = 1.0,
-    max_noise_span: float = 0.20,
-    device: str = "auto",
-    verbose: bool = False,
-) -> Any:
+def patch_minimax_h3_diffusion_cache_model(model: Any, preset: str = "balanced", composition_cutoff: float = 0.75, detail_protection: float = 0.15, drift_tolerance: float = 1.0, max_noise_span: float = 0.20, device: str = "auto", verbose: bool = False) -> Any:
     """Return a cloned patcher with a physical diffusion-aware H3 block-loop cache."""
 
     if preset == "custom" and composition_cutoff < detail_protection:
-        raise ValueError(
-            f"Composition cutoff noise level ({composition_cutoff}) must be greater than "
-            f"or equal to detail protection level ({detail_protection})."
-        )
+        raise ValueError(f"Composition cutoff noise level ({composition_cutoff}) must be greater than or equal to detail protection level ({detail_protection}).")
 
     if getattr(model, "model_options", {}).get(MINIMAX_H3_CACHE_OWNER_KEY):
         raise ValueError("MiniMax H3 Diffusion Cache cannot be combined with another MiniMax H3 Cache.")
@@ -1918,30 +1480,17 @@ def patch_minimax_h3_diffusion_cache_model(
     patched_model = model.clone()
     diffusion_model = patched_model.model.diffusion_model
     if not isinstance(diffusion_model, minimax_model.MiniMaxH3Model):
-        raise ValueError(
-            "MiniMax H3 Diffusion Cache requires a MiniMax H3 diffusion model; "
-            f"received {diffusion_model.__class__.__name__}."
-        )
+        raise ValueError(f"MiniMax H3 Diffusion Cache requires a MiniMax H3 diffusion model; received {diffusion_model.__class__.__name__}.")
 
-    cache = MiniMaxH3DiffusionCache(
-        preset=preset,
-        composition_cutoff=composition_cutoff,
-        detail_protection=detail_protection,
-        drift_tolerance=drift_tolerance,
-        max_noise_span=max_noise_span,
-        device=device,
-        verbose=verbose,
-    )
+    cache = MiniMaxH3DiffusionCache(preset=preset, composition_cutoff=composition_cutoff, detail_protection=detail_protection, drift_tolerance=drift_tolerance, max_noise_span=max_noise_span, device=device, verbose=verbose)
     if hasattr(patched_model, "model_options"):
         patched_model.model_options[MINIMAX_H3_CACHE_OWNER_KEY] = True
     bound_forward = types.MethodType(minimax_h3_block_patch_forward, diffusion_model)
     patched_model.add_object_patch("diffusion_model._forward", bound_forward)
     patched_model.set_model_patch_replace(cache, "dit", "block_loop", 0)
-    patched_model.add_wrapper(
-        comfy.patcher_extension.WrappersMP.OUTER_SAMPLE,
-        MiniMaxH3DiffusionSamplingScope(cache),
-    )
+    patched_model.add_wrapper(comfy.patcher_extension.WrappersMP.OUTER_SAMPLE, MiniMaxH3DiffusionSamplingScope(cache))
     return patched_model
+
 
 @dataclass(frozen=True, slots=True)
 class MiniMaxH3RadialAttentionConfig:
@@ -1988,11 +1537,7 @@ class MiniMaxH3SlaAttentionConfig:
             raise ValueError("MiniMax H3 SLA minimum sequence length must be zero or greater.")
         if self.dense_tail_steps < 0:
             raise ValueError("MiniMax H3 SLA dense tail steps must be zero or greater.")
-        for value, label in (
-            (self.protect_audio, "audio protection"),
-            (self.disable_fp16_accumulation, "FP16/BF16 accumulation control"),
-            (self.stabilize_routing, "routing stabilization"),
-        ):
+        for value, label in ((self.protect_audio, "audio protection"), (self.disable_fp16_accumulation, "FP16/BF16 accumulation control"), (self.stabilize_routing, "routing stabilization")):
             if not isinstance(value, bool):
                 raise TypeError(f"MiniMax H3 SLA {label} must be a boolean.")
         if self.protect_reference_media not in SLA_REFERENCE_PROTECTION_MODES:
@@ -2003,23 +1548,9 @@ class MiniMaxH3SlaAttentionConfig:
         return self
 
 
-UNIFIED_ATTENTION_MODES = (
-    "disabled",
-    "FlashAttention",
-    "SageAttention",
-    "Sparse / MiniMax H3 SLA",
-    "Sparse / MiniMax H3 Radial",
-)
+UNIFIED_ATTENTION_MODES = ("disabled", "FlashAttention", "SageAttention", "Sparse / MiniMax H3 SLA", "Sparse / MiniMax H3 Radial")
 
-CUSTOM_SAGE_MODES = (
-    "auto",
-    "sageattn_qk_int8_pv_fp16_cuda",
-    "sageattn_qk_int8_pv_fp16_triton",
-    "sageattn_qk_int8_pv_fp8_cuda",
-    "sageattn_qk_int8_pv_fp8_cuda++",
-    "sageattn3",
-    "sageattn3_per_block_mean",
-)
+CUSTOM_SAGE_MODES = ("auto", "sageattn_qk_int8_pv_fp16_cuda", "sageattn_qk_int8_pv_fp16_triton", "sageattn_qk_int8_pv_fp8_cuda", "sageattn_qk_int8_pv_fp8_cuda++", "sageattn3", "sageattn3_per_block_mean")
 
 SLA_REFERENCE_PROTECTION_MODES = ("Off", "Light", "Heavy Enforcement")
 SLA_DENSE_BACKENDS = ("comfy_kitchen", "auto", "pytorch", *CUSTOM_SAGE_MODES[1:])
@@ -2027,6 +1558,7 @@ SLA_REFERENCE_LIGHT_SPARSITY = 0.85
 
 
 def _call_attention_function(attention_function: Callable[..., torch.Tensor]) -> Callable[..., torch.Tensor]:
+
     def override(_original: Callable[..., torch.Tensor], *args: Any, **kwargs: Any) -> torch.Tensor:
         wrapped = getattr(attention_function, "__wrapped__", attention_function)
         return wrapped(*args, **kwargs)
@@ -2035,6 +1567,7 @@ def _call_attention_function(attention_function: Callable[..., torch.Tensor]) ->
 
 
 def _call_attention_with_fallback(attention_function: Callable[..., torch.Tensor]) -> Callable[..., torch.Tensor]:
+
     def override(original: Callable[..., torch.Tensor], *args: Any, **kwargs: Any) -> torch.Tensor:
         return attention_function(original, *args, **kwargs)
 
@@ -2092,13 +1625,7 @@ def _make_sage_backend(mode: str, allow_compile: bool) -> Callable[..., torch.Te
             tensor_layout = kwargs.pop("tensor_layout", "NHD")
             if tensor_layout == "NHD":
                 q, k, v = (tensor.transpose(1, 2) for tensor in (q, k, v))
-            result = sageattn3_blackwell(
-                q,
-                k,
-                v,
-                per_block_mean=mode == "sageattn3_per_block_mean",
-                **kwargs,
-            )
+            result = sageattn3_blackwell(q, k, v, per_block_mean=mode == "sageattn3_per_block_mean", **kwargs)
             return result.transpose(1, 2) if tensor_layout == "NHD" else result
     else:
         raise ValueError(f"Unsupported custom SageAttention mode: {mode}")
@@ -2108,9 +1635,7 @@ def _make_sage_backend(mode: str, allow_compile: bool) -> Callable[..., torch.Te
 
     def attention(q, k, v, heads, mask=None, skip_reshape=False, skip_output_reshape=False, **kwargs):
         if kwargs.get("low_precision_attention", True) is False:
-            return comfy.ldm.modules.attention.attention_pytorch.__wrapped__(
-                q, k, v, heads, mask=mask, skip_reshape=skip_reshape, skip_output_reshape=skip_output_reshape, **kwargs
-            )
+            return comfy.ldm.modules.attention.attention_pytorch.__wrapped__(q, k, v, heads, mask=mask, skip_reshape=skip_reshape, skip_output_reshape=skip_output_reshape, **kwargs)
         input_dtype = v.dtype
         if q.dtype == torch.float32 or k.dtype == torch.float32 or v.dtype == torch.float32:
             q, k, v = q.to(torch.float16), k.to(torch.float16), v.to(torch.float16)
@@ -2167,10 +1692,12 @@ def _resolve_h3_sla_dense_backend(backend: str) -> Callable[..., torch.Tensor] |
 def _make_flash_backend(allow_compile: bool, cast_dtype: torch.dtype) -> Callable[..., torch.Tensor]:
     try:
         from flash_attn import flash_attn_func
+
         is_v3 = False
     except ImportError:
         try:
             from flash_attn_interface import flash_attn_func
+
             is_v3 = True
         except ImportError as error:
             raise RuntimeError("Custom FlashAttention requires flash_attn or flash_attn_interface.") from error
@@ -2272,10 +1799,7 @@ def _h3_radial_block_mask(state: dict[str, Any], device: torch.device) -> torch.
             if frame_distance == 0:
                 plan[output_block, input_block] = True
                 continue
-            radius = frame_tokens // 2 if frame_distance == 1 else max(
-                block_size,
-                int((2 ** frame_tokens.bit_length()) * state["config"].decay_factor / 2**frame_distance),
-            )
+            radius = frame_tokens // 2 if frame_distance == 1 else max(block_size, int((2 ** frame_tokens.bit_length()) * state["config"].decay_factor / 2**frame_distance))
             plan[output_block, input_block] = output_left <= input_right + radius and input_left <= output_right + radius
     return plan
 
@@ -2326,6 +1850,7 @@ def _run_h3_radial_attention(self, x, rope_freqs, state: dict[str, Any]) -> torc
 
 
 def _make_h3_radial_attention_forward(original: Callable[..., torch.Tensor], config: MiniMaxH3RadialAttentionConfig):
+
     def forward(self, x, rope_freqs=None, transformer_options=None):
         transformer_options = {} if transformer_options is None else transformer_options
         state = transformer_options.get(MINIMAX_H3_RADIAL_STATE_KEY)
@@ -2337,6 +1862,7 @@ def _make_h3_radial_attention_forward(original: Callable[..., torch.Tensor], con
 
 
 def _make_h3_radial_wrapper(config: MiniMaxH3RadialAttentionConfig):
+
     def wrapper(executor, x, timestep, context, transformer_options=None, minimax_payload=None, **kwargs):
         transformer_options = {} if transformer_options is None else transformer_options
         model = executor.class_obj
@@ -2350,16 +1876,7 @@ def _make_h3_radial_wrapper(config: MiniMaxH3RadialAttentionConfig):
             layout = minimax_model.PackedLayout(*signature, keyframes=payload.get("keyframes"), refs=payload.get("refs"))
         video_start, video_end, _ = next(segment for segment in layout.segments if segment[2] == "video")
         options = dict(transformer_options)
-        options[MINIMAX_H3_RADIAL_STATE_KEY] = {
-            "config": config,
-            "timestep": timestep,
-            "sequence_length": layout.seq_len,
-            "video_start": video_start,
-            "video_end": video_end,
-            "frame_count": latent_t,
-            "tokens_per_frame": (video_end - video_start) // latent_t,
-            "masks": {},
-        }
+        options[MINIMAX_H3_RADIAL_STATE_KEY] = {"config": config, "timestep": timestep, "sequence_length": layout.seq_len, "video_start": video_start, "video_end": video_end, "frame_count": latent_t, "tokens_per_frame": (video_end - video_start) // latent_t, "masks": {}}
         return executor(x, timestep, context, options, minimax_payload=minimax_payload, **kwargs)
 
     return wrapper
@@ -2424,11 +1941,7 @@ def _sla_select_blocks(q: torch.Tensor, k: torch.Tensor, config: MiniMaxH3SlaAtt
         scale = scores.detach().abs().amax(dim=-1, keepdim=True).clamp_min(1e-6)
         scores.scatter_add_(-1, previous.long(), scale.expand_as(previous) * 0.01)
     reference_count = 0
-    reference_sparsity = {
-        "Off": None,
-        "Light": SLA_REFERENCE_LIGHT_SPARSITY,
-        "Heavy Enforcement": 0.0,
-    }[config.protect_reference_media]
+    reference_sparsity = {"Off": None, "Light": SLA_REFERENCE_LIGHT_SPARSITY, "Heavy Enforcement": 0.0}[config.protect_reference_media]
     if reference_sparsity is not None:
         for first, last in _sla_block_ranges(reference_ranges, key_block, key_blocks):
             keep = max(1, min(last - first, math.ceil((1.0 - reference_sparsity) * (last - first))))
@@ -2443,17 +1956,11 @@ def _sla_select_blocks(q: torch.Tensor, k: torch.Tensor, config: MiniMaxH3SlaAtt
     return selected, selected_count, history
 
 
-SLA_TRITON_LAUNCH_LADDER = {
-    (32, 32): ((4, 2), (2, 1), (4, 1), (2, 2)),
-    (64, 64): ((4, 1), (4, 3), (8, 3), (8, 1)),
-    (64, 128): ((4, 2), (8, 2), (4, 1)),
-    (128, 64): ((8, 3), (4, 3), (8, 2), (4, 1)),
-    (128, 128): ((8, 2), (4, 2), (8, 1), (4, 1)),
-}
+SLA_TRITON_LAUNCH_LADDER = {(32, 32): ((4, 2), (2, 1), (4, 1), (2, 2)), (64, 64): ((4, 1), (4, 3), (8, 3), (8, 1)), (64, 128): ((4, 2), (8, 2), (4, 1)), (128, 64): ((8, 3), (4, 3), (8, 2), (4, 1)), (128, 128): ((8, 2), (4, 2), (8, 1), (4, 1))}
 _SLA_TRITON_CHOSEN: dict[tuple[int, int, int], tuple[int, int]] = {}
 
-
 if triton is not None:
+
     @triton.jit
     def _sla_attention_kernel(Q, K, V, scale: tl.constexpr, topk: tl.constexpr, lookup, output, heads: tl.constexpr, query_length: tl.constexpr, key_length: tl.constexpr, query_blocks: tl.constexpr, head_dim: tl.constexpr, query_block: tl.constexpr, key_block: tl.constexpr):
         query_block_index = tl.program_id(0).to(tl.int64)
@@ -2505,11 +2012,7 @@ def _sla_sparse_attention(q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, loo
     last_error = None
     for num_warps, num_stages in ladder:
         try:
-            _sla_attention_kernel[(query_blocks, batch * heads)](
-                q, k, v, head_dim**-0.5, selected_count, lookup, output,
-                heads, sequence, k.shape[1], query_blocks, head_dim,
-                config.block_size, key_block, num_warps=num_warps, num_stages=num_stages,
-            )
+            _sla_attention_kernel[(query_blocks, batch * heads)](q, k, v, head_dim**-0.5, selected_count, lookup, output, heads, sequence, k.shape[1], query_blocks, head_dim, config.block_size, key_block, num_warps=num_warps, num_stages=num_stages)
         except triton.runtime.errors.OutOfResources as error:
             last_error = error
             continue
@@ -2557,6 +2060,7 @@ def _run_h3_sla_dense_attention(state: dict[str, Any], original: Callable[..., t
 
 
 def _make_h3_sla_override(config: MiniMaxH3SlaAttentionConfig, state: dict[str, Any]) -> Callable[..., torch.Tensor]:
+
     def override(original, q, k, v, heads, mask=None, skip_reshape=False, skip_output_reshape=False, **kwargs):
         options = kwargs.get("transformer_options") or {}
         current = options.get(MINIMAX_H3_SLA_STATE_KEY)
@@ -2584,10 +2088,7 @@ def _make_h3_sla_override(config: MiniMaxH3SlaAttentionConfig, state: dict[str, 
             q_nhd, k_nhd, v_nhd = (value.transpose(1, 2).contiguous() for value in (q, k, v))
             call_index = current["call_index"]
             current["call_index"] = call_index + 1
-            lookup, selected_count, history = _sla_select_blocks(
-                q_nhd, k_nhd, config, current["protected_ranges"], current["reference_ranges"],
-                state["history"].get(call_index),
-            )
+            lookup, selected_count, history = _sla_select_blocks(q_nhd, k_nhd, config, current["protected_ranges"], current["reference_ranges"], state["history"].get(call_index))
             output = _sla_sparse_attention(q_nhd, k_nhd, v_nhd, lookup, selected_count, config)
             if history is not None:
                 state["history"][call_index] = history
@@ -2597,6 +2098,7 @@ def _make_h3_sla_override(config: MiniMaxH3SlaAttentionConfig, state: dict[str, 
             state["sparse_disabled_reason"] = f"the sparse kernel failed with {error.__class__.__name__}: {error}"
             _report_sla_fallback(state, state["sparse_disabled_reason"], logging.WARNING)
             return _run_h3_sla_dense_attention(state, original, q, k, v, heads, mask=mask, skip_reshape=skip_reshape, skip_output_reshape=skip_output_reshape, **kwargs)
+
     return override
 
 
@@ -2634,6 +2136,7 @@ class MiniMaxH3SlaSamplingScope:
 
 
 def _make_h3_sla_wrapper(config: MiniMaxH3SlaAttentionConfig, state: dict[str, Any]):
+
     def wrapper(executor, x, timestep, context, transformer_options=None, minimax_payload=None, **kwargs):
         options = dict(transformer_options or {})
         layout = (minimax_payload or {}).get("layout")
@@ -2651,13 +2154,7 @@ def _make_h3_sla_wrapper(config: MiniMaxH3SlaAttentionConfig, state: dict[str, A
             dense_reason = _sla_dense_step(options, timestep, config)
         if config.disable_fp16_accumulation:
             _set_h3_sla_reduced_precision_accumulation(False)
-        current = {
-            "dense": dense_reason is not None,
-            "dense_reason": dense_reason,
-            "call_index": 0,
-            "protected_ranges": tuple(protected_ranges),
-            "reference_ranges": tuple(reference_ranges),
-        }
+        current = {"dense": dense_reason is not None, "dense_reason": dense_reason, "call_index": 0, "protected_ranges": tuple(protected_ranges), "reference_ranges": tuple(reference_ranges)}
         if dense_reason is not None:
             state["history"].clear()
             _report_sla_fallback(state, dense_reason)
@@ -2669,6 +2166,7 @@ def _make_h3_sla_wrapper(config: MiniMaxH3SlaAttentionConfig, state: dict[str, A
         except Exception:
             state["history"].clear()
             raise
+
     return wrapper
 
 
@@ -2682,12 +2180,7 @@ def _patch_h3_sla_attention(model: Any, config: MiniMaxH3SlaAttentionConfig) -> 
         raise ValueError("MiniMax H3 SLA requires a MiniMax H3 diffusion model.")
     if {block.attn.head_dim for block in diffusion_model.blocks} != {128}:
         raise ValueError("MiniMax H3 SLA requires 128-dimensional attention heads.")
-    state = {
-        "history": {},
-        "reported_fallbacks": set(),
-        "sparse_disabled_reason": None,
-        "dense_backend": _resolve_h3_sla_dense_backend(config.dense_backend),
-    }
+    state = {"history": {}, "reported_fallbacks": set(), "sparse_disabled_reason": None, "dense_backend": _resolve_h3_sla_dense_backend(config.dense_backend)}
     options = _ensure_transformer_options(patched)
     options[UNIFIED_ATTENTION_OWNER_KEY] = "Sparse / MiniMax H3 SLA"
     options["optimized_attention_override"] = _call_attention_with_fallback(_make_h3_sla_override(config, state))
@@ -2742,14 +2235,10 @@ def patch_unified_attention_model(model: Any, attention_mode: dict[str, Any]) ->
     options = _ensure_transformer_options(patched)
     options[UNIFIED_ATTENTION_OWNER_KEY] = mode
     if mode == "FlashAttention":
-        options["optimized_attention_override"] = _call_attention_function(
-            _make_flash_backend(bool(attention_mode.get("allow_compile", False)), _model_compute_dtype(patched))
-        )
+        options["optimized_attention_override"] = _call_attention_function(_make_flash_backend(bool(attention_mode.get("allow_compile", False)), _model_compute_dtype(patched)))
     elif mode == "SageAttention":
         h3_memory_optimizations = bool(attention_mode.get("h3_memory_optimizations", False))
-        options["optimized_attention_override"] = _call_attention_function(
-            _make_sage_backend(attention_mode.get("sage_mode", "auto"), bool(attention_mode.get("allow_compile", False)))
-        )
+        options["optimized_attention_override"] = _call_attention_function(_make_sage_backend(attention_mode.get("sage_mode", "auto"), bool(attention_mode.get("allow_compile", False))))
         if h3_memory_optimizations:
             diffusion_model = patched.get_model_object("diffusion_model")
             if not isinstance(diffusion_model, minimax_model.MiniMaxH3Model):
@@ -2776,22 +2265,18 @@ def _validate_ideogram4_debanner_directions(directions: dict[int, torch.Tensor])
 
 
 def _make_ideogram4_debanner_wrapper(strength: float):
+
     def wrapper(executor, x, timesteps, context=None, attention_mask=None, transformer_options=None, **kwargs):
         _, _, grid_height, grid_width = x.shape
         options = {} if transformer_options is None else dict(transformer_options)
-        options[IDEOGRAM4_DEBANNER_STATE_KEY] = {
-            "grid_height": grid_height,
-            "grid_width": grid_width,
-            "image_token_count": grid_height * grid_width,
-            "strength": strength,
-            "is_conditional": context is not None,
-        }
+        options[IDEOGRAM4_DEBANNER_STATE_KEY] = {"grid_height": grid_height, "grid_width": grid_width, "image_token_count": grid_height * grid_width, "strength": strength, "is_conditional": context is not None}
         return executor(x, timesteps, context, attention_mask, options, **kwargs)
 
     return wrapper
 
 
 def _make_ideogram4_debanner_forward(original: Callable[..., torch.Tensor], direction: torch.Tensor):
+
     def forward(self, x, attn_mask, freqs_cis, adaln_input, transformer_options={}):
         output = original(x, attn_mask, freqs_cis, adaln_input, transformer_options=transformer_options)
         state = transformer_options.get(IDEOGRAM4_DEBANNER_STATE_KEY)
@@ -2802,9 +2287,7 @@ def _make_ideogram4_debanner_forward(original: Callable[..., torch.Tensor], dire
         grid_width = state["grid_width"]
         image_token_count = state["image_token_count"]
         image_offset = output.shape[1] - image_token_count
-        spatial_direction = torch.nn.functional.interpolate(
-            direction.permute(0, 3, 1, 2), size=(grid_height, grid_width), mode="nearest"
-        ).permute(0, 2, 3, 1).reshape(1, image_token_count, -1).to(device=output.device, dtype=output.dtype)
+        spatial_direction = torch.nn.functional.interpolate(direction.permute(0, 3, 1, 2), size=(grid_height, grid_width), mode="nearest").permute(0, 2, 3, 1).reshape(1, image_token_count, -1).to(device=output.device, dtype=output.dtype)
         image_tokens = output[:, image_offset:]
         original_norm = torch.linalg.vector_norm(image_tokens, dim=-1, keepdim=True)
         corrected = torch.nn.functional.normalize(image_tokens - state["strength"] * spatial_direction, p=2, dim=-1) * original_norm
@@ -2824,11 +2307,7 @@ def patch_ideogram4_debanner_model(model: Any, directions: dict[int, torch.Tenso
         raise ValueError("Ideogram 4 Debanner requires an Ideogram4Transformer2DModel diffusion model.")
 
     patched = model.clone()
-    patched.add_wrapper_with_key(
-        comfy.patcher_extension.WrappersMP.DIFFUSION_MODEL,
-        IDEOGRAM4_DEBANNER_WRAPPER_KEY,
-        _make_ideogram4_debanner_wrapper(strength),
-    )
+    patched.add_wrapper_with_key(comfy.patcher_extension.WrappersMP.DIFFUSION_MODEL, IDEOGRAM4_DEBANNER_WRAPPER_KEY, _make_ideogram4_debanner_wrapper(strength))
     for index in range(25, 29):
         block = diffusion_model.layers[index]
         patched_forward = types.MethodType(_make_ideogram4_debanner_forward(block.forward, directions[index]), block)
@@ -2840,15 +2319,7 @@ def patch_ideogram4_debanner(model: Any, strength: float) -> Any:
     return patch_ideogram4_debanner_model(model, load_ideogram4_debanner_directions(), strength)
 
 
-def apply_nag_guidance(
-    z_pos: torch.Tensor,
-    z_neg: torch.Tensor,
-    nag_scale: float,
-    nag_tau: float,
-    nag_alpha: float,
-    eps: float = 1e-6,
-    heads: int | None = None,
-) -> torch.Tensor:
+def apply_nag_guidance(z_pos: torch.Tensor, z_neg: torch.Tensor, nag_scale: float, nag_tau: float, nag_alpha: float, eps: float = 1e-6, heads: int | None = None) -> torch.Tensor:
     orig_shape = z_pos.shape
     z_pos_f = z_pos.float()
     z_neg_f = z_neg.float()
@@ -2887,10 +2358,7 @@ def _extract_krea2_cross_attn(cond_source: Any) -> torch.Tensor | None:
     return None
 
 
-def _is_krea2_nag_sigma_active(
-    sigma_source: Any,
-    sigma_window: tuple[float, float] | None,
-) -> bool:
+def _is_krea2_nag_sigma_active(sigma_source: Any, sigma_window: tuple[float, float] | None) -> bool:
     if sigma_window is None or sigma_source is None:
         return True
     sigma_start, sigma_end = sigma_window
@@ -2953,13 +2421,7 @@ def _krea2_nag_post_input_patch(args: dict[str, Any]) -> dict[str, Any]:
     state["l_neg"] = l_neg
     state["ref_total"] = ref_total
     state["neg_key_log_scale"] = neg_key_log_scale
-    return {
-        "img": img,
-        "txt": context,
-        "img_ids": imgpos,
-        "txt_ids": txtpos,
-        "transformer_options": transformer_options,
-    }
+    return {"img": img, "txt": context, "img_ids": imgpos, "txt_ids": txtpos, "transformer_options": transformer_options}
 
 
 def _krea2_nag_attn1_patch(q, k, v, pe=None, attn_mask=None, extra_options=None):
@@ -3040,38 +2502,14 @@ def _krea2_nag_attn1_output_patch(out_pos, extra_options):
     q_neg_c = comfy.ldm.modules.attention.AttentionTensorContainer(q_neg)
     k_neg_c = comfy.ldm.modules.attention.AttentionTensorContainer(k_neg)
     v_neg_c = comfy.ldm.modules.attention.AttentionTensorContainer(v_neg)
-    out_neg = comfy.ldm.modules.attention.optimized_attention_masked(
-        q_neg_c,
-        k_neg_c,
-        v_neg_c,
-        heads,
-        mask=neg_mask,
-        skip_reshape=True,
-        preferred_attention=preferred_attention,
-        transformer_options=extra_options,
-    )
+    out_neg = comfy.ldm.modules.attention.optimized_attention_masked(q_neg_c, k_neg_c, v_neg_c, heads, mask=neg_mask, skip_reshape=True, preferred_attention=preferred_attention, transformer_options=extra_options)
 
     z_img_pos = out_pos[:, l_pos : l_pos + img_tokens, :]
     z_img_neg = out_neg[:, l_neg : l_neg + img_tokens, :]
-    z_img_nag = apply_nag_guidance(
-        z_img_pos,
-        z_img_neg,
-        nag_scale=state["nag_scale"],
-        nag_tau=state["nag_tau"],
-        nag_alpha=state["nag_alpha"],
-        heads=heads,
-    )
+    z_img_nag = apply_nag_guidance(z_img_pos, z_img_neg, nag_scale=state["nag_scale"], nag_tau=state["nag_tau"], nag_alpha=state["nag_alpha"], heads=heads)
 
     if ref_total > 0:
-        return torch.cat(
-            (
-                out_pos[:, :l_pos, :],
-                z_img_nag,
-                out_neg[:, :l_neg, :],
-                out_pos[:, l_pos + img_tokens :, :],
-            ),
-            dim=1,
-        )
+        return torch.cat((out_pos[:, :l_pos, :], z_img_nag, out_neg[:, :l_neg, :], out_pos[:, l_pos + img_tokens :, :]), dim=1)
     return torch.cat((out_pos[:, :l_pos, :], z_img_nag, out_neg[:, :l_neg, :]), dim=1)
 
 
@@ -3081,30 +2519,19 @@ _krea2_nag_attn1_output_patch._uc_krea2_nag_patch = True
 
 
 def _make_krea2_nag_block_forward(original: Callable[..., torch.Tensor]):
+
     def forward(self, x, vec, freqs, mask=None, timestep_zero_index=None, transformer_options={}):
         if timestep_zero_index is not None:
             state = transformer_options.get(KREA2_NAG_STATE_KEY)
             if state is not None and "l_neg" in state:
                 timestep_zero_index = timestep_zero_index + state["l_neg"]
-        return original(
-            x,
-            vec,
-            freqs,
-            mask=mask,
-            timestep_zero_index=timestep_zero_index,
-            transformer_options=transformer_options,
-        )
+        return original(x, vec, freqs, mask=mask, timestep_zero_index=timestep_zero_index, transformer_options=transformer_options)
 
     return forward
 
 
-def _make_krea2_nag_diffusion_wrapper(
-    nag_scale: float,
-    nag_tau: float,
-    nag_alpha: float,
-    sigma_window: tuple[float, float] | None,
-    explicit_neg_context: torch.Tensor | None,
-):
+def _make_krea2_nag_diffusion_wrapper(nag_scale: float, nag_tau: float, nag_alpha: float, sigma_window: tuple[float, float] | None, explicit_neg_context: torch.Tensor | None):
+
     def wrapper(executor, x, timesteps, context, attention_mask=None, ref_latents=None, transformer_options={}, **kwargs):
         options = {} if transformer_options is None else dict(transformer_options)
         options.pop(KREA2_NAG_STATE_KEY, None)
@@ -3116,19 +2543,14 @@ def _make_krea2_nag_diffusion_wrapper(
         neg_context = options.get(KREA2_NAG_NEG_CONTEXT_KEY, explicit_neg_context)
         sigma_source = options.get("sigmas", timesteps)
         if neg_context is not None and context is not None and _is_krea2_nag_sigma_active(sigma_source, sigma_window):
-            options[KREA2_NAG_STATE_KEY] = {
-                "dit": executor.class_obj,
-                "neg_context": neg_context,
-                "nag_scale": nag_scale,
-                "nag_tau": nag_tau,
-                "nag_alpha": nag_alpha,
-            }
+            options[KREA2_NAG_STATE_KEY] = {"dit": executor.class_obj, "neg_context": neg_context, "nag_scale": nag_scale, "nag_tau": nag_tau, "nag_alpha": nag_alpha}
         return executor(x, timesteps, context, attention_mask, ref_latents, options, **kwargs)
 
     return wrapper
 
 
 def _make_krea2_nag_predict_noise_wrapper():
+
     def wrapper(executor, x, timestep, model_options={}, seed=None):
         guider = executor.class_obj
         cfg = getattr(guider, "cfg", None)
@@ -3139,10 +2561,8 @@ def _make_krea2_nag_predict_noise_wrapper():
     return wrapper
 
 
-def _make_krea2_nag_calc_cond_batch_wrapper(
-    sigma_window: tuple[float, float] | None,
-    explicit_neg_context: torch.Tensor | None,
-):
+def _make_krea2_nag_calc_cond_batch_wrapper(sigma_window: tuple[float, float] | None, explicit_neg_context: torch.Tensor | None):
+
     def wrapper(executor, model, conds, x_in, timestep, model_options):
         if not conds or conds[0] is None:
             return executor(model, conds, x_in, timestep, model_options)
@@ -3153,11 +2573,7 @@ def _make_krea2_nag_calc_cond_batch_wrapper(
 
         transformer_options = model_options.get("transformer_options", {})
         cfg = transformer_options.get(KREA2_NAG_CFG_SCALE_KEY)
-        has_custom_cfg = (
-            "sampler_cfg_function" in model_options
-            or bool(model_options.get("sampler_pre_cfg_function"))
-            or bool(model_options.get("sampler_post_cfg_function"))
-        )
+        has_custom_cfg = "sampler_cfg_function" in model_options or bool(model_options.get("sampler_pre_cfg_function")) or bool(model_options.get("sampler_post_cfg_function"))
         skip_uncond = cfg is not None and math.isclose(float(cfg), 1.0) and not has_custom_cfg
 
         if not active:
@@ -3179,15 +2595,7 @@ def _make_krea2_nag_calc_cond_batch_wrapper(
     return wrapper
 
 
-def patch_krea2_nag_model(
-    model: Any,
-    nag_scale: float = 5.0,
-    nag_tau: float = 2.5,
-    nag_alpha: float = 0.25,
-    start_percent: float = 0.0,
-    end_percent: float = 1.0,
-    nag_negative: Any = None,
-) -> Any:
+def patch_krea2_nag_model(model: Any, nag_scale: float = 5.0, nag_tau: float = 2.5, nag_alpha: float = 0.25, start_percent: float = 0.0, end_percent: float = 1.0, nag_negative: Any = None) -> Any:
     nag_scale = float(nag_scale)
     nag_tau = float(nag_tau)
     nag_alpha = float(nag_alpha)
@@ -3221,37 +2629,20 @@ def patch_krea2_nag_model(
     if start_percent > 0.0 or end_percent < 1.0:
         model_sampling = patched.get_model_object("model_sampling")
         if model_sampling is not None:
-            sigma_window = (
-                float(model_sampling.percent_to_sigma(start_percent)),
-                float(model_sampling.percent_to_sigma(end_percent)),
-            )
+            sigma_window = (float(model_sampling.percent_to_sigma(start_percent)), float(model_sampling.percent_to_sigma(end_percent)))
 
     patches = patched.model_options.setdefault("transformer_options", {}).setdefault("patches", {})
     for patch_name in ("post_input", "attn1_patch", "attn1_output_patch"):
         if patch_name in patches:
-            patches[patch_name] = [
-                fn for fn in patches[patch_name] if not getattr(fn, "_uc_krea2_nag_patch", False)
-            ]
+            patches[patch_name] = [fn for fn in patches[patch_name] if not getattr(fn, "_uc_krea2_nag_patch", False)]
 
     patched.set_model_post_input_patch(_krea2_nag_post_input_patch)
     patched.set_model_attn1_patch(_krea2_nag_attn1_patch)
     patched.set_model_attn1_output_patch(_krea2_nag_attn1_output_patch)
 
-    patched.add_wrapper_with_key(
-        comfy.patcher_extension.WrappersMP.DIFFUSION_MODEL,
-        KREA2_NAG_DIFFUSION_WRAPPER_KEY,
-        _make_krea2_nag_diffusion_wrapper(nag_scale, nag_tau, nag_alpha, sigma_window, explicit_neg_context),
-    )
-    patched.add_wrapper_with_key(
-        comfy.patcher_extension.WrappersMP.PREDICT_NOISE,
-        KREA2_NAG_PREDICT_NOISE_WRAPPER_KEY,
-        _make_krea2_nag_predict_noise_wrapper(),
-    )
-    patched.add_wrapper_with_key(
-        comfy.patcher_extension.WrappersMP.CALC_COND_BATCH,
-        KREA2_NAG_CALC_COND_WRAPPER_KEY,
-        _make_krea2_nag_calc_cond_batch_wrapper(sigma_window, explicit_neg_context),
-    )
+    patched.add_wrapper_with_key(comfy.patcher_extension.WrappersMP.DIFFUSION_MODEL, KREA2_NAG_DIFFUSION_WRAPPER_KEY, _make_krea2_nag_diffusion_wrapper(nag_scale, nag_tau, nag_alpha, sigma_window, explicit_neg_context))
+    patched.add_wrapper_with_key(comfy.patcher_extension.WrappersMP.PREDICT_NOISE, KREA2_NAG_PREDICT_NOISE_WRAPPER_KEY, _make_krea2_nag_predict_noise_wrapper())
+    patched.add_wrapper_with_key(comfy.patcher_extension.WrappersMP.CALC_COND_BATCH, KREA2_NAG_CALC_COND_WRAPPER_KEY, _make_krea2_nag_calc_cond_batch_wrapper(sigma_window, explicit_neg_context))
 
     if hasattr(diffusion_model, "blocks"):
         for index, block in enumerate(diffusion_model.blocks):
@@ -3269,11 +2660,7 @@ def _is_moss_image_diffusion_model(diffusion_model: Any) -> bool:
         return False
     if moss_image_model is not None and isinstance(diffusion_model, moss_image_model.MOSSImage):
         return True
-    return (
-        hasattr(diffusion_model, "video_embedder")
-        and hasattr(diffusion_model, "final_linear_video")
-        and hasattr(diffusion_model, "rope")
-    )
+    return hasattr(diffusion_model, "video_embedder") and hasattr(diffusion_model, "final_linear_video") and hasattr(diffusion_model, "rope")
 
 
 def unpatchify_flux2_latent(latent: torch.Tensor) -> torch.Tensor:
@@ -3300,19 +2687,9 @@ def resize_moss_reference_latent(ref: torch.Tensor, target_h: int, target_w: int
         return ref
     if ref.ndim == 4 and ref.shape[1] % 4 == 0:
         unpatched = unpatchify_flux2_latent(ref)
-        resized = F.interpolate(
-            unpatched.to(torch.float32),
-            size=(int(target_h) * 2, int(target_w) * 2),
-            mode="bilinear",
-            align_corners=False,
-        )
+        resized = F.interpolate(unpatched.to(torch.float32), size=(int(target_h) * 2, int(target_w) * 2), mode="bilinear", align_corners=False)
         return patchify_flux2_latent(resized).to(dtype=ref.dtype)
-    return F.interpolate(
-        ref.to(torch.float32),
-        size=(int(target_h), int(target_w)),
-        mode="bilinear",
-        align_corners=False,
-    ).to(dtype=ref.dtype)
+    return F.interpolate(ref.to(torch.float32), size=(int(target_h), int(target_w)), mode="bilinear", align_corners=False).to(dtype=ref.dtype)
 
 
 def lowpass_moss_latent(latent: torch.Tensor, kernel_size: int = 5) -> torch.Tensor:
@@ -3331,17 +2708,7 @@ def lowpass_moss_latent(latent: torch.Tensor, kernel_size: int = 5) -> torch.Ten
     return patchify_flux2_latent(filtered).to(dtype=latent.dtype)
 
 
-def build_moss_reference_rope_ids(
-    target_h: int,
-    target_w: int,
-    ref_h: int,
-    ref_w: int,
-    text_len: int,
-    ref_index: int = 1,
-    rope_mode: str = "spatial_aligned",
-    for_self_attn: bool = False,
-    device: torch.device | str = "cpu",
-) -> torch.Tensor:
+def build_moss_reference_rope_ids(target_h: int, target_w: int, ref_h: int, ref_w: int, text_len: int, ref_index: int = 1, rope_mode: str = "spatial_aligned", for_self_attn: bool = False, device: torch.device | str = "cpu") -> torch.Tensor:
     """Build 4D RoPE (r, t, h, w) coordinates for a MOSS-Image reference latent."""
     target_h = max(1, int(target_h))
     target_w = max(1, int(target_w))
@@ -3394,22 +2761,12 @@ def _embed_moss_rope_ids(diffusion_model: Any, ids: torch.Tensor) -> torch.Tenso
         import comfy.ldm.flux.math
 
         ids_3d = ids.unsqueeze(0) if ids.ndim == 2 else ids
-        pe = torch.cat(
-            [comfy.ldm.flux.math.rope(ids_3d[..., i], d, 10000) for i, d in enumerate(diffusion_model.rope_axes_dim)],
-            dim=-3,
-        )
+        pe = torch.cat([comfy.ldm.flux.math.rope(ids_3d[..., i], d, 10000) for i, d in enumerate(diffusion_model.rope_axes_dim)], dim=-3)
         return pe.unsqueeze(1).transpose(1, 2).contiguous()
     raise RuntimeError("MOSS-Image diffusion model does not expose a compatible RoPE embedder.")
 
 
-def _prepare_moss_mask(
-    mask: torch.Tensor | None,
-    batch_size: int,
-    target_h: int,
-    target_w: int,
-    device: torch.device,
-    dtype: torch.dtype,
-) -> torch.Tensor | None:
+def _prepare_moss_mask(mask: torch.Tensor | None, batch_size: int, target_h: int, target_w: int, device: torch.device, dtype: torch.dtype) -> torch.Tensor | None:
     if not torch.is_tensor(mask):
         return None
     m = mask.to(device=device, dtype=torch.float32)
@@ -3429,12 +2786,7 @@ def _prepare_moss_mask(
     return m.clamp(0.0, 1.0).to(dtype=dtype)
 
 
-def _unpack_reference_latents_list(
-    raw_refs: Sequence[torch.Tensor],
-    target_batch: int,
-    device: torch.device,
-    dtype: torch.dtype,
-) -> list[torch.Tensor]:
+def _unpack_reference_latents_list(raw_refs: Sequence[torch.Tensor], target_batch: int, device: torch.device, dtype: torch.dtype) -> list[torch.Tensor]:
     """Normalize reference latent tensors into a list of (target_batch, C, H_r, W_r) tensors."""
     resolved: list[torch.Tensor] = []
     for ref in raw_refs:
@@ -3461,24 +2813,11 @@ def _unpack_reference_latents_list(
     return resolved
 
 
-def _moss_apply_qk_norm_and_rope(
-    block: Any,
-    q: torch.Tensor,
-    k: torch.Tensor,
-    pe: torch.Tensor,
-    heads: int,
-) -> tuple[torch.Tensor, torch.Tensor]:
+def _moss_apply_qk_norm_and_rope(block: Any, q: torch.Tensor, k: torch.Tensor, pe: torch.Tensor, heads: int) -> tuple[torch.Tensor, torch.Tensor]:
     bsz, seq_len, _ = q.shape
     q_v = q.view(bsz, seq_len, heads, -1)
     k_v = k.view(bsz, seq_len, heads, -1)
-    use_ck = (
-        moss_image_model is not None
-        and not comfy.model_management.in_training
-        and hasattr(comfy, "quant_ops")
-        and hasattr(comfy.quant_ops, "ck")
-        and hasattr(comfy.quant_ops.ck, "rms_rope_split_half")
-        and pe.ndim == 6
-    )
+    use_ck = moss_image_model is not None and not comfy.model_management.in_training and hasattr(comfy, "quant_ops") and hasattr(comfy.quant_ops, "ck") and hasattr(comfy.quant_ops.ck, "rms_rope_split_half") and pe.ndim == 6
     if use_ck:
         q_scale, _, q_stream = comfy.ops.cast_bias_weight(block.q_norm, q_v, offloadable=True)
         k_scale, _, k_stream = comfy.ops.cast_bias_weight(block.k_norm, k_v, offloadable=True)
@@ -3500,26 +2839,12 @@ def _moss_modulated_rms_norm(block_norm: Any, x: torch.Tensor, scale: torch.Tens
     return block_norm(x) * (1.0 + scale) + shift
 
 
-def _moss_run_attention(
-    block: Any,
-    q_flat: torch.Tensor,
-    k_flat: torch.Tensor,
-    v_flat: torch.Tensor,
-    heads: int,
-    transformer_options: dict[str, Any],
-) -> torch.Tensor:
+def _moss_run_attention(block: Any, q_flat: torch.Tensor, k_flat: torch.Tensor, v_flat: torch.Tensor, heads: int, transformer_options: dict[str, Any]) -> torch.Tensor:
     if moss_image_model is not None and hasattr(moss_image_model, "AttentionTensorContainer"):
         q_c = moss_image_model.AttentionTensorContainer(q_flat)
         k_c = moss_image_model.AttentionTensorContainer(k_flat)
         v_c = moss_image_model.AttentionTensorContainer(v_flat)
-        return moss_image_model.optimized_attention(
-            q_c,
-            k_c,
-            v_c,
-            heads,
-            transformer_options=transformer_options,
-            preferred_attention=getattr(block, "comfy_attention", None),
-        )
+        return moss_image_model.optimized_attention(q_c, k_c, v_c, heads, transformer_options=transformer_options, preferred_attention=getattr(block, "comfy_attention", None))
     head_dim = q_flat.shape[-1] // heads
     q_h = q_flat.view(q_flat.shape[0], q_flat.shape[1], heads, head_dim).transpose(1, 2)
     k_h = k_flat.view(k_flat.shape[0], k_flat.shape[1], heads, head_dim).transpose(1, 2)
@@ -3542,13 +2867,7 @@ def _moss_gated_residual(x: torch.Tensor, y: torch.Tensor, gate: torch.Tensor) -
     return x.addcmul_(y, gate)
 
 
-def _moss_ffn_residual(
-    block: Any,
-    x: torch.Tensor,
-    scale_f: torch.Tensor,
-    shift_f: torch.Tensor,
-    gate_f: torch.Tensor,
-) -> torch.Tensor:
+def _moss_ffn_residual(block: Any, x: torch.Tensor, scale_f: torch.Tensor, shift_f: torch.Tensor, gate_f: torch.Tensor) -> torch.Tensor:
     y = _moss_modulated_rms_norm(block.norm2, x, scale_f, shift_f)
     if hasattr(comfy, "ops") and hasattr(comfy.ops, "linear_input_act"):
         out = comfy.ops.linear_input_act(block.proj["ffn_down"], block.proj["ffn_up_gate"](y), "situ")
@@ -3560,29 +2879,14 @@ def _moss_ffn_residual(
 
 class MOSSImageEditExecutionState:
     def __init__(self) -> None:
-        self.step: contextvars.ContextVar[dict[str, Any] | None] = contextvars.ContextVar(
-            "moss_image_edit_step",
-            default=None,
-        )
+        self.step: contextvars.ContextVar[dict[str, Any] | None] = contextvars.ContextVar("moss_image_edit_step", default=None)
         self.sampler_latent_image: torch.Tensor | None = None
         self.sampler_denoise_mask: torch.Tensor | None = None
 
 
-def make_moss_edit_layer_forward(
-    layer_idx: int,
-    block: Any,
-    orig_forward: Any,
-    exec_state: MOSSImageEditExecutionState,
-):
-    def _layer_forward(
-        self,
-        x: torch.Tensor,
-        mod: tuple[torch.Tensor, ...],
-        pe: torch.Tensor,
-        transformer_options: dict[str, Any] = {},
-        *args: Any,
-        **kwargs: Any,
-    ) -> torch.Tensor:
+def make_moss_edit_layer_forward(layer_idx: int, block: Any, orig_forward: Any, exec_state: MOSSImageEditExecutionState):
+
+    def _layer_forward(self, x: torch.Tensor, mod: tuple[torch.Tensor, ...], pe: torch.Tensor, transformer_options: dict[str, Any] = {}, *args: Any, **kwargs: Any) -> torch.Tensor:
         step_state = exec_state.step.get()
         if step_state is None or "kv_out" in kwargs:
             return orig_forward(x, mod, pe, transformer_options, *args, **kwargs)
@@ -3654,12 +2958,7 @@ def make_moss_edit_layer_forward(
     return types.MethodType(_layer_forward, block)
 
 
-def _extract_sigma_tensor(
-    sigma_source: Any,
-    batch_size: int,
-    device: torch.device,
-    dtype: torch.dtype,
-) -> torch.Tensor:
+def _extract_sigma_tensor(sigma_source: Any, batch_size: int, device: torch.device, dtype: torch.dtype) -> torch.Tensor:
     if torch.is_tensor(sigma_source):
         s = sigma_source.to(device=device, dtype=torch.float32).reshape(-1)
     elif isinstance(sigma_source, (int, float)):
@@ -3675,27 +2974,9 @@ def _extract_sigma_tensor(
     return s.clamp(0.0, 1.0).to(dtype=dtype)
 
 
-def _make_moss_edit_outer_sample_wrapper(
-    exec_state: MOSSImageEditExecutionState,
-    node_ref_latents: list[torch.Tensor],
-    node_mask: torch.Tensor | None,
-    noise_anchor: float,
-    structure_retention: float,
-    lowpass_kernel: int,
-    process_in: Any = None,
-):
-    def outer_sample_wrapper(
-        executor,
-        noise,
-        latent_image,
-        sampler,
-        sigmas,
-        denoise_mask=None,
-        callback=None,
-        disable_pbar=False,
-        seed=None,
-        **kwargs,
-    ):
+def _make_moss_edit_outer_sample_wrapper(exec_state: MOSSImageEditExecutionState, node_ref_latents: list[torch.Tensor], node_mask: torch.Tensor | None, noise_anchor: float, structure_retention: float, lowpass_kernel: int, process_in: Any = None):
+
+    def outer_sample_wrapper(executor, noise, latent_image, sampler, sigmas, denoise_mask=None, callback=None, disable_pbar=False, seed=None, **kwargs):
         exec_state.sampler_latent_image = None
         exec_state.sampler_denoise_mask = None
         if torch.is_tensor(latent_image) and latent_image.ndim == 4:
@@ -3712,12 +2993,7 @@ def _make_moss_edit_outer_sample_wrapper(
             primary_ref = exec_state.sampler_latent_image
 
         anchor_weight = float(noise_anchor) * float(structure_retention)
-        if (
-            torch.is_tensor(noise)
-            and noise.ndim == 4
-            and primary_ref is not None
-            and anchor_weight > 0.0
-        ):
+        if torch.is_tensor(noise) and noise.ndim == 4 and primary_ref is not None and anchor_weight > 0.0:
             ref_t = primary_ref.to(device=noise.device, dtype=torch.float32)
             if ref_t.shape[-2:] != noise.shape[-2:]:
                 ref_t = resize_moss_reference_latent(ref_t, noise.shape[-2], noise.shape[-1])
@@ -3731,30 +3007,13 @@ def _make_moss_edit_outer_sample_wrapper(
             anchored = math.sqrt(max(0.0, 1.0 - rho * rho)) * noise_f32 + rho * ref_norm
             active_mask = node_mask if node_mask is not None else exec_state.sampler_denoise_mask
             if active_mask is not None:
-                m = _prepare_moss_mask(
-                    active_mask,
-                    noise.shape[0],
-                    noise.shape[-2],
-                    noise.shape[-1],
-                    noise.device,
-                    torch.float32,
-                )
+                m = _prepare_moss_mask(active_mask, noise.shape[0], noise.shape[-2], noise.shape[-1], noise.device, torch.float32)
                 if m is not None:
                     anchored = m * noise_f32 + (1.0 - m) * anchored
             noise = anchored.to(dtype=noise.dtype)
 
         try:
-            return executor(
-                noise,
-                latent_image,
-                sampler,
-                sigmas,
-                denoise_mask,
-                callback,
-                disable_pbar,
-                seed,
-                **kwargs,
-            )
+            return executor(noise, latent_image, sampler, sigmas, denoise_mask, callback, disable_pbar, seed, **kwargs)
         finally:
             exec_state.sampler_latent_image = None
             exec_state.sampler_denoise_mask = None
@@ -3778,6 +3037,7 @@ def _make_moss_edit_diffusion_wrapper(
     uncond_skip_layer: int,
     sigma_window: tuple[float, float] | None,
 ):
+
     def diffusion_wrapper(executor, x, timestep, context, transformer_options=None, **kwargs):
         if transformer_options is None:
             transformer_options = {}
@@ -3853,13 +3113,7 @@ def _make_moss_edit_diffusion_wrapper(
             flat_m = spatial_mask.reshape(bsz, visual_tokens, 1)
             attn_spatial_mask = (1.0 - 0.35 * flat_m).clamp(0.25, 1.0)
 
-        can_run_ref_kv = (
-            float(strength) > 0.0
-            and hasattr(diffusion_model, "layers")
-            and hasattr(diffusion_model, "video_embedder")
-            and hasattr(diffusion_model, "time_embedding")
-            and hasattr(diffusion_model, "shared_block_modulation")
-        )
+        can_run_ref_kv = float(strength) > 0.0 and hasattr(diffusion_model, "layers") and hasattr(diffusion_model, "video_embedder") and hasattr(diffusion_model, "time_embedding") and hasattr(diffusion_model, "shared_block_modulation")
         step_state: dict[str, Any] | None = None
         if can_run_ref_kv:
             t_zero = torch.zeros((bsz,), device=device, dtype=torch.float32)
@@ -3867,9 +3121,7 @@ def _make_moss_edit_diffusion_wrapper(
                 t_emb = moss_image_model.timestep_embedding(t_zero, 256).to(dtype)
             else:
                 half = 128
-                freqs = torch.exp(
-                    -math.log(10000.0) * torch.arange(0, half, device=device, dtype=torch.float32) / float(half)
-                )
+                freqs = torch.exp(-math.log(10000.0) * torch.arange(0, half, device=device, dtype=torch.float32) / float(half))
                 args_t = t_zero[:, None] * freqs[None, :]
                 t_emb = torch.cat([torch.cos(args_t), torch.sin(args_t)], dim=-1).to(dtype)
             vec_ref = diffusion_model.time_embedding(t_emb)
@@ -3879,35 +3131,9 @@ def _make_moss_edit_diffusion_wrapper(
             for idx, ref_lat in enumerate(resolved_refs):
                 ref_h, ref_w = int(ref_lat.shape[-2]), int(ref_lat.shape[-1])
                 x_ref_tokens = diffusion_model.video_embedder(ref_lat.flatten(2).transpose(1, 2)).contiguous()
-                ids_self = build_moss_reference_rope_ids(
-                    target_h=frame_h,
-                    target_w=frame_w,
-                    ref_h=ref_h,
-                    ref_w=ref_w,
-                    text_len=text_len,
-                    ref_index=idx + 1,
-                    rope_mode=rope_mode,
-                    for_self_attn=True,
-                    device=device,
-                )
-                ids_cross = build_moss_reference_rope_ids(
-                    target_h=frame_h,
-                    target_w=frame_w,
-                    ref_h=ref_h,
-                    ref_w=ref_w,
-                    text_len=text_len,
-                    ref_index=idx + 1,
-                    rope_mode=rope_mode,
-                    for_self_attn=False,
-                    device=device,
-                )
-                ref_entries.append(
-                    {
-                        "x": x_ref_tokens,
-                        "pe_self": _embed_moss_rope_ids(diffusion_model, ids_self),
-                        "pe_cross": _embed_moss_rope_ids(diffusion_model, ids_cross),
-                    }
-                )
+                ids_self = build_moss_reference_rope_ids(target_h=frame_h, target_w=frame_w, ref_h=ref_h, ref_w=ref_w, text_len=text_len, ref_index=idx + 1, rope_mode=rope_mode, for_self_attn=True, device=device)
+                ids_cross = build_moss_reference_rope_ids(target_h=frame_h, target_w=frame_w, ref_h=ref_h, ref_w=ref_w, text_len=text_len, ref_index=idx + 1, rope_mode=rope_mode, for_self_attn=False, device=device)
+                ref_entries.append({"x": x_ref_tokens, "pe_self": _embed_moss_rope_ids(diffusion_model, ids_self), "pe_cross": _embed_moss_rope_ids(diffusion_model, ids_cross)})
 
             base_blend = min(1.0, max(0.0, float(strength) * 0.65))
             blend_per_batch = torch.full((bsz, 1, 1), base_blend, device=device, dtype=torch.float32)
@@ -4088,11 +3314,7 @@ def patch_moss_image_edit_model(
             out = orig_extra_conds(**kwargs)
             ref_lats = kwargs.get("reference_latents", None)
             if ref_lats is not None and comfy is not None and hasattr(comfy, "conds"):
-                latents = [
-                    self.process_latent_in(lat) if hasattr(self, "process_latent_in") else lat
-                    for lat in ref_lats
-                    if torch.is_tensor(lat)
-                ]
+                latents = [self.process_latent_in(lat) if hasattr(self, "process_latent_in") else lat for lat in ref_lats if torch.is_tensor(lat)]
                 if latents:
                     out["ref_latents"] = comfy.conds.CONDList(latents)
             return out
@@ -4103,40 +3325,20 @@ def patch_moss_image_edit_model(
     if start_percent > 0.0 or end_percent < 1.0:
         model_sampling = patched.get_model_object("model_sampling")
         if model_sampling is not None:
-            sigma_window = (
-                float(model_sampling.percent_to_sigma(start_percent)),
-                float(model_sampling.percent_to_sigma(end_percent)),
-            )
+            sigma_window = (float(model_sampling.percent_to_sigma(start_percent)), float(model_sampling.percent_to_sigma(end_percent)))
 
     exec_state = MOSSImageEditExecutionState()
     for layer_idx, block in enumerate(getattr(diffusion_model, "layers", ())):
-        patched.add_object_patch(
-            f"diffusion_model.layers.{layer_idx}.forward",
-            make_moss_edit_layer_forward(layer_idx, block, block.forward, exec_state),
-        )
+        patched.add_object_patch(f"diffusion_model.layers.{layer_idx}.forward", make_moss_edit_layer_forward(layer_idx, block, block.forward, exec_state))
 
     if hasattr(patched, "remove_wrappers_with_key"):
-        patched.remove_wrappers_with_key(
-            comfy.patcher_extension.WrappersMP.OUTER_SAMPLE,
-            MOSS_IMAGE_EDIT_OUTER_SAMPLE_WRAPPER_KEY,
-        )
-        patched.remove_wrappers_with_key(
-            comfy.patcher_extension.WrappersMP.DIFFUSION_MODEL,
-            MOSS_IMAGE_EDIT_DIFFUSION_WRAPPER_KEY,
-        )
+        patched.remove_wrappers_with_key(comfy.patcher_extension.WrappersMP.OUTER_SAMPLE, MOSS_IMAGE_EDIT_OUTER_SAMPLE_WRAPPER_KEY)
+        patched.remove_wrappers_with_key(comfy.patcher_extension.WrappersMP.DIFFUSION_MODEL, MOSS_IMAGE_EDIT_DIFFUSION_WRAPPER_KEY)
 
     patched.add_wrapper_with_key(
         comfy.patcher_extension.WrappersMP.OUTER_SAMPLE,
         MOSS_IMAGE_EDIT_OUTER_SAMPLE_WRAPPER_KEY,
-        _make_moss_edit_outer_sample_wrapper(
-            exec_state=exec_state,
-            node_ref_latents=node_ref_latents,
-            node_mask=inferred_mask,
-            noise_anchor=noise_anchor,
-            structure_retention=structure_retention,
-            lowpass_kernel=lowpass_kernel,
-            process_in=process_in,
-        ),
+        _make_moss_edit_outer_sample_wrapper(exec_state=exec_state, node_ref_latents=node_ref_latents, node_mask=inferred_mask, noise_anchor=noise_anchor, structure_retention=structure_retention, lowpass_kernel=lowpass_kernel, process_in=process_in),
     )
     patched.add_wrapper_with_key(
         comfy.patcher_extension.WrappersMP.DIFFUSION_MODEL,
@@ -4172,12 +3374,7 @@ class Krea2CachedTextFusion(torch.nn.Module):
         self.cache = None
         self.cache_key = None
 
-    def forward(
-        self,
-        x: torch.Tensor,
-        mask: Any = None,
-        transformer_options: dict[str, Any] = {},
-    ) -> torch.Tensor:
+    def forward(self, x: torch.Tensor, mask: Any = None, transformer_options: dict[str, Any] = {}) -> torch.Tensor:
         cache_key = (x.data_ptr(), x.shape, x.device)
         if self.cache is None or self.cache_key != cache_key:
             self.cache = self.original(x, mask=mask, transformer_options=transformer_options)
@@ -4186,15 +3383,7 @@ class Krea2CachedTextFusion(torch.nn.Module):
 
 
 class Krea2EditExecutionState:
-    def __init__(
-        self,
-        ref_position: str = "aligned (trained)",
-        ref_position_a: str = "aligned (trained)",
-        ref_boost: float = 1.0,
-        ref_boost_a: float = 1.0,
-        boost_mode: str = "Fast / Key Scaling (FlashAttention)",
-        cached_txtfusion: Krea2CachedTextFusion | None = None,
-    ) -> None:
+    def __init__(self, ref_position: str = "aligned (trained)", ref_position_a: str = "aligned (trained)", ref_boost: float = 1.0, ref_boost_a: float = 1.0, boost_mode: str = "Fast / Key Scaling (FlashAttention)", cached_txtfusion: Krea2CachedTextFusion | None = None) -> None:
         self.ref_position = ref_position
         self.ref_position_a = ref_position_a
         self.ref_boost = ref_boost
@@ -4218,11 +3407,8 @@ class Krea2EditExecutionState:
             self.cached_txtfusion.reset()
 
 
-def _make_krea2_edit_process_img(
-    original_process_img: Callable[..., tuple[torch.Tensor, torch.Tensor, int, int]],
-    exec_state: Krea2EditExecutionState,
-    total_refs: int,
-):
+def _make_krea2_edit_process_img(original_process_img: Callable[..., tuple[torch.Tensor, torch.Tensor, int, int]], exec_state: Krea2EditExecutionState, total_refs: int):
+
     def process_img(self, x: torch.Tensor, index: int = 0):
         img, img_ids, h, w = original_process_img(x, index=index)
         if index == 0:
@@ -4235,9 +3421,7 @@ def _make_krea2_edit_process_img(
             target_h, target_w = target_hw
             mode = exec_state.ref_position if index == total_refs else exec_state.ref_position_a
             if mode == "beside (right of target)":
-                prior_offset = sum(
-                    exec_state.ref_widths.get(i, 0) for i in range(1, index)
-                )
+                prior_offset = sum(exec_state.ref_widths.get(i, 0) for i in range(1, index))
                 img_ids[..., 2] += float(target_w + prior_offset)
             elif mode == "bag of features":
                 img_ids[..., 1] = float(target_h - 1) / 2.0
@@ -4247,18 +3431,9 @@ def _make_krea2_edit_process_img(
     return process_img
 
 
-def _make_krea2_edit_attn_forward(
-    original_attn_forward: Callable[..., torch.Tensor],
-    exec_state: Krea2EditExecutionState,
-    total_refs: int,
-):
-    def forward(
-        self,
-        x: torch.Tensor,
-        freqs: Any = None,
-        mask: Any = None,
-        transformer_options: dict[str, Any] = {},
-    ) -> torch.Tensor:
+def _make_krea2_edit_attn_forward(original_attn_forward: Callable[..., torch.Tensor], exec_state: Krea2EditExecutionState, total_refs: int):
+
+    def forward(self, x: torch.Tensor, freqs: Any = None, mask: Any = None, transformer_options: dict[str, Any] = {}) -> torch.Tensor:
         ref_tokens = transformer_options.get("reference_image_num_tokens")
         if not ref_tokens or (exec_state.ref_boost == 1.0 and exec_state.ref_boost_a == 1.0):
             return original_attn_forward(x, freqs=freqs, mask=mask, transformer_options=transformer_options)
@@ -4308,10 +3483,7 @@ def _make_krea2_edit_attn_forward(
             q_c = comfy.ldm.modules.attention.AttentionTensorContainer(q)
             k_c = comfy.ldm.modules.attention.AttentionTensorContainer(k)
             v_c = comfy.ldm.modules.attention.AttentionTensorContainer(v)
-            out = comfy.ldm.modules.attention.optimized_attention_masked(
-                q_c, k_c, v_c, self.heads, mask=mask, skip_reshape=True,
-                preferred_attention=self.comfy_attention, transformer_options=transformer_options,
-            )
+            out = comfy.ldm.modules.attention.optimized_attention_masked(q_c, k_c, v_c, self.heads, mask=mask, skip_reshape=True, preferred_attention=self.comfy_attention, transformer_options=transformer_options)
             if "block_index" in transformer_options and "attn1_output_patch" in transformer_patches:
                 for p in transformer_patches["attn1_output_patch"]:
                     out = p(out, extra_options)
@@ -4419,11 +3591,7 @@ def patch_krea2_edit_model(
             out = orig_extra_conds(**extra_kwargs)
             existing = extra_kwargs.get("reference_latents", None) or []
             proc = getattr(self, "process_latent_in", None)
-            all_refs = list(node_ref_latents) + [
-                proc(lat) if callable(proc) else lat
-                for lat in existing
-                if torch.is_tensor(lat)
-            ]
+            all_refs = list(node_ref_latents) + [proc(lat) if callable(proc) else lat for lat in existing if torch.is_tensor(lat)]
             if all_refs and comfy is not None and hasattr(comfy, "conds"):
                 out["ref_latents"] = comfy.conds.CONDList(all_refs)
                 out["ref_latents_method"] = comfy.conds.CONDConstant("index_timestep_zero")
@@ -4433,20 +3601,10 @@ def patch_krea2_edit_model(
 
     total_refs = len(node_ref_latents) or 1
     cached_txtfusion = Krea2CachedTextFusion(diffusion_model.txtfusion) if (cache_text_fusion and hasattr(diffusion_model, "txtfusion")) else None
-    exec_state = Krea2EditExecutionState(
-        ref_position=ref_position,
-        ref_position_a=ref_position_a,
-        ref_boost=ref_boost,
-        ref_boost_a=ref_boost_a,
-        boost_mode=boost_mode,
-        cached_txtfusion=cached_txtfusion,
-    )
+    exec_state = Krea2EditExecutionState(ref_position=ref_position, ref_position_a=ref_position_a, ref_boost=ref_boost, ref_boost_a=ref_boost_a, boost_mode=boost_mode, cached_txtfusion=cached_txtfusion)
 
     if hasattr(diffusion_model, "process_img"):
-        patched_process_img = types.MethodType(
-            _make_krea2_edit_process_img(diffusion_model.process_img, exec_state, total_refs),
-            diffusion_model,
-        )
+        patched_process_img = types.MethodType(_make_krea2_edit_process_img(diffusion_model.process_img, exec_state, total_refs), diffusion_model)
         patched.add_object_patch("diffusion_model.process_img", patched_process_img)
 
     if cached_txtfusion is not None:
@@ -4454,22 +3612,12 @@ def patch_krea2_edit_model(
 
     if hasattr(diffusion_model, "blocks"):
         for index, block in enumerate(diffusion_model.blocks):
-            patched_attn = types.MethodType(
-                _make_krea2_edit_attn_forward(block.attn.forward, exec_state, total_refs),
-                block.attn,
-            )
+            patched_attn = types.MethodType(_make_krea2_edit_attn_forward(block.attn.forward, exec_state, total_refs), block.attn)
             patched.add_object_patch(f"diffusion_model.blocks.{index}.attn.forward", patched_attn)
 
     if hasattr(patched, "remove_wrappers_with_key"):
-        patched.remove_wrappers_with_key(
-            comfy.patcher_extension.WrappersMP.OUTER_SAMPLE,
-            KREA2_EDIT_OUTER_SAMPLE_WRAPPER_KEY,
-        )
-    patched.add_wrapper_with_key(
-        comfy.patcher_extension.WrappersMP.OUTER_SAMPLE,
-        KREA2_EDIT_OUTER_SAMPLE_WRAPPER_KEY,
-        Krea2EditSamplingScope(exec_state),
-    )
+        patched.remove_wrappers_with_key(comfy.patcher_extension.WrappersMP.OUTER_SAMPLE, KREA2_EDIT_OUTER_SAMPLE_WRAPPER_KEY)
+    patched.add_wrapper_with_key(comfy.patcher_extension.WrappersMP.OUTER_SAMPLE, KREA2_EDIT_OUTER_SAMPLE_WRAPPER_KEY, Krea2EditSamplingScope(exec_state))
     patched.model_options[KREA2_EDIT_OWNER_KEY] = True
     return patched
 
@@ -4482,18 +3630,13 @@ def parse_h3_context_frames(option: Any, default: int) -> int:
     return int(match.group()) if match else default
 
 
-def patch_minimax_h3_context_windows(
-    model: Any,
-    window_size: Any = "124 frames (~5.2s - Standard)",
-    overlap: Any = "39 frames (~1.6s - Standard)",
-    blend_profile: str = "pyramid",
-    freenoise: bool = True,
-) -> Any:
+def patch_minimax_h3_context_windows(model: Any, window_size: Any = "124 frames (~5.2s - Standard)", overlap: Any = "39 frames (~1.6s - Standard)", blend_profile: str = "pyramid", freenoise: bool = True) -> Any:
     """Patch a MiniMax H3 model with sliding temporal context windows aligned to its 17n+5 grid."""
     if str(window_size).strip().lower().startswith("disable"):
         return model
 
     import comfy.context_windows
+
     from .sampling_helpers import h3_snap_frame_count
 
     w_frames = h3_snap_frame_count(parse_h3_context_frames(window_size, 124))
@@ -4509,18 +3652,7 @@ def patch_minimax_h3_context_windows(
 
     patched = model.clone()
     patched.model_options["context_handler"] = comfy.context_windows.IndexListContextHandler(
-        context_schedule=sched_enum,
-        fuse_method=fuse_enum,
-        context_length=ctx_len,
-        context_overlap=ctx_ov,
-        context_stride=1,
-        closed_loop=False,
-        dim=2,
-        freenoise=bool(freenoise),
-        cond_retain_index_list="",
-        split_conds_to_windows=False,
-        latent_retain_index_list="",
-        causal_window_fix=False,
+        context_schedule=sched_enum, fuse_method=fuse_enum, context_length=ctx_len, context_overlap=ctx_ov, context_stride=1, closed_loop=False, dim=2, freenoise=bool(freenoise), cond_retain_index_list="", split_conds_to_windows=False, latent_retain_index_list="", causal_window_fix=False
     )
     comfy.context_windows.create_prepare_sampling_wrapper(patched)
     if freenoise:
@@ -4528,3 +3660,224 @@ def patch_minimax_h3_context_windows(
     return patched
 
 
+MINIMAX_H3_SPATIAL_TILE_WRAPPER_KEY = "uc_minimax_h3_spatial_tiles"
+H3_SPATIAL_BLEND_PROFILES = ("cosine", "pyramid")
+
+
+def _h3_px_to_lat_even(px: int) -> int:
+    return max(2, (round(int(px) / 16) // 2) * 2)
+
+
+def _h3_snap_lat_even(val: float) -> int:
+    return max(0, int(round(float(val) / 2)) * 2)
+
+
+def compute_h3_spatial_tile_axis(size: int, tile: int, overlap: int, min_tile: int = 0) -> tuple[list[int], list[int], list[int], list[int]]:
+    if size <= tile:
+        return [0], [size], [0], [0]
+    stride = max(2, tile - overlap)
+    count = math.ceil((size - overlap) / stride)
+    if (count - 1) * stride + tile < size:
+        count += 1
+    starts = [i * stride for i in range(count)]
+    lengths = [min(tile, size - s) for s in starts]
+    if min_tile > 0 and count >= 2:
+        edge = size - starts[-1]
+        if edge < min_tile:
+            new_last = _h3_snap_lat_even(size - min_tile)
+            if starts[-2] < new_last < starts[-2] + lengths[-2]:
+                starts[-1] = new_last
+                lengths[-1] = size - new_last
+    prev_ovl = [0] * count
+    for i in range(1, count):
+        prev_ovl[i] = max(0, starts[i - 1] + lengths[i - 1] - starts[i])
+    next_ovl = [prev_ovl[i + 1] if i + 1 < count else 0 for i in range(count)]
+    return starts, lengths, prev_ovl, next_ovl
+
+
+def build_h3_spatial_tile_weight(tile_h: int, tile_w: int, top_ov: int, bottom_ov: int, left_ov: int, right_ov: int, blend_profile: str, device: torch.device, dtype: torch.dtype) -> torch.Tensor:
+
+    def _axis_w(length: int, lead_ov: int, tail_ov: int) -> torch.Tensor:
+        w = torch.ones(length, device=device, dtype=torch.float32)
+        lo = min(lead_ov, length)
+        if lo > 0:
+            t = torch.arange(1, lo + 1, device=device, dtype=torch.float32) / float(lo + 1)
+            ramp = 0.5 * (1.0 - torch.cos(math.pi * t)) if blend_profile == "cosine" else t
+            w[:lo] = torch.minimum(w[:lo], ramp)
+        ro = min(tail_ov, length)
+        if ro > 0:
+            t = torch.arange(ro, 0, -1, device=device, dtype=torch.float32) / float(ro + 1)
+            ramp = 0.5 * (1.0 - torch.cos(math.pi * t)) if blend_profile == "cosine" else t
+            w[length - ro :] = torch.minimum(w[length - ro :], ramp)
+        return w.clamp_min(1e-4)
+
+    wy = _axis_w(tile_h, top_ov, bottom_ov).view(1, 1, 1, tile_h, 1)
+    wx = _axis_w(tile_w, left_ov, right_ov).view(1, 1, 1, 1, tile_w)
+    return (wy * wx).to(dtype=dtype)
+
+
+def _find_conds_latent_shapes(conds: Sequence[Any]) -> list[torch.Size] | None:
+    for cond_list in conds:
+        if not cond_list:
+            continue
+        for c_dict in cond_list:
+            mc = c_dict.get("model_conds", {})
+            ls_obj = mc.get("latent_shapes")
+            if ls_obj is not None:
+                shapes = getattr(ls_obj, "cond", ls_obj)
+                if shapes:
+                    return list(shapes)
+    return None
+
+
+def _crop_h3_conds_for_spatial_tile(conds: Sequence[Any], h_full: int, w_full: int, r0: int, c0: int, tr: int, tc: int, tile_shapes: list[torch.Size] | None) -> list[Any]:
+    import comfy.conds
+
+    cropped_outer: list[Any] = []
+    for cond_list in conds:
+        if not cond_list:
+            cropped_outer.append(cond_list)
+            continue
+        new_list = []
+        for c_dict in cond_list:
+            nc = dict(c_dict)
+            mask = nc.get("mask")
+            if torch.is_tensor(mask) and mask.ndim >= 2 and mask.shape[-2] == h_full and mask.shape[-1] == w_full:
+                nc["mask"] = mask[..., r0 : r0 + tr, c0 : c0 + tc].contiguous()
+            mc = dict(nc.get("model_conds", {}))
+            if tile_shapes is not None and "latent_shapes" in mc:
+                ls_obj = mc["latent_shapes"]
+                mc["latent_shapes"] = ls_obj._copy_with(tile_shapes) if hasattr(ls_obj, "_copy_with") else comfy.conds.CONDConstant(tile_shapes)
+            if "denoise_mask" in mc:
+                dm_obj = mc["denoise_mask"]
+                dm_val = getattr(dm_obj, "cond", dm_obj)
+                if torch.is_tensor(dm_val) and dm_val.ndim == 5 and dm_val.shape[-2] == h_full and dm_val.shape[-1] == w_full:
+                    dm_crop = dm_val[..., r0 : r0 + tr, c0 : c0 + tc].contiguous()
+                    mc["denoise_mask"] = dm_obj._copy_with(dm_crop) if hasattr(dm_obj, "_copy_with") else dm_crop
+            if "minimax_payload" in mc:
+                mp_obj = mc["minimax_payload"]
+                payload = getattr(mp_obj, "cond", None)
+                if isinstance(payload, dict):
+                    new_payload = {k: v for k, v in payload.items() if k != "layout"}
+                    kfs = payload.get("keyframes")
+                    if kfs:
+                        cropped_kfs = []
+                        for kf in kfs:
+                            nkf = dict(kf)
+                            lt = kf.get("latent")
+                            if torch.is_tensor(lt) and lt.ndim == 5:
+                                if lt.shape[3] == h_full and lt.shape[4] == w_full:
+                                    nkf["latent"] = lt[:, :, :, r0 : r0 + tr, c0 : c0 + tc].contiguous()
+                                else:
+                                    b_k, c_k, t_k, h_k, w_k = lt.shape
+                                    lt_res = F.interpolate(lt.to(torch.float32).reshape(b_k * t_k, c_k, h_k, w_k), size=(h_full, w_full), mode="bilinear", align_corners=False).to(lt.dtype).reshape(b_k, c_k, t_k, h_full, w_full)
+                                    nkf["latent"] = lt_res[:, :, :, r0 : r0 + tr, c0 : c0 + tc].contiguous()
+                            cropped_kfs.append(nkf)
+                        new_payload["keyframes"] = cropped_kfs
+                        refs = payload.get("refs") or []
+                        new_payload["cond_video_latents"] = [kf["latent"] for kf in cropped_kfs if kf.get("latent") is not None] + [r["latent"] for r in refs if "latent" in r]
+                        new_payload["cond_audio_latents"] = [kf["audio_latent"] for kf in cropped_kfs if kf.get("audio_latent") is not None] + [r["audio_latent"] for r in refs if r.get("audio_latent") is not None]
+                    mc["minimax_payload"] = mp_obj._copy_with(new_payload) if hasattr(mp_obj, "_copy_with") else comfy.conds.CONDConstant(new_payload)
+            nc["model_conds"] = mc
+            new_list.append(nc)
+        cropped_outer.append(new_list)
+    return cropped_outer
+
+
+def patch_minimax_h3_spatial_tiles(model: Any, tile_width: int = 768, tile_height: int = 768, overlap_ratio: float = 0.25, min_tile_size: int = 256, blend_profile: str = "cosine") -> Any:
+    """Patch a MiniMax H3 model to evaluate overlapping 2D spatial tiles per denoising step."""
+    profile = str(blend_profile or "cosine").strip().lower()
+    if profile not in H3_SPATIAL_BLEND_PROFILES:
+        raise ValueError(f"Unsupported spatial blend_profile {blend_profile!r}; choose from {H3_SPATIAL_BLEND_PROFILES}.")
+
+    tw = _h3_px_to_lat_even(tile_width)
+    th = _h3_px_to_lat_even(tile_height)
+    ol_w = min(tw - 2, _h3_snap_lat_even(tw * float(overlap_ratio)))
+    ol_h = min(th - 2, _h3_snap_lat_even(th * float(overlap_ratio)))
+    mt = min(_h3_px_to_lat_even(min_tile_size), th, tw) if int(min_tile_size) > 0 else 0
+
+    def _spatial_tile_calc_cond_batch(executor, inner_model, conds, x_in, timestep, model_options):
+        latent_shapes = _find_conds_latent_shapes(conds)
+        is_packed_av = latent_shapes is not None and len(latent_shapes) > 1
+        if is_packed_av:
+            streams = comfy.utils.unpack_latents(x_in, latent_shapes)
+            video = streams[0]
+            extra_streams = list(streams[1:])
+        elif torch.is_tensor(x_in) and x_in.ndim == 5:
+            video = x_in
+            extra_streams = []
+        else:
+            return executor(inner_model, conds, x_in, timestep, model_options)
+
+        if video.ndim != 5:
+            return executor(inner_model, conds, x_in, timestep, model_options)
+
+        b_sz, c_sz, t_len, h_full, w_full = video.shape
+        rows, trows, top_ovl, bottom_ovl = compute_h3_spatial_tile_axis(h_full, th, ol_h, mt)
+        cols, tcols, left_ovl, right_ovl = compute_h3_spatial_tile_axis(w_full, tw, ol_w, mt)
+        if len(rows) == 1 and len(cols) == 1:
+            return executor(inner_model, conds, x_in, timestep, model_options)
+
+        num_branches = len(conds)
+        video_acc = [torch.zeros_like(video, dtype=torch.float32) for _ in range(num_branches)]
+        video_w_acc = torch.zeros((1, 1, 1, h_full, w_full), device=video.device, dtype=torch.float32)
+        extra_acc = [[torch.zeros_like(s, dtype=torch.float32) for s in extra_streams] for _ in range(num_branches)]
+        extra_w_sum = 0.0
+
+        orig_model_shapes = getattr(inner_model, "latent_shapes", None)
+        try:
+            for ri, r0 in enumerate(rows):
+                tr = trows[ri]
+                for cj, c0 in enumerate(cols):
+                    tc = tcols[cj]
+                    v_tile = video[:, :, :, r0 : r0 + tr, c0 : c0 + tc].contiguous()
+                    if is_packed_av:
+                        tile_x_in, tile_shapes = comfy.utils.pack_latents([v_tile, *extra_streams])
+                    else:
+                        tile_x_in = v_tile
+                        tile_shapes = None
+
+                    tile_conds = _crop_h3_conds_for_spatial_tile(conds, h_full, w_full, r0, c0, tr, tc, tile_shapes)
+                    tile_opts = dict(model_options)
+                    t_opts = dict(tile_opts.get("transformer_options", {}))
+                    t_opts["uc_spatial_tile"] = (ri, cj, r0, c0, tr, tc)
+                    tile_opts["transformer_options"] = t_opts
+
+                    tile_outs = executor(inner_model, tile_conds, tile_x_in, timestep, tile_opts)
+                    w_2d = build_h3_spatial_tile_weight(tr, tc, top_ovl[ri], bottom_ovl[ri], left_ovl[cj], right_ovl[cj], profile, video.device, torch.float32)
+                    video_w_acc[:, :, :, r0 : r0 + tr, c0 : c0 + tc] += w_2d
+                    area_w = float(tr * tc)
+                    extra_w_sum += area_w
+
+                    for bi in range(num_branches):
+                        out_b = tile_outs[bi]
+                        if is_packed_av:
+                            unpacked_b = comfy.utils.unpack_latents(out_b, tile_shapes)
+                            v_out = unpacked_b[0]
+                            for si, s_out in enumerate(unpacked_b[1:]):
+                                extra_acc[bi][si].add_(s_out.to(torch.float32), alpha=area_w)
+                        else:
+                            v_out = out_b
+                        video_acc[bi][:, :, :, r0 : r0 + tr, c0 : c0 + tc] += v_out.to(torch.float32) * w_2d
+        finally:
+            if orig_model_shapes is not None:
+                inner_model.latent_shapes = orig_model_shapes
+
+        inv_vw = 1.0 / video_w_acc.clamp_min(1e-6)
+        inv_aw = 1.0 / max(extra_w_sum, 1e-6)
+        final_branches: list[torch.Tensor] = []
+        for bi in range(num_branches):
+            fused_v = (video_acc[bi] * inv_vw).to(dtype=video.dtype)
+            if is_packed_av:
+                fused_extras = [(acc * inv_aw).to(dtype=orig.dtype) for acc, orig in zip(extra_acc[bi], extra_streams)]
+                packed_out, _ = comfy.utils.pack_latents([fused_v, *fused_extras])
+                final_branches.append(packed_out)
+            else:
+                final_branches.append(fused_v)
+        return final_branches
+
+    patched = model.clone()
+    wrapper_type = comfy.patcher_extension.WrappersMP.CALC_COND_BATCH
+    patched.remove_wrappers_with_key(wrapper_type, MINIMAX_H3_SPATIAL_TILE_WRAPPER_KEY)
+    patched.add_wrapper_with_key(wrapper_type, MINIMAX_H3_SPATIAL_TILE_WRAPPER_KEY, _spatial_tile_calc_cond_batch)
+    return patched
