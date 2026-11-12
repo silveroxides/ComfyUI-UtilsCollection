@@ -1,38 +1,24 @@
+import base64
 import json
 import logging
-from .image_helpers import format_video_timestamp
-import unicodedata
 import string
-import base64
+import unicodedata
 import zlib
 from collections.abc import Mapping
 from dataclasses import dataclass, field, fields, replace
 from functools import cached_property, lru_cache
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple, Union
+
+import torchaudio.functional
 from torch import Tensor
 from torch.distributions import Categorical
-import torchaudio.functional
+
+from .image_helpers import format_video_timestamp
+
 try:
     import tiktoken
 except ImportError:
     tiktoken = None
-from comfy.model_management import throw_exception_if_processing_interrupted
-from ..models.whisper import ModelDimensions, Whisper
-from .whisper_timing_helpers import alignment_heads, add_word_timestamps
-from .video_helpers import (
-    VideoCompareType, audio_overlap_similarity, compute_video_signatures,
-    cross_correlate_video_signatures, rank_video_overlap_candidates,
-)
-import numpy as np
-import comfy.model_patcher
-import comfy.ops
-from ..model_assets import download_huggingface_model, get_model_migration, MODEL_MIGRATIONS
-from ..models.openpose import BodyPoseModel, HandPoseModel, FacePoseModel
-from ..models.yolox import YOLOXDetector
-from ..models.rtmpose import RTMPoseEstimator, AP10KPoseEstimator
-from ..models.densepose import DensePoseModel
-from ..models.depth_anything import DA3Small, DA3Base, DA3Large, DA3MonoLarge
-from ..models.yolo import YOLOv8nSeg, YOLOv8mSeg, YOLOv8sDetect, YOLOv8mDetect, YOLO11xDetect
 import math
 import numbers
 import os
@@ -41,42 +27,43 @@ import tempfile
 from contextlib import closing
 from pathlib import Path
 
+import comfy.model_management
+import comfy.model_patcher
+import comfy.ops
+import comfy.utils
+import folder_paths
 import node_helpers
+import numpy as np
 import torch
 import torch.nn.functional as F
+from comfy.model_management import throw_exception_if_processing_interrupted
 from comfy.nested_tensor import NestedTensor
 from unifiedefficientloader import IncrementalSafetensorsWriter, MemoryEfficientSafeOpen
 
-import comfy.model_management
-import comfy.utils
-import folder_paths
-
-from .encoder_helpers import (
-    _encode_minimax_h3_audio_reference,
-    encode_minimax_h3_ref_vlm,
-    fuse_minimax_h3_ref_vlm_images,
-    prepare_minimax_h3_reference_image,
-    prepare_minimax_h3_reference_video,
-    validate_minimax_h3_clip_continuation_media,
-)
-from .helper_functions import atomic_uel_writer, read_uel_safetensors_dict
+from ..model_assets import MODEL_MIGRATIONS, download_huggingface_model, get_model_migration
+from ..models.densepose import DensePoseModel
+from ..models.depth_anything import DA3Base, DA3Large, DA3MonoLarge, DA3Small
+from ..models.minimax_h3_latent_upscaler import DEFAULT_CHUNK_FRAMES as H3_UPSCALER_DEFAULT_CHUNK_FRAMES
+from ..models.minimax_h3_latent_upscaler import MiniMaxH3LatentUpscaler2D
+from ..models.openpose import BodyPoseModel, FacePoseModel, HandPoseModel
+from ..models.rtmpose import AP10KPoseEstimator, RTMPoseEstimator
+from ..models.whisper import ModelDimensions, Whisper
+from ..models.yolo import YOLO11xDetect, YOLOv8mDetect, YOLOv8mSeg, YOLOv8nSeg, YOLOv8sDetect
+from ..models.yolox import YOLOXDetector
+from .encoder_helpers import _encode_minimax_h3_audio_reference, encode_minimax_h3_ref_vlm, fuse_minimax_h3_ref_vlm_images, prepare_minimax_h3_reference_image, prepare_minimax_h3_reference_video, validate_minimax_h3_clip_continuation_media
+from .helper_functions import atomic_uel_writer
 from .minimax_h3_guide_helpers import splice_conditioning
-
+from .video_helpers import VideoCompareType, audio_overlap_similarity, compute_video_signatures, cross_correlate_video_signatures, rank_video_overlap_candidates
+from .whisper_timing_helpers import add_word_timestamps, alignment_heads
 
 MINIMAX_H3_CONTINUATION_CANDIDATE_COMPARE_TYPE = VideoCompareType.DHASH
-
 
 SAM3_WORKING_SIZE = 1008
 SAM3_EDGE_PADDING = 32
 
-
 MODEL_FOLDER = MODEL_MIGRATIONS["folder_category"]
 MODEL_REPO = MODEL_MIGRATIONS["hf_repo"]
-CHECKPOINTS = {
-    "body": (get_model_migration("openpose_body")["filename"], BodyPoseModel),
-    "hand": (get_model_migration("openpose_hand")["filename"], HandPoseModel),
-    "face": (get_model_migration("openpose_face")["filename"], FacePoseModel),
-}
+CHECKPOINTS = {"body": (get_model_migration("openpose_body")["filename"], BodyPoseModel), "hand": (get_model_migration("openpose_hand")["filename"], HandPoseModel), "face": (get_model_migration("openpose_face")["filename"], FacePoseModel)}
 
 
 def register_openpose_paths():
@@ -121,11 +108,7 @@ def load_pose_safetensors(path, architecture):
         missing = sorted(set(expected) - actual_keys)
         unexpected = sorted(actual_keys - set(expected))
         if missing or unexpected:
-            raise ValueError(
-                f"Invalid {architecture.__name__} checkpoint keys in {path}: "
-                f"missing ({len(missing)})={missing[:10]}, "
-                f"unexpected ({len(unexpected)})={unexpected[:10]}."
-            )
+            raise ValueError(f"Invalid {architecture.__name__} checkpoint keys in {path}: missing ({len(missing)})={missing[:10]}, unexpected ({len(unexpected)})={unexpected[:10]}.")
         metadata = handler.metadata() or {}
         if metadata.get("architecture") != architecture.__name__:
             raise ValueError(f"Expected architecture metadata {architecture.__name__}")
@@ -155,9 +138,7 @@ def load_pose_safetensors(path, architecture):
     model.train(False)
     offload = comfy.model_management.unet_offload_device()
     model.to(offload)
-    return comfy.model_patcher.CoreModelPatcher(
-        model, load_device=comfy.model_management.get_torch_device(), offload_device=offload,
-    )
+    return comfy.model_patcher.CoreModelPatcher(model, load_device=comfy.model_management.get_torch_device(), offload_device=offload)
 
 
 def openpose_forward(patcher, images):
@@ -171,10 +152,7 @@ def openpose_forward(patcher, images):
     return output.detach().movedim(1, -1).cpu().numpy()
 
 
-DWPOSE_CHECKPOINTS = {
-    "detector": get_model_migration("dwpose_detector")["filename"],
-    "pose": get_model_migration("dwpose_pose")["filename"],
-}
+DWPOSE_CHECKPOINTS = {"detector": get_model_migration("dwpose_detector")["filename"], "pose": get_model_migration("dwpose_pose")["filename"]}
 
 
 def load_dwpose_model(kind):
@@ -271,12 +249,7 @@ def yolo_forward(patcher, images_nchw):
 
 
 DEPTH_ANYTHING_FOLDER = "depthanything3"
-DEPTH_ANYTHING_MIGRATIONS = {
-    "da3_small.safetensors": ("da3_small", DA3Small),
-    "da3_base.safetensors": ("da3_base", DA3Base),
-    "da3_large.safetensors": ("da3_large", DA3Large),
-    "da3mono_large.safetensors": ("da3mono_large", DA3MonoLarge),
-}
+DEPTH_ANYTHING_MIGRATIONS = {"da3_small.safetensors": ("da3_small", DA3Small), "da3_base.safetensors": ("da3_base", DA3Base), "da3_large.safetensors": ("da3_large", DA3Large), "da3mono_large.safetensors": ("da3mono_large", DA3MonoLarge)}
 DEPTH_ANYTHING_MODELS = tuple(DEPTH_ANYTHING_MIGRATIONS)
 _DEPTH_ANYTHING_ALIASES = {
     **{name: name for name in DEPTH_ANYTHING_MIGRATIONS},
@@ -301,10 +274,7 @@ def resolve_depth_anything_model_name(model_name):
     normalized = str(model_name or "").strip().replace("\\", "/").split("/")[-1].lower()
     if normalized in _DEPTH_ANYTHING_ALIASES:
         return _DEPTH_ANYTHING_ALIASES[normalized]
-    raise ValueError(
-        f"Unknown Depth Anything 3 model: {model_name!r}. "
-        f"Available models: {', '.join(DEPTH_ANYTHING_MODELS)}"
-    )
+    raise ValueError(f"Unknown Depth Anything 3 model: {model_name!r}. Available models: {', '.join(DEPTH_ANYTHING_MODELS)}")
 
 
 def load_depth_anything_model(model_name):
@@ -320,15 +290,8 @@ def depth_anything_forward(patcher, images_5d, ref_view_strategy="saddle_balance
     comfy.model_management.throw_exception_if_processing_interrupted()
     comfy.model_management.load_models_gpu([patcher])
     dtype = next(patcher.model.parameters()).dtype
-    output = patcher.model(
-        images_5d.to(device=patcher.load_device, dtype=dtype),
-        ref_view_strategy=ref_view_strategy,
-        compute_ray=compute_ray,
-    )
-    return {
-        key: value.detach().float().cpu() if torch.is_tensor(value) else value
-        for key, value in output.items()
-    }
+    output = patcher.model(images_5d.to(device=patcher.load_device, dtype=dtype), ref_view_strategy=ref_view_strategy, compute_ray=compute_ray)
+    return {key: value.detach().float().cpu() if torch.is_tensor(value) else value for key, value in output.items()}
 
 
 def _extract_text_prompts(conditioning, device, dtype):
@@ -363,13 +326,7 @@ def _sam3_axis_ranges(length, count, tile_size):
     offsets = [0]
     for offset in range(1, count // 2 + 1):
         offsets.extend((-offset, offset))
-    return [
-        (
-            max(0, round(center_start + offset * stride)),
-            min(length, round(center_start + offset * stride) + tile_size),
-        )
-        for offset in offsets
-    ]
+    return [(max(0, round(center_start + offset * stride)), min(length, round(center_start + offset * stride) + tile_size)) for offset in offsets]
 
 
 def _sam3_long_axis_tile_count(longest, shortest):
@@ -385,11 +342,7 @@ def _sam3_tile_records(height, width, edge_padding):
     padded_height = height + edge_padding * 2
     padded_width = width + edge_padding * 2
     tile_size = min(padded_height, padded_width)
-    return [
-        (y0, y1, x0, x1)
-        for y0, y1 in _sam3_axis_ranges(padded_height, rows, tile_size)
-        for x0, x1 in _sam3_axis_ranges(padded_width, columns, tile_size)
-    ]
+    return [(y0, y1, x0, x1) for y0, y1 in _sam3_axis_ranges(padded_height, rows, tile_size) for x0, x1 in _sam3_axis_ranges(padded_width, columns, tile_size)]
 
 
 def _padded_sam3_tile(image, y0, y1, x0, x1, device, dtype):
@@ -400,11 +353,7 @@ def _padded_sam3_tile(image, y0, y1, x0, x1, device, dtype):
     pad_width = square_size - tile_width
     pad_top = pad_height if y0 == 0 else 0 if y1 == image.shape[-2] else pad_height // 2
     pad_left = pad_width if x0 == 0 else 0 if x1 == image.shape[-1] else pad_width // 2
-    padded = F.pad(
-        tile,
-        (pad_left, square_size - tile_width - pad_left, pad_top, square_size - tile_height - pad_top),
-        mode="replicate",
-    )
+    padded = F.pad(tile, (pad_left, square_size - tile_width - pad_left, pad_top, square_size - tile_height - pad_top), mode="replicate")
     if square_size > SAM3_WORKING_SIZE:
         frame = comfy.utils.common_upscale(padded, SAM3_WORKING_SIZE, SAM3_WORKING_SIZE, "lanczos", crop="disabled")
     else:
@@ -472,10 +421,7 @@ def _minimax_h3_clip_continuation_saved_path(relative_path: str) -> Path:
     return path
 
 
-def trim_minimax_h3_clip_continuation(
-    images: torch.Tensor, audio: dict | None, trim_leading_frames: int,
-    trim_trailing_frames: int = 0, fps: float = 24.0, match_tail: bool = True,
-) -> tuple[torch.Tensor, dict | None]:
+def trim_minimax_h3_clip_continuation(images: torch.Tensor, audio: dict | None, trim_leading_frames: int, trim_trailing_frames: int = 0, fps: float = 24.0, match_tail: bool = True) -> tuple[torch.Tensor, dict | None]:
     """Trim clip ends and keep decoded audio sample-aligned."""
     if not torch.is_tensor(images) or images.ndim != 4 or images.shape[0] < 1:
         raise ValueError("MiniMax H3 Clip Continuation images must be non-empty BHWC frames.")
@@ -493,7 +439,7 @@ def trim_minimax_h3_clip_continuation(
     if not math.isfinite(fps) or fps <= 0:
         raise ValueError("MiniMax H3 Clip Continuation fps must be positive.")
     stop = images.shape[0] - int(trim_trailing_frames) if trim_trailing_frames else None
-    frames = images[int(trim_leading_frames):stop]
+    frames = images[int(trim_leading_frames) : stop]
     if audio is None:
         return frames, None
     waveform = audio.get("waveform") if isinstance(audio, Mapping) else None
@@ -508,7 +454,7 @@ def trim_minimax_h3_clip_continuation(
         trail = round(int(trim_trailing_frames) * sample_rate / fps)
         if trail >= waveform.shape[-1]:
             raise ValueError("MiniMax H3 Clip Continuation trim removes all audio.")
-        waveform = waveform[..., :waveform.shape[-1] - trail]
+        waveform = waveform[..., : waveform.shape[-1] - trail]
     elif match_tail or trim_trailing_frames:
         wanted = round(frames.shape[0] * sample_rate / fps)
         waveform = waveform[..., :wanted]
@@ -517,9 +463,7 @@ def trim_minimax_h3_clip_continuation(
     return frames, {"waveform": waveform, "sample_rate": sample_rate}
 
 
-def combine_minimax_h3_clip_continuations(
-    clips: Sequence[torch.Tensor], audio_clips: Sequence[dict | None], fps: int = 24,
-) -> tuple[torch.Tensor, dict | None]:
+def combine_minimax_h3_clip_continuations(clips: Sequence[torch.Tensor], audio_clips: Sequence[dict | None], fps: int = 24) -> tuple[torch.Tensor, dict | None]:
     """Join already-trimmed H3 clips with audio normalized to each clip duration."""
     if not clips:
         raise ValueError("Connect at least one MiniMax H3 Clip Continuation clip.")
@@ -562,9 +506,7 @@ def combine_minimax_h3_clip_continuations(
     return merged_frames, {"waveform": torch.cat(merged_audio, dim=-1), "sample_rate": target_rate}
 
 
-def accumulate_minimax_h3_clip_continuations(
-    image_batches: Sequence[torch.Tensor], audio_batches: Sequence[dict | None],
-) -> tuple[torch.Tensor, dict | None]:
+def accumulate_minimax_h3_clip_continuations(image_batches: Sequence[torch.Tensor], audio_batches: Sequence[dict | None]) -> tuple[torch.Tensor, dict | None]:
     """Join compatible accumulated clip batches without changing their audio."""
     if not image_batches or len(image_batches) != len(audio_batches):
         raise ValueError("MiniMax H3 Clip Continuation accumulation needs matching image and audio batches.")
@@ -745,10 +687,7 @@ def audio_batch_to_list(audio: dict | None) -> list[dict]:
     if waveform.ndim == 2:
         return [{"waveform": waveform.unsqueeze(0), "sample_rate": sample_rate}]
     batch_size = waveform.shape[0]
-    return [
-        {"waveform": waveform[i : i + 1].clone(), "sample_rate": sample_rate}
-        for i in range(batch_size)
-    ]
+    return [{"waveform": waveform[i : i + 1].clone(), "sample_rate": sample_rate} for i in range(batch_size)]
 
 
 def snapshot_minimax_h3_clip_continuation_media(media: dict | None) -> dict | None:
@@ -766,16 +705,11 @@ def snapshot_minimax_h3_clip_continuation_media(media: dict | None) -> dict | No
         snapshot["audio"] = None
     if media.get("latent") is not None and isinstance(media["latent"], dict):
         parts = h3_streams_from_latent(media["latent"])
-        snapshot["latent"] = {
-            "samples": NestedTensor(tuple(p.detach().cpu().clone() for p in parts))
-        }
+        snapshot["latent"] = {"samples": NestedTensor(tuple(p.detach().cpu().clone() for p in parts))}
     return snapshot
 
 
-def rank_minimax_h3_continuation_media_candidates(
-    frames: torch.Tensor, current: torch.Tensor, maximum_frames: int,
-    near_identical_tolerance: float,
-) -> list[tuple[int, float]]:
+def rank_minimax_h3_continuation_media_candidates(frames: torch.Tensor, current: torch.Tensor, maximum_frames: int, near_identical_tolerance: float) -> list[tuple[int, float]]:
     """Correlate saved target context; convert temporal offsets into leading cuts."""
     limit = min(int(maximum_frames), current.shape[0] - 1)
     if limit < 1:
@@ -788,11 +722,7 @@ def rank_minimax_h3_continuation_media_candidates(
     required = min(shortest, max(2, math.ceil(shortest * 0.5)))
     candidates = []
     for offset in range(tail_count - limit, tail_count - required + 1):
-        result = cross_correlate_video_signatures(
-            reference, query, compare_type=compare_type,
-            min_overlap_fraction=0.5, min_overlap_frames=2,
-            min_offset_frames=offset, max_offset_frames=offset,
-        )
+        result = cross_correlate_video_signatures(reference, query, compare_type=compare_type, min_overlap_fraction=0.5, min_overlap_frames=2, min_offset_frames=offset, max_offset_frames=offset)
         if result.overlap_frames:
             candidates.append((tail_count - result.offset_frames, result.distance))
     if not candidates:
@@ -802,12 +732,7 @@ def rank_minimax_h3_continuation_media_candidates(
     return [(overlap, distance) for overlap, distance in candidates if distance <= ceiling]
 
 
-def align_minimax_h3_clip_continuation_join(
-    previous: torch.Tensor, current: torch.Tensor, threshold: float, maximum_frames: int,
-    near_identical_tolerance: float = 1.0, *, continuation_frames=None,
-    previous_audio=None, current_audio=None, fps: int = 24,
-    minimum_overlap_frames: int = 0,
-) -> tuple[int, int] | None:
+def align_minimax_h3_clip_continuation_join(previous: torch.Tensor, current: torch.Tensor, threshold: float, maximum_frames: int, near_identical_tolerance: float = 1.0, *, continuation_frames=None, previous_audio=None, current_audio=None, fps: int = 24, minimum_overlap_frames: int = 0) -> tuple[int, int] | None:
     """Score local temporal sequences, then choose an aligned two-sided seam."""
     logger = logging.getLogger(__name__)
     if tuple(previous.shape[1:]) != tuple(current.shape[1:]):
@@ -816,9 +741,7 @@ def align_minimax_h3_clip_continuation_join(
     query_count = min(int(maximum_frames), current.shape[0])
     minimum_overlap = int(minimum_overlap_frames)
     if continuation_frames is not None:
-        context_candidates = rank_minimax_h3_continuation_media_candidates(
-            continuation_frames, current, maximum_frames, near_identical_tolerance
-        )
+        context_candidates = rank_minimax_h3_continuation_media_candidates(continuation_frames, current, maximum_frames, near_identical_tolerance)
         if context_candidates:
             minimum_overlap = min(overlap for overlap, _distance in context_candidates)
     if min(reference_count, query_count) < 2:
@@ -837,26 +760,14 @@ def align_minimax_h3_clip_continuation_join(
     context_offset = None
     if continuation_frames is not None:
         context_signatures = compute_video_signatures(continuation_frames, compare_type)
-        anchors = [
-            cross_correlate_video_signatures(context_signatures, signatures, compare_type)
-            for signatures in (reference_signatures, query_signatures)
-        ]
-        if all(
-            anchor.distance <= 1.0 - minimum
-            and (
-                anchor.second_best_distance is None
-                or anchor.second_best_distance > anchor.distance + tolerance
-            )
-            for anchor in anchors
-        ):
+        anchors = [cross_correlate_video_signatures(context_signatures, signatures, compare_type) for signatures in (reference_signatures, query_signatures)]
+        if all(anchor.distance <= 1.0 - minimum and (anchor.second_best_distance is None or anchor.second_best_distance > anchor.distance + tolerance) for anchor in anchors):
             context_offset = anchors[1].offset_frames - anchors[0].offset_frames
         else:
             logger.warning("H3 join: saved-tail alignment is weak or ambiguous; using actual-clip evidence.")
     audio_first = _continuation_audio_waveform(previous_audio) if previous_audio is not None else None
     audio_second = _continuation_audio_waveform(current_audio) if current_audio is not None else None
-    if audio_first is not None and audio_second is not None and (
-        audio_first[1] != audio_second[1] or audio_first[0].shape[0] != audio_second[0].shape[0]
-    ):
+    if audio_first is not None and audio_second is not None and (audio_first[1] != audio_second[1] or audio_first[0].shape[0] != audio_second[0].shape[0]):
         raise ValueError("MiniMax H3 Clip Continuation overlap audio must have matching sample rates and channels.")
     candidates = []
     for offset in range(-query_count + 2, reference_count - 1):
@@ -864,10 +775,10 @@ def align_minimax_h3_clip_continuation_join(
         count = min(reference_count - first_start, query_count - second_start)
         if count < minimum_overlap:
             continue
-        first = reference_features[first_start:first_start + count]
-        second = query_features[second_start:second_start + count]
-        hashes_first = reference_signatures[first_start:first_start + count]
-        hashes_second = query_signatures[second_start:second_start + count]
+        first = reference_features[first_start : first_start + count]
+        second = query_features[second_start : second_start + count]
+        hashes_first = reference_signatures[first_start : first_start + count]
+        hashes_second = query_signatures[second_start : second_start + count]
         hash_similarity = 1.0 - (hashes_first != hashes_second).float().mean(dim=1)
         frame_similarity = F.cosine_similarity(first, second, dim=1).clamp(0, 1)
         motion = 1.0 - ((first[1:] - first[:-1]) - (second[1:] - second[:-1])).abs().mean(dim=1).clamp(0, 1)
@@ -885,8 +796,7 @@ def align_minimax_h3_clip_continuation_join(
                     continue
                 candidates.append((score, length, first_start + start, second_start + start, offset))
     if not candidates:
-        logger.warning("H3 join unchanged: no sequence meets %.1f%% within %d/%d frames.",
-                       threshold, reference_count, query_count)
+        logger.warning("H3 join unchanged: no sequence meets %.1f%% within %d/%d frames.", threshold, reference_count, query_count)
         return None
     floor = max(item[0] for item in candidates) - tolerance
     by_offset = {}
@@ -897,8 +807,7 @@ def align_minimax_h3_clip_continuation_join(
             if existing is None or (candidate[1], candidate[0], candidate[2]) > (existing[1], existing[0], existing[2]):
                 by_offset[offset] = candidate
     if not by_offset:
-        logger.warning("H3 join unchanged: no alignment satisfies the supplied tolerance %s.",
-                       near_identical_tolerance)
+        logger.warning("H3 join unchanged: no alignment satisfies the supplied tolerance %s.", near_identical_tolerance)
         return None
     ranked = []
     for score, length, first_start, second_start, offset in by_offset.values():
@@ -908,8 +817,8 @@ def align_minimax_h3_clip_continuation_join(
             samples = round(length * rate / fps)
             left_start = round((origin + first_start) * rate / fps)
             right_start = round(second_start * rate / fps)
-            left = audio_first[0][:, left_start:left_start + samples]
-            right = audio_second[0][:, right_start:right_start + samples]
+            left = audio_first[0][:, left_start : left_start + samples]
+            right = audio_second[0][:, right_start : right_start + samples]
             if left.shape[-1] == samples and right.shape[-1] == samples:
                 similarity = audio_overlap_similarity(left, right, length, fps, rate)
         if similarity is not None:
@@ -923,8 +832,7 @@ def align_minimax_h3_clip_continuation_join(
     elif len(finalists) == 1:
         chosen = finalists[0]
     else:
-        logger.warning("H3 join unchanged: %d competing temporal alignments within %.1f%%.",
-                       len(finalists), near_identical_tolerance)
+        logger.warning("H3 join unchanged: %d competing temporal alignments within %.1f%%.", len(finalists), near_identical_tolerance)
         return None
     _, length, first_start, second_start, _, similarity = chosen
     seams = []
@@ -936,10 +844,7 @@ def align_minimax_h3_clip_continuation_join(
         second_before = query_features[second_start + step - 1]
         second_after = query_features[second_start + step]
         bridge = second_after - first_before
-        visual_error = (
-            (bridge - (first_after - first_before)).square().mean()
-            + (bridge - (second_after - second_before)).square().mean()
-        ).item()
+        visual_error = ((bridge - (first_after - first_before)).square().mean() + (bridge - (second_after - second_before)).square().mean()).item()
         audio_error = 0.0
         if similarity is not None:
             left_cut = round(previous_keep * audio_first[1] / fps)
@@ -947,37 +852,20 @@ def align_minimax_h3_clip_continuation_join(
             left_wave, right_wave = audio_first[0], audio_second[0]
             if 0 < left_cut < left_wave.shape[-1] and 0 < right_cut < right_wave.shape[-1]:
                 bridge_audio = right_wave[:, right_cut] - left_wave[:, left_cut - 1]
-                audio_error = (
-                    (bridge_audio - (left_wave[:, left_cut] - left_wave[:, left_cut - 1])).square().mean()
-                    + (bridge_audio - (right_wave[:, right_cut] - right_wave[:, right_cut - 1])).square().mean()
-                ).item()
+                audio_error = ((bridge_audio - (left_wave[:, left_cut] - left_wave[:, left_cut - 1])).square().mean() + (bridge_audio - (right_wave[:, right_cut] - right_wave[:, right_cut - 1])).square().mean()).item()
         seams.append((visual_error, audio_error, -min(step, length - step), step, previous_keep, current_skip))
     chosen_seam = min(seams)
     previous_keep, current_skip = chosen_seam[-2:]
-    logger.warning("H3 join: remove %d previous ending frames and %d current beginning frames; matched %d; audio %s.",
-                   previous.shape[0] - previous_keep, current_skip, length,
-                   "scored" if similarity is not None else "neutral")
+    logger.warning("H3 join: remove %d previous ending frames and %d current beginning frames; matched %d; audio %s.", previous.shape[0] - previous_keep, current_skip, length, "scored" if similarity is not None else "neutral")
     return previous_keep, current_skip
 
 
-def find_minimax_h3_clip_continuation_join(
-    previous: torch.Tensor, current: torch.Tensor, threshold: float, maximum_frames: int,
-    near_identical_tolerance: float = 1.0, *, continuation_frames=None,
-    previous_audio=None, current_audio=None, fps: int = 24,
-) -> tuple[int, int] | None:
+def find_minimax_h3_clip_continuation_join(previous: torch.Tensor, current: torch.Tensor, threshold: float, maximum_frames: int, near_identical_tolerance: float = 1.0, *, continuation_frames=None, previous_audio=None, current_audio=None, fps: int = 24) -> tuple[int, int] | None:
     """Forward legacy join to the active seam alignment implementation."""
-    return align_minimax_h3_clip_continuation_join(
-        previous, current, threshold, maximum_frames,
-        near_identical_tolerance, continuation_frames=continuation_frames,
-        previous_audio=previous_audio, current_audio=current_audio, fps=fps,
-    )
+    return align_minimax_h3_clip_continuation_join(previous, current, threshold, maximum_frames, near_identical_tolerance, continuation_frames=continuation_frames, previous_audio=previous_audio, current_audio=current_audio, fps=fps)
 
 
-def _trailing_continuation_window(
-    image_batches: Sequence[torch.Tensor],
-    audio_batches: Sequence[dict | None],
-    needed_frames: int,
-) -> tuple[torch.Tensor, dict | None]:
+def _trailing_continuation_window(image_batches: Sequence[torch.Tensor], audio_batches: Sequence[dict | None], needed_frames: int) -> tuple[torch.Tensor, dict | None]:
     """Extract only trailing frames and audio needed for overlap matching without full concatenation."""
     if not image_batches:
         raise ValueError("Cannot window empty continuation batches.")
@@ -1001,11 +889,7 @@ def _trailing_continuation_window(
 
 
 def trim_minimax_h3_clip_continuation_batch(
-    image_batches: Sequence[torch.Tensor], audio_batches: Sequence[dict | None],
-    threshold: float, maximum_frames: int,
-    near_identical_tolerance: float = 1.0,
-    *, continuation_batches: Sequence[dict | None] | None = None,
-    continuation_prune_range: float = 0.0,
+    image_batches: Sequence[torch.Tensor], audio_batches: Sequence[dict | None], threshold: float, maximum_frames: int, near_identical_tolerance: float = 1.0, *, continuation_batches: Sequence[dict | None] | None = None, continuation_prune_range: float = 0.0
 ) -> tuple[list[torch.Tensor], list[dict | None]]:
     """Trim detected continuation overlap once, after a complete batch is collected."""
     if not image_batches or len(image_batches) != len(audio_batches):
@@ -1037,15 +921,15 @@ def trim_minimax_h3_clip_continuation_batch(
                 search_images, search_audio = trim_minimax_h3_clip_continuation(images, audio, initial_prune, 0)
                 search_frames = frames[:-initial_prune]
         join = align_minimax_h3_clip_continuation_join(
-            search_previous, search_images, threshold, maximum_frames,
+            search_previous,
+            search_images,
+            threshold,
+            maximum_frames,
             previous_audio=search_previous_audio,
             current_audio=search_audio,
             near_identical_tolerance=near_identical_tolerance,
             continuation_frames=search_frames,
-            minimum_overlap_frames=(
-                max(2, round(frames.shape[0] * max(0.0, 100.0 - prune_range) / 100.0))
-                if frames is not None and prune_range > 0 else 0
-            ),
+            minimum_overlap_frames=(max(2, round(frames.shape[0] * max(0.0, 100.0 - prune_range) / 100.0)) if frames is not None and prune_range > 0 else 0),
         )
         if join is not None:
             previous_keep, current_skip = join
@@ -1054,9 +938,7 @@ def trim_minimax_h3_clip_continuation_batch(
                 remove -= trimmed_images.pop().shape[0]
                 trimmed_audio.pop()
             if remove:
-                trimmed_images[-1], trimmed_audio[-1] = trim_minimax_h3_clip_continuation(
-                    trimmed_images[-1], trimmed_audio[-1], 0, remove
-                )
+                trimmed_images[-1], trimmed_audio[-1] = trim_minimax_h3_clip_continuation(trimmed_images[-1], trimmed_audio[-1], 0, remove)
             images, audio = trim_minimax_h3_clip_continuation(images, audio, initial_prune + current_skip)
         trimmed_images.append(images)
         trimmed_audio.append(audio)
@@ -1064,11 +946,7 @@ def trim_minimax_h3_clip_continuation_batch(
 
 
 def find_minimax_h3_clip_continuation_overlap(
-    previous: torch.Tensor, current: torch.Tensor, threshold: int, maximum_frames: int = 56,
-    previous_audio: dict | None = None, current_audio: dict | None = None,
-    fps: int = 24,
-    near_identical_tolerance: float = 1.0,
-    *, candidate_overlaps: Sequence[tuple[int, float]] | None = None,
+    previous: torch.Tensor, current: torch.Tensor, threshold: int, maximum_frames: int = 56, previous_audio: dict | None = None, current_audio: dict | None = None, fps: int = 24, near_identical_tolerance: float = 1.0, *, candidate_overlaps: Sequence[tuple[int, float]] | None = None
 ) -> int:
     """Return the strongest temporally consistent audiovisual overlap.
 
@@ -1085,17 +963,9 @@ def find_minimax_h3_clip_continuation_overlap(
         return 0
     limit = min(int(maximum_frames), previous.shape[0], current.shape[0] - 1)
     if candidate_overlaps is None:
-        candidate_overlaps = rank_video_overlap_candidates(
-            previous,
-            current,
-            limit,
-            compare_type=MINIMAX_H3_CONTINUATION_CANDIDATE_COMPARE_TYPE,
-        )
+        candidate_overlaps = rank_video_overlap_candidates(previous, current, limit, compare_type=MINIMAX_H3_CONTINUATION_CANDIDATE_COMPARE_TYPE)
     else:
-        candidate_overlaps = [
-            (overlap, distance) for overlap, distance in candidate_overlaps
-            if 1 <= overlap <= limit
-        ]
+        candidate_overlaps = [(overlap, distance) for overlap, distance in candidate_overlaps if 1 <= overlap <= limit]
     if not candidate_overlaps:
         return 0
     visual_previous = _continuation_visual_features(previous)
@@ -1105,10 +975,7 @@ def find_minimax_h3_clip_continuation_overlap(
         audio_enabled = False
     audio_previous = _continuation_audio_waveform(previous_audio) if audio_enabled else None
     audio_current = _continuation_audio_waveform(current_audio) if audio_enabled else None
-    if audio_enabled and (
-        audio_previous[1] != audio_current[1]
-        or audio_previous[0].shape[0] != audio_current[0].shape[0]
-    ):
+    if audio_enabled and (audio_previous[1] != audio_current[1] or audio_previous[0].shape[0] != audio_current[0].shape[0]):
         raise ValueError("MiniMax H3 Clip Continuation overlap audio must have matching sample rates and channels.")
     valid_candidates = []
     for overlap, _candidate_distance in candidate_overlaps:
@@ -1128,9 +995,7 @@ def find_minimax_h3_clip_continuation_overlap(
         if sequence_similarity * 100 < float(threshold):
             continue
         if audio_enabled:
-            audio_similarity = audio_overlap_similarity(
-                audio_previous[0], audio_current[0], overlap, fps, audio_previous[1]
-            )
+            audio_similarity = audio_overlap_similarity(audio_previous[0], audio_current[0], overlap, fps, audio_previous[1])
             if audio_similarity is None:
                 continue
             sequence_similarity = 0.6 * sequence_similarity + 0.4 * audio_similarity
@@ -1159,18 +1024,12 @@ def _continuation_visual_features(frames: torch.Tensor) -> torch.Tensor:
 def _continuation_audio_waveform(audio: dict) -> tuple[torch.Tensor, int]:
     waveform = audio.get("waveform") if isinstance(audio, Mapping) else None
     sample_rate = audio.get("sample_rate") if isinstance(audio, Mapping) else None
-    if (
-        not torch.is_tensor(waveform) or waveform.ndim != 3 or waveform.shape[0] != 1
-        or waveform.shape[1] not in {1, 2} or not isinstance(sample_rate, int) or sample_rate <= 0
-    ):
+    if not torch.is_tensor(waveform) or waveform.ndim != 3 or waveform.shape[0] != 1 or waveform.shape[1] not in {1, 2} or not isinstance(sample_rate, int) or sample_rate <= 0:
         raise ValueError("MiniMax H3 Clip Continuation overlap audio must be mono or stereo with a positive sample rate.")
     return waveform[0].to(torch.float32), sample_rate
 
 
-def save_minimax_h3_clip_continuation_media(
-    frames: torch.Tensor | None, tail_frames: int, filename_prefix: str, clip_index: int,
-    audio: dict | None = None, padded_frames: int = 0, latent: dict | None = None,
-) -> str:
+def save_minimax_h3_clip_continuation_media(frames: torch.Tensor | None, tail_frames: int, filename_prefix: str, clip_index: int, audio: dict | None = None, padded_frames: int = 0, latent: dict | None = None) -> str:
     if isinstance(tail_frames, bool) or not isinstance(tail_frames, numbers.Integral) or tail_frames not in {5, 22, 39, 56}:
         raise ValueError("MiniMax H3 Clip Continuation tail frames must be 5, 22, 39, or 56.")
     pad = int(padded_frames) if padded_frames is not None else 0
@@ -1216,9 +1075,7 @@ def save_minimax_h3_clip_continuation_media(
                     pad = auto_pad
         if frames.shape[0] < tail_frames + pad:
             detail = f"needs {tail_frames} frames" if not pad else f"needs {tail_frames + pad} frames ({tail_frames} tail + {pad} padded)"
-            raise ValueError(
-                f"MiniMax H3 Clip Continuation {detail} but received {frames.shape[0]}."
-            )
+            raise ValueError(f"MiniMax H3 Clip Continuation {detail} but received {frames.shape[0]}.")
         stop_idx = frames.shape[0] - pad
         start_idx = stop_idx - tail_frames
         tail = frames[start_idx:stop_idx].detach().cpu().contiguous()
@@ -1243,24 +1100,11 @@ def save_minimax_h3_clip_continuation_media(
             audio_tail = active_wave[..., -sample_count:].detach().cpu().contiguous()
         else:
             audio_tail = F.pad(active_wave, (sample_count - active_wave.shape[-1], 0)).detach().cpu().contiguous()
-    meta_dict = {
-        "format_version": MINIMAX_H3_CLIP_CONTINUATION_FORMAT,
-        "frame_rate": 24,
-        "shape": list(tail.shape) if tail is not None else None,
-        "audio_shape": list(audio_tail.shape) if audio_tail is not None else None,
-        "audio_sample_rate": audio_rate,
-        "padded_frames": pad,
-        "tail_frames": int(tail_frames),
-    }
+    meta_dict = {"format_version": MINIMAX_H3_CLIP_CONTINUATION_FORMAT, "frame_rate": 24, "shape": list(tail.shape) if tail is not None else None, "audio_shape": list(audio_tail.shape) if audio_tail is not None else None, "audio_sample_rate": audio_rate, "padded_frames": pad, "tail_frames": int(tail_frames)}
     if video_latent is not None and audio_latent is not None:
         meta_dict["video_latent_shape"] = list(video_latent.shape)
         meta_dict["audio_latent_shape"] = list(audio_latent.shape)
-    metadata = {
-        MINIMAX_H3_CLIP_CONTINUATION_METADATA_KEY: json.dumps(
-            meta_dict,
-            separators=(",", ":"), sort_keys=True,
-        )
-    }
+    metadata = {MINIMAX_H3_CLIP_CONTINUATION_METADATA_KEY: json.dumps(meta_dict, separators=(",", ":"), sort_keys=True)}
     batch_items = []
     if tail is not None:
         batch_items.append(("frames", tail))
@@ -1314,15 +1158,11 @@ def load_minimax_h3_clip_continuation_media(filename_prefix: str, clip_index: in
 
 def load_minimax_h3_clip_continuation_media_path(relative_path: str) -> dict:
     """Load media from the exact relative path produced by Clip Continuation Save."""
-    return _load_minimax_h3_clip_continuation_media_path(
-        _minimax_h3_clip_continuation_saved_path(relative_path)
-    )
+    return _load_minimax_h3_clip_continuation_media_path(_minimax_h3_clip_continuation_saved_path(relative_path))
 
 
 def get_minimax_h3_clip_continuation_path_fingerprint(relative_path: str) -> str:
-    return _minimax_h3_clip_continuation_fingerprint_path(
-        _minimax_h3_clip_continuation_saved_path(relative_path)
-    )
+    return _minimax_h3_clip_continuation_fingerprint_path(_minimax_h3_clip_continuation_saved_path(relative_path))
 
 
 def _load_minimax_h3_clip_continuation_media_path(path: Path) -> dict:
@@ -1340,12 +1180,7 @@ def _load_minimax_h3_clip_continuation_media_path(path: Path) -> dict:
                             handle.mark_processed(name)
             video_latent = streamed["video"]
             audio_latent = streamed["audio"]
-            return {
-                "format_version": 1,
-                "frame_rate": 24,
-                "frames": None,
-                "latent": {"samples": NestedTensor((video_latent, audio_latent))},
-            }
+            return {"format_version": 1, "frame_rate": 24, "frames": None, "latent": {"samples": NestedTensor((video_latent, audio_latent))}}
 
         allowed_keys = {"frames", "audio", "video_latent", "audio_latent"}
         has_frames = "frames" in keys
@@ -1364,33 +1199,17 @@ def _load_minimax_h3_clip_continuation_media_path(path: Path) -> dict:
             metadata = json.loads(raw_metadata)
         except json.JSONDecodeError as exc:
             raise ValueError("MiniMax H3 Clip Continuation metadata is invalid JSON.") from exc
-        if (
-            not isinstance(metadata, dict)
-            or metadata.get("format_version") != MINIMAX_H3_CLIP_CONTINUATION_FORMAT
-            or metadata.get("frame_rate") != 24
-        ):
+        if not isinstance(metadata, dict) or metadata.get("format_version") != MINIMAX_H3_CLIP_CONTINUATION_FORMAT or metadata.get("frame_rate") != 24:
             raise ValueError("MiniMax H3 Clip Continuation file has invalid frame metadata.")
 
         if has_frames:
             shape = handle.get_shape("frames")
-            if (
-                metadata.get("shape") != list(shape)
-                or len(shape) != 4
-                or shape[0] < 5
-                or min(shape[1:3]) < 1
-                or shape[3] != 3
-                or not handle.get_dtype("frames").is_floating_point
-            ):
+            if metadata.get("shape") != list(shape) or len(shape) != 4 or shape[0] < 5 or min(shape[1:3]) < 1 or shape[3] != 3 or not handle.get_dtype("frames").is_floating_point:
                 raise ValueError("MiniMax H3 Clip Continuation file has invalid frame metadata.")
         if has_latent:
             v_shape = handle.get_shape("video_latent")
             a_shape = handle.get_shape("audio_latent")
-            if (
-                metadata.get("video_latent_shape") != list(v_shape)
-                or metadata.get("audio_latent_shape") != list(a_shape)
-                or len(v_shape) != 5
-                or len(a_shape) != 4
-            ):
+            if metadata.get("video_latent_shape") != list(v_shape) or metadata.get("audio_latent_shape") != list(a_shape) or len(v_shape) != 5 or len(a_shape) != 4:
                 raise ValueError("MiniMax H3 Clip Continuation file has invalid latent metadata.")
 
         frames, audio, video_latent, audio_latent = None, None, None, None
@@ -1415,9 +1234,7 @@ def _load_minimax_h3_clip_continuation_media_path(path: Path) -> dict:
         if has_frames and frames is None:
             raise ValueError("MiniMax H3 Clip Continuation file has no frames.")
     if frames is not None:
-        validate_minimax_h3_clip_continuation_media(
-            {"format_version": 1, "frame_rate": 24, "frames": frames}
-        )
+        validate_minimax_h3_clip_continuation_media({"format_version": 1, "frame_rate": 24, "frames": frames})
     result = {"format_version": 1, "frame_rate": 24, "frames": frames}
     if audio is not None:
         if metadata.get("audio_shape") != list(audio.shape) or metadata.get("audio_sample_rate") is None:
@@ -1456,9 +1273,7 @@ class _H3LayoutStub:
 def _h3_layout_origin(layout) -> float:
     a, b, kind = layout.segments[-1]
     if kind != "video" or b <= a:
-        raise RuntimeError(
-            f"Expected the target video rows to be the last layout segment, found {kind!r} spanning {b - a} rows."
-        )
+        raise RuntimeError(f"Expected the target video rows to be the last layout segment, found {kind!r} spanning {b - a} rows.")
     return float(layout.position_ids[a, 0])
 
 
@@ -1497,10 +1312,7 @@ def ensure_minimax_h3_layout_contract() -> None:
         if len(got) != 2 or any(abs(g - w) > 1e-9 for g, w in zip(got, want)):
             raise RuntimeError(f"Keyframe anchors no longer sit at FRAME_RESCALE per pixel frame: got {got}, expected {want}")
 
-        lay = build(
-            keyframes=[{"resolved_frame_index": 3, "latent": video}],
-            refs=[{"kind": "audio", "ref_audio_t": 8}],
-        )
+        lay = build(keyframes=[{"resolved_frame_index": 3, "latent": video}], refs=[{"kind": "audio", "ref_audio_t": 8}])
         a, _ = _h3_layout_seg(lay, "cond")[0]
         gap = float(lay.position_ids[a, 0]) - _h3_layout_origin(lay)
         if abs(gap - fr * 3) > 1e-9:
@@ -1588,16 +1400,12 @@ def h3_video_tail_from_latent(latent: Any, n: int) -> tuple[list[torch.Tensor], 
     total = int(video.shape[2])
     steps = h3_steps_for_frames(int(n))
     if steps is None:
-        raise ValueError(
-            f"A {n}-frame window is not a whole number of latent steps. Use 5, 22, 39, or 56."
-        )
+        raise ValueError(f"A {n}-frame window is not a whole number of latent steps. Use 5, 22, 39, or 56.")
     if steps > total:
         raise ValueError(f"Asked for {steps} latent steps, but context_latent only has {total}.")
     start = total - steps
     if start % 5 != 0:
-        raise RuntimeError(
-            f"The {steps}-step tail of a {total}-step latent starts at cycle position {start % 5}, not 0."
-        )
+        raise RuntimeError(f"The {steps}-step tail of a {total}-step latent starts at cycle position {start % 5}, not 0.")
     covered = h3_pixel_frames_for_latent_steps(steps)
     if covered != n:
         raise RuntimeError(f"{steps} steps cover {covered} frames, expected {n}.")
@@ -1648,18 +1456,7 @@ def h3_encode_tail_audio(audio_vae: Any, audio: Mapping, seconds: float, cache: 
 
 
 def apply_minimax_h3_clip_continuation(
-    conditioning: Any,
-    latent: Any,
-    tail_frames: int | str = 22,
-    audio_tail_frames: int = 24,
-    *,
-    continuation_latent: Any = None,
-    continuation_media: dict | None = None,
-    continuation_frames: torch.Tensor | None = None,
-    continuation_audio: dict | None = None,
-    vae: Any = None,
-    audio_vae: Any = None,
-    cache: Any = None,
+    conditioning: Any, latent: Any, tail_frames: int | str = 22, audio_tail_frames: int = 24, *, continuation_latent: Any = None, continuation_media: dict | None = None, continuation_frames: torch.Tensor | None = None, continuation_audio: dict | None = None, vae: Any = None, audio_vae: Any = None, cache: Any = None
 ) -> tuple[Any, int]:
     """Pin previous-clip video and audio tails onto H3 conditioning using exact Clip Continuation keyframes."""
     media_type = "video+audio"
@@ -1696,14 +1493,9 @@ def apply_minimax_h3_clip_continuation(
             src_w = int(src_video.shape[4]) * 16
             src_h = int(src_video.shape[3]) * 16
             if src_w != width or src_h != height:
-                raise ValueError(
-                    f"continuation_latent is {src_w}x{src_h} but target clip is {width}x{height}. "
-                    "Latents cannot be resized across clips."
-                )
+                raise ValueError(f"continuation_latent is {src_w}x{src_h} but target clip is {width}x{height}. Latents cannot be resized across clips.")
             if int(src_video.shape[1]) != int(video.shape[1]):
-                raise ValueError(
-                    f"continuation_latent has {int(src_video.shape[1])} channels, target clip has {int(video.shape[1])}."
-                )
+                raise ValueError(f"continuation_latent has {int(src_video.shape[1])} channels, target clip has {int(video.shape[1])}.")
             available = h3_pixel_frames_for_latent_steps(int(src_video.shape[2]))
             video_src = "latent"
         else:
@@ -1718,9 +1510,7 @@ def apply_minimax_h3_clip_continuation(
         run = next((g for g in H3_VIDEO_RUN_GRID if g <= n), 1)
         n = run
         if n >= frame_count:
-            raise ValueError(
-                f"MiniMax H3 Clip Continuation tail frames ({n}) cannot exceed or equal the target frame count ({frame_count})."
-            )
+            raise ValueError(f"MiniMax H3 Clip Continuation tail frames ({n}) cannot exceed or equal the target frame count ({frame_count}).")
 
         if video_src == "latent":
             blocks, offsets, covered = h3_video_tail_from_latent(continuation_latent, n)
@@ -1740,19 +1530,14 @@ def apply_minimax_h3_clip_continuation(
                     blocks = [enc[:, :, k : k + 1] for k in range(steps)]
                     span = n
                 else:
-                    raise RuntimeError(
-                        f"{n} frames encoded to {steps} latent steps covering {covered} frames; VAE grid mismatch."
-                    )
+                    raise RuntimeError(f"{n} frames encoded to {steps} latent steps covering {covered} frames; VAE grid mismatch.")
             else:
                 offsets = h3_step_offsets(steps)
                 blocks = [enc[:, :, k : k + 1] for k in range(steps)]
                 span = covered
 
         for p, blk in zip(offsets, blocks):
-            keyframes.append({
-                "resolved_frame_index": p,
-                "latent": blk,
-            })
+            keyframes.append({"resolved_frame_index": p, "latent": blk})
 
     audio_kf = None
     if use_audio:
@@ -1768,10 +1553,7 @@ def apply_minimax_h3_clip_continuation(
         end_frame = effective_span + overhang / H3_FRAME_RESCALE
         end_coord = round(H3_FRAME_RESCALE * end_frame)
         end_frame = end_coord / H3_FRAME_RESCALE
-        audio_kf = {
-            "resolved_frame_index": end_frame - ref_audio_t / H3_FRAME_RESCALE,
-            "audio_latent": audio_latent,
-        }
+        audio_kf = {"resolved_frame_index": end_frame - ref_audio_t / H3_FRAME_RESCALE, "audio_latent": audio_latent}
 
     head_end = span
     tail_kfs = [audio_kf] if audio_kf is not None else []
@@ -1783,9 +1565,7 @@ def apply_minimax_h3_clip_continuation(
         for kf in prior:
             p = kf.get("resolved_frame_index", 0)
             if p >= frame_count:
-                raise ValueError(
-                    f"Conditioning carries a keyframe anchored at frame {p}, but target clip is only {frame_count} frames."
-                )
+                raise ValueError(f"Conditioning carries a keyframe anchored at frame {p}, but target clip is only {frame_count} frames.")
             if p < head_end:
                 continue
             kept.append(dict(kf))
@@ -1827,11 +1607,7 @@ def h3_audio_t_at_frame_boundary(frame_index: int) -> int:
     return round(frame_index * H3_AUDIO_LATENT_FPS / H3_CONTINUATION_FPS)
 
 
-def _extract_h3_av_streams(
-    latent: Any,
-    *,
-    name: str,
-) -> tuple[torch.Tensor, torch.Tensor]:
+def _extract_h3_av_streams(latent: Any, *, name: str) -> tuple[torch.Tensor, torch.Tensor]:
     """Validate and extract the structural video/audio streams of an H3 latent."""
     if not isinstance(latent, dict):
         raise TypeError(f"{name} must be a dict containing a 'samples' entry")
@@ -1853,9 +1629,7 @@ def _extract_h3_av_streams(
     if video.ndim != 5:
         raise ValueError(f"{name} video must have shape [1, 24, T, H, W], got {tuple(video.shape)}")
     if audio.ndim != 4:
-        raise ValueError(
-            f"{name} audio must have shape [1, 32, 2, T_audio], got {tuple(audio.shape)}"
-        )
+        raise ValueError(f"{name} audio must have shape [1, 32, 2, T_audio], got {tuple(audio.shape)}")
     if video.shape[0] != 1 or audio.shape[0] != 1:
         raise ValueError(f"{name} video and audio batch sizes must both be 1")
     if video.shape[1] != H3_VIDEO_LATENT_CHANNELS:
@@ -1873,20 +1647,13 @@ def _extract_h3_av_streams(
     return video, audio
 
 
-def validate_h3_av_latent(
-    latent: Any,
-    *,
-    name: str,
-) -> tuple[torch.Tensor, torch.Tensor, int]:
+def validate_h3_av_latent(latent: Any, *, name: str) -> tuple[torch.Tensor, torch.Tensor, int]:
     """Validate and extract a cumulative MiniMax H3 video/audio latent pair."""
     video, audio = _extract_h3_av_streams(latent, name=name)
     frame_count = h3_frame_count_from_video_latent_t(video.shape[2])
     expected_audio_t = h3_audio_t_at_frame_boundary(frame_count)
     if audio.shape[-1] != expected_audio_t:
-        raise ValueError(
-            f"{name} audio temporal length must be {expected_audio_t} for "
-            f"{frame_count} frames, got {audio.shape[-1]}"
-        )
+        raise ValueError(f"{name} audio temporal length must be {expected_audio_t} for {frame_count} frames, got {audio.shape[-1]}")
     return video, audio, frame_count
 
 
@@ -1899,21 +1666,14 @@ def _valid_window_audio_lengths(frame_count: int) -> tuple[int, ...]:
     return (lower, lower + 1)
 
 
-def validate_h3_av_window(
-    latent: Any,
-    *,
-    name: str,
-) -> tuple[torch.Tensor, torch.Tensor, int]:
+def validate_h3_av_window(latent: Any, *, name: str) -> tuple[torch.Tensor, torch.Tensor, int]:
     """Validate an H3 AV window while allowing global-boundary audio rounding."""
     video, audio = _extract_h3_av_streams(latent, name=name)
     frame_count = h3_frame_count_from_video_latent_t(video.shape[2])
     valid_audio_lengths = _valid_window_audio_lengths(frame_count)
     if audio.shape[-1] not in valid_audio_lengths:
         expected = " or ".join(str(length) for length in valid_audio_lengths)
-        raise ValueError(
-            f"{name} audio temporal length must be {expected} for an aligned "
-            f"{frame_count}-frame window, got {audio.shape[-1]}"
-        )
+        raise ValueError(f"{name} audio temporal length must be {expected} for an aligned {frame_count}-frame window, got {audio.shape[-1]}")
     return video, audio, frame_count
 
 
@@ -1928,11 +1688,7 @@ class _ContinuationLayout:
     transition_audio_t: int
 
 
-def calculate_guided_continuation_layout(
-    previous_frame_count: int,
-    overlap_frames: int,
-    extension_frames: int,
-) -> _ContinuationLayout:
+def calculate_guided_continuation_layout(previous_frame_count: int, overlap_frames: int, extension_frames: int) -> _ContinuationLayout:
     """Resolve a fresh target whose leading span is hidden motion context."""
     if overlap_frames < 5 or overlap_frames % 17 != 5:
         raise ValueError("overlap_frames must be at least 5 and satisfy 17k + 5")
@@ -1952,59 +1708,20 @@ def calculate_guided_continuation_layout(
     previous_audio_end = h3_audio_t_at_frame_boundary(previous_frame_count)
     overlap_audio_start = h3_audio_t_at_frame_boundary(overlap_start_frame)
     extended_audio_end = h3_audio_t_at_frame_boundary(extended_frame_count)
-    return _ContinuationLayout(
-        window_frame_count=window_frame_count,
-        overlap_video_t=overlap_video_t,
-        new_video_t=new_video_t,
-        overlap_audio_t=previous_audio_end - overlap_audio_start,
-        new_audio_t=extended_audio_end - previous_audio_end,
-        transition_video_t=0,
-        transition_audio_t=0,
-    )
+    return _ContinuationLayout(window_frame_count=window_frame_count, overlap_video_t=overlap_video_t, new_video_t=new_video_t, overlap_audio_t=previous_audio_end - overlap_audio_start, new_audio_t=extended_audio_end - previous_audio_end, transition_video_t=0, transition_audio_t=0)
 
 
-def assemble_guided_target(
-    previous_video: torch.Tensor,
-    previous_audio: torch.Tensor,
-    layout: _ContinuationLayout,
-) -> dict[str, NestedTensor]:
+def assemble_guided_target(previous_video: torch.Tensor, previous_audio: torch.Tensor, layout: _ContinuationLayout) -> dict[str, NestedTensor]:
     """Allocate an entirely fresh AV target for motion-context continuation."""
-    video = previous_video.new_zeros(
-        (
-            1,
-            H3_VIDEO_LATENT_CHANNELS,
-            layout.overlap_video_t + layout.new_video_t,
-            previous_video.shape[3],
-            previous_video.shape[4],
-        )
-    )
-    audio = previous_audio.new_zeros(
-        (
-            1,
-            H3_AUDIO_LATENT_CHANNELS,
-            H3_AUDIO_CHANNELS,
-            layout.overlap_audio_t + layout.new_audio_t,
-        )
-    )
+    video = previous_video.new_zeros((1, H3_VIDEO_LATENT_CHANNELS, layout.overlap_video_t + layout.new_video_t, previous_video.shape[3], previous_video.shape[4]))
+    audio = previous_audio.new_zeros((1, H3_AUDIO_LATENT_CHANNELS, H3_AUDIO_CHANNELS, layout.overlap_audio_t + layout.new_audio_t))
     return {"samples": NestedTensor((video, audio))}
 
 
-def apply_latent_tail_guide_to_conditioning(
-    positive: Any,
-    previous_av_latent: Any,
-    target_av_latent: Any,
-    overlap_video_tokens: int,
-    overlap_audio_tokens: int,
-) -> Any:
+def apply_latent_tail_guide_to_conditioning(positive: Any, previous_av_latent: Any, target_av_latent: Any, overlap_video_tokens: int, overlap_audio_tokens: int) -> Any:
     """Append one native synchronized AV guide built from the previous latent tail."""
-    previous_video, previous_audio, previous_frame_count = validate_h3_av_latent(
-        previous_av_latent,
-        name="previous_av_latent",
-    )
-    target_video, target_audio, target_frame_count = validate_h3_av_window(
-        target_av_latent,
-        name="target_av_latent",
-    )
+    previous_video, previous_audio, previous_frame_count = validate_h3_av_latent(previous_av_latent, name="previous_av_latent")
+    target_video, target_audio, target_frame_count = validate_h3_av_window(target_av_latent, name="target_av_latent")
     if previous_video.shape[3:] != target_video.shape[3:]:
         raise ValueError("target_av_latent video spatial dimensions must match previous latent")
 
@@ -2023,44 +1740,21 @@ def apply_latent_tail_guide_to_conditioning(
         if pos is not None and 0 <= float(pos) < guide_frames:
             raise ValueError("positive already contains a MiniMax H3 guide inside the latent-tail overlap")
 
-    keyframes.append(
-        {
-            "resolved_frame_index": 0,
-            "latent": previous_video[:, :, -overlap_video_tokens:].clone(),
-            "audio_latent": previous_audio[..., -overlap_audio_tokens:].clone(),
-        }
-    )
+    keyframes.append({"resolved_frame_index": 0, "latent": previous_video[:, :, -overlap_video_tokens:].clone(), "audio_latent": previous_audio[..., -overlap_audio_tokens:].clone()})
     keyframes.sort(key=lambda kf: float(kf["resolved_frame_index"]))
     return node_helpers.conditioning_set_values(positive, {"minimax_keyframes": keyframes})
 
 
-def assemble_appended_continuation(
-    previous_av_latent: Any,
-    sampled_window: Any,
-    overlap_video_tokens: int,
-    overlap_audio_tokens: int,
-    transition_video_tokens: int = 0,
-    transition_audio_tokens: int = 0,
-) -> tuple[dict, int]:
+def assemble_appended_continuation(previous_av_latent: Any, sampled_window: Any, overlap_video_tokens: int, overlap_audio_tokens: int, transition_video_tokens: int = 0, transition_audio_tokens: int = 0) -> tuple[dict, int]:
     """Trim hidden context, optionally replace a transition, and append new tokens."""
-    previous_video, previous_audio, previous_frame_count = validate_h3_av_latent(
-        previous_av_latent,
-        name="previous_av_latent",
-    )
-    sampled_video, sampled_audio = _extract_h3_av_streams(
-        sampled_window,
-        name="sampled_window",
-    )
+    previous_video, previous_audio, previous_frame_count = validate_h3_av_latent(previous_av_latent, name="previous_av_latent")
+    sampled_video, sampled_audio = _extract_h3_av_streams(sampled_window, name="sampled_window")
 
     new_video = sampled_video[:, :, overlap_video_tokens:]
     new_audio = sampled_audio[..., overlap_audio_tokens:]
     if transition_video_tokens > 0:
-        sampled_video_transition = sampled_video[
-            :, :, overlap_video_tokens - transition_video_tokens : overlap_video_tokens
-        ]
-        sampled_audio_transition = sampled_audio[
-            ..., overlap_audio_tokens - transition_audio_tokens : overlap_audio_tokens
-        ]
+        sampled_video_transition = sampled_video[:, :, overlap_video_tokens - transition_video_tokens : overlap_video_tokens]
+        sampled_audio_transition = sampled_audio[..., overlap_audio_tokens - transition_audio_tokens : overlap_audio_tokens]
         previous_video_prefix = previous_video[:, :, :-transition_video_tokens]
         previous_audio_prefix = previous_audio[..., :-transition_audio_tokens]
     else:
@@ -2080,9 +1774,7 @@ def assemble_appended_continuation(
 def _register_minimax_h3_ref_folder() -> None:
     path = os.path.join(folder_paths.models_dir, MINIMAX_H3_REF_FOLDER)
     if MINIMAX_H3_REF_FOLDER not in folder_paths.folder_names_and_paths:
-        folder_paths.folder_names_and_paths[MINIMAX_H3_REF_FOLDER] = (
-            [path], {".safetensors"}
-        )
+        folder_paths.folder_names_and_paths[MINIMAX_H3_REF_FOLDER] = ([path], {".safetensors"})
     else:
         folder_paths.add_model_folder_path(MINIMAX_H3_REF_FOLDER, path)
 
@@ -2091,10 +1783,7 @@ _register_minimax_h3_ref_folder()
 
 
 def list_minimax_h3_refs() -> list[str]:
-    return [
-        name for name in folder_paths.get_filename_list(MINIMAX_H3_REF_FOLDER)
-        if name.lower().endswith(".safetensors")
-    ]
+    return [name for name in folder_paths.get_filename_list(MINIMAX_H3_REF_FOLDER) if name.lower().endswith(".safetensors")]
 
 
 def get_minimax_h3_ref_input_fingerprint(filename: str) -> str:
@@ -2232,14 +1921,8 @@ def create_minimax_h3_image_refs(images: torch.Tensor, vae, compression: str = "
             metadata = {"description": description, "source": "image"}
             ref = {"kind": "image", "latent": latent, "metadata": metadata}
             if clip is not None:
-                ref["vlm_embedding"], ref["vlm_tags"] = encode_minimax_h3_ref_vlm(
-                    clip, "image", source, vlm_resolution, vlm_reference_start + index
-                )
-                metadata.update({
-                    "vlm_presentation": "image_numbered",
-                    "vlm_resolution": vlm_resolution,
-                    "vlm_reference_number": vlm_reference_start + index,
-                })
+                ref["vlm_embedding"], ref["vlm_tags"] = encode_minimax_h3_ref_vlm(clip, "image", source, vlm_resolution, vlm_reference_start + index)
+                metadata.update({"vlm_presentation": "image_numbered", "vlm_resolution": vlm_resolution, "vlm_reference_number": vlm_reference_start + index})
             refs.append(_compress_minimax_h3_visual_ref(ref, compression, grid_long_edge, None, refine_steps))
         return refs
     fused = None
@@ -2388,10 +2071,7 @@ def save_minimax_h3_ref_collection(refs: list[dict], filename_prefix: str, bundl
         if len(refs) > 256:
             raise ValueError("MiniMax H3 Ref bundle cannot contain more than 256 references.")
         refs = [_validate_minimax_h3_ref(ref) for ref in refs]
-        header = {
-            "_format_version": 5, "kind": "bundle", "name": prefix.name,
-            "members": [_minimax_h3_ref_storage_metadata(ref) for ref in refs],
-        }
+        header = {"_format_version": 5, "kind": "bundle", "name": prefix.name, "members": [_minimax_h3_ref_storage_metadata(ref) for ref in refs]}
         metadata = {MINIMAX_H3_REF_METADATA_KEY: json.dumps(header, separators=(",", ":"), sort_keys=True)}
         next_index = 1
         while True:
@@ -2493,14 +2173,10 @@ def load_minimax_h3_ref(filename: str) -> dict:
             raise ValueError(f"MiniMax H3 {kind} Ref has an invalid latent shape: {shape}.")
         if "shape" in stored and stored["shape"] != list(shape):
             raise ValueError("MiniMax H3 Ref metadata does not match its latent tensor.")
-        expected_dimensions = ({"latent_t": shape[2], "latent_h": shape[3], "latent_w": shape[4]} if kind != "audio" else {"ref_audio_t": shape[-1]})
+        expected_dimensions = {"latent_t": shape[2], "latent_h": shape[3], "latent_w": shape[4]} if kind != "audio" else {"ref_audio_t": shape[-1]}
         if "dimensions" in stored and stored["dimensions"] != expected_dimensions:
             raise ValueError("MiniMax H3 Ref metadata dimensions do not match its latent tensor.")
-        expected_header_dimensions = (
-            {"latent_t": shape[-1], "latent_h": 0, "latent_w": 0}
-            if kind == "audio"
-            else {"latent_t": shape[2], "latent_h": shape[3], "latent_w": shape[4]}
-        )
+        expected_header_dimensions = {"latent_t": shape[-1], "latent_h": 0, "latent_w": 0} if kind == "audio" else {"latent_t": shape[2], "latent_h": shape[3], "latent_w": shape[4]}
         if any(key in stored and stored[key] != value for key, value in expected_header_dimensions.items()):
             raise ValueError("MiniMax H3 Ref header dimensions do not match its latent tensor.")
         if "vlm_embedding" in tensor_names:
@@ -2572,9 +2248,7 @@ def load_minimax_h3_ref_collection(filename: str) -> list[dict]:
             if "vlm_shape" in member:
                 vlm_shape = handle.get_shape(f"{key}.vlm_embedding")
                 tag_shape = handle.get_shape(f"{key}.vlm_tags")
-                if (member["kind"] == "audio" or len(vlm_shape) != 3 or vlm_shape[0] != 1 or min(vlm_shape) < 1
-                        or tag_shape != (vlm_shape[1],) or not handle.get_dtype(f"{key}.vlm_embedding").is_floating_point
-                        or handle.get_dtype(f"{key}.vlm_tags") != torch.long):
+                if member["kind"] == "audio" or len(vlm_shape) != 3 or vlm_shape[0] != 1 or min(vlm_shape) < 1 or tag_shape != (vlm_shape[1],) or not handle.get_dtype(f"{key}.vlm_embedding").is_floating_point or handle.get_dtype(f"{key}.vlm_tags") != torch.long:
                     raise ValueError("MiniMax H3 Ref bundle member has invalid VLM tensors.")
         tensors = {}
         with closing(handle.async_stream(sorted(expected), batch_size=1, prefetch_batches=1, pin_memory=False)) as stream:
@@ -2594,11 +2268,7 @@ def load_minimax_h3_ref_collection(filename: str) -> list[dict]:
         latent = tensors[key]
         if latent.ndim != (4 if member["kind"] == "audio" else 5):
             raise ValueError("MiniMax H3 Ref bundle member has an invalid latent rank.")
-        dimensions = (
-            {"latent_t": latent.shape[-1], "latent_h": 0, "latent_w": 0}
-            if member["kind"] == "audio"
-            else {"latent_t": latent.shape[2], "latent_h": latent.shape[3], "latent_w": latent.shape[4]}
-        )
+        dimensions = {"latent_t": latent.shape[-1], "latent_h": 0, "latent_w": 0} if member["kind"] == "audio" else {"latent_t": latent.shape[2], "latent_h": latent.shape[3], "latent_w": latent.shape[4]}
         if any(field in member and member[field] != value for field, value in dimensions.items()):
             raise ValueError("MiniMax H3 Ref bundle member dimensions do not match its tensor.")
         metadata = member.get("metadata", {})
@@ -2668,9 +2338,7 @@ def _minimax_h3_native_ref_token_count(block: dict) -> int:
 
 def flatten_minimax_h3_ref_collections(ref_collections: dict) -> list[dict]:
     refs = []
-    for _name, collection in sorted(
-        (ref_collections or {}).items(), key=lambda item: int(item[0].rsplit("_", 1)[-1])
-    ):
+    for _name, collection in sorted((ref_collections or {}).items(), key=lambda item: int(item[0].rsplit("_", 1)[-1])):
         if collection is not None:
             refs.extend(collection)
     return refs
@@ -2737,10 +2405,7 @@ def detect_sam3(model, image, conditioning=None, bboxes=None, positive_coords=No
     batch, height, width, _ = image.shape
 
     def boxes_to_tensor(box_list):
-        return torch.tensor([[
-            [(box["x"] + box["width"] / 2) / width, (box["y"] + box["height"] / 2) / height, box["width"] / width, box["height"] / height]
-            for box in box_list
-        ]], dtype=torch.float32)
+        return torch.tensor([[[(box["x"] + box["width"] / 2) / width, (box["y"] + box["height"] / 2) / height, box["width"] / width, box["height"] / height] for box in box_list]], dtype=torch.float32)
 
     per_frame_boxes = None
     if bboxes is not None:
@@ -2761,10 +2426,7 @@ def detect_sam3(model, image, conditioning=None, bboxes=None, positive_coords=No
     point_inputs = None
     if positive_points or negative_points:
         coordinates = [[point["x"] / width * SAM3_WORKING_SIZE, point["y"] / height * SAM3_WORKING_SIZE] for point in positive_points + negative_points]
-        point_inputs = {
-            "point_coords": torch.tensor([coordinates], dtype=dtype, device=device),
-            "point_labels": torch.tensor([[1] * len(positive_points) + [0] * len(negative_points)], dtype=torch.int32, device=device),
-        }
+        point_inputs = {"point_coords": torch.tensor([coordinates], dtype=dtype, device=device), "point_labels": torch.tensor([[1] * len(positive_points) + [0] * len(negative_points)], dtype=torch.int32, device=device)}
     conditionings = _extract_text_prompts(conditioning, device, dtype) if conditioning else []
     tile_edge_padding = SAM3_EDGE_PADDING if edge_padding else 0
     image_in = None
@@ -2776,7 +2438,7 @@ def detect_sam3(model, image, conditioning=None, bboxes=None, positive_coords=No
     all_bboxes, all_masks = [], []
     progress = comfy.utils.ProgressBar(batch)
     for index in range(batch):
-        frame = image_in[index:index + 1].to(device=device, dtype=dtype) if image_in is not None else None
+        frame = image_in[index : index + 1].to(device=device, dtype=dtype) if image_in is not None else None
         frame_boxes = per_frame_boxes[index].to(device=device, dtype=dtype) if per_frame_boxes is not None and per_frame_boxes[index] is not None else None
         bbox_dicts, frame_masks = [], []
         if point_inputs is not None:
@@ -2794,7 +2456,7 @@ def detect_sam3(model, image, conditioning=None, bboxes=None, positive_coords=No
         for embedding, text_mask, max_detections in conditionings:
             candidates = []
             for y0, y1, x0, x1 in _sam3_tile_records(height, width, tile_edge_padding):
-                tile, tile_geometry = _padded_sam3_tile(tiled_images[index:index + 1], y0, y1, x0, x1, device, dtype)
+                tile, tile_geometry = _padded_sam3_tile(tiled_images[index : index + 1], y0, y1, x0, x1, device, dtype)
                 results = sam3_model(tile, text_embeddings=embedding, text_mask=text_mask, threshold=threshold, orig_size=(SAM3_WORKING_SIZE, SAM3_WORKING_SIZE))
                 scores = results["scores"][0].sigmoid()
                 kept = scores > threshold
@@ -2822,13 +2484,13 @@ def detect_sam3(model, image, conditioning=None, bboxes=None, positive_coords=No
                 bbox_dicts.append({"x": clipped_x0 - tile_edge_padding, "y": clipped_y0 - tile_edge_padding, "width": clipped_x1 - clipped_x0, "height": clipped_y1 - clipped_y0, "score": score})
                 refined = _refine_mask(sam3_model, tile, mask, refine_iterations)
                 refined = F.interpolate(refined[None], size=(square_size, square_size), mode="bilinear", align_corners=False)[0]
-                refined = refined[:, pad_top:pad_top + tile_height, pad_left:pad_left + tile_width]
+                refined = refined[:, pad_top : pad_top + tile_height, pad_left : pad_left + tile_width]
                 source_y0 = max(tile_edge_padding, y0)
                 source_y1 = min(height + tile_edge_padding, y1)
                 source_x0 = max(tile_edge_padding, x0)
                 source_x1 = min(width + tile_edge_padding, x1)
                 full_mask = torch.zeros(1, height, width, device=device, dtype=dtype)
-                full_mask[:, source_y0 - tile_edge_padding:source_y1 - tile_edge_padding, source_x0 - tile_edge_padding:source_x1 - tile_edge_padding] = refined[:, source_y0 - y0:source_y1 - y0, source_x0 - x0:source_x1 - x0]
+                full_mask[:, source_y0 - tile_edge_padding : source_y1 - tile_edge_padding, source_x0 - tile_edge_padding : source_x1 - tile_edge_padding] = refined[:, source_y0 - y0 : source_y1 - y0, source_x0 - x0 : source_x1 - x0]
                 frame_masks.append(full_mask)
         all_bboxes.append(bbox_dicts)
         if frame_masks:
@@ -2991,26 +2653,13 @@ WHISPER_LANGUAGES = {
 WHISPER_LANGUAGE_TOKENS = tuple(f"<|{code}|>" for code in WHISPER_LANGUAGES)
 
 # language code lookup by name, with a few language aliases
-WHISPER_TO_LANGUAGE_CODE = {
-    **{language: code for code, language in WHISPER_LANGUAGES.items()},
-    "burmese": "my",
-    "valencian": "ca",
-    "flemish": "nl",
-    "haitian": "ht",
-    "letzeburgesch": "lb",
-    "pushto": "ps",
-    "panjabi": "pa",
-    "moldavian": "ro",
-    "moldovan": "ro",
-    "sinhalese": "si",
-    "castilian": "es",
-    "mandarin": "zh",
-}
+WHISPER_TO_LANGUAGE_CODE = {**{language: code for code, language in WHISPER_LANGUAGES.items()}, "burmese": "my", "valencian": "ca", "flemish": "nl", "haitian": "ht", "letzeburgesch": "lb", "pushto": "ps", "panjabi": "pa", "moldavian": "ro", "moldovan": "ro", "sinhalese": "si", "castilian": "es", "mandarin": "zh"}
 
 
 @dataclass
 class WhisperTokenizer:
     """Native tokenizer with upstream Unicode-aware word grouping."""
+
     def split_to_word_tokens(self, tokens: List[int]):
         if self.language in {"zh", "ja", "th", "lo", "my", "yue"}:
             # These languages don't typically use spaces, so it is difficult to split words
@@ -3033,11 +2682,7 @@ class WhisperTokenizer:
             current_tokens.append(token)
             decoded = self.decode_with_timestamps(current_tokens)
 
-            if (
-                replacement_char not in decoded
-                or decoded_full[unicode_offset + decoded.index(replacement_char)]
-                == replacement_char
-            ):
+            if replacement_char not in decoded or decoded_full[unicode_offset + decoded.index(replacement_char)] == replacement_char:
                 words.append(decoded)
                 word_tokens.append(current_tokens)
                 current_tokens = []
@@ -3181,9 +2826,7 @@ class WhisperTokenizer:
         keeping basic punctuations like commas, periods, question marks, exclamation points, etc.
         """
         symbols = list('"#()*+/:;<=>@[\\]^_`{|}~「」『』')
-        symbols += (
-            "<< >> <<< >>> -- --- -( -[ (' (\" (( )) ((( ))) [[ ]] {{ }} ♪♪ ♪♪♪".split()
-        )
+        symbols += "<< >> <<< >>> -- --- -( -[ (' (\" (( )) ((( ))) [[ ]] {{ }} ♪♪ ♪♪♪".split()
 
         # symbols that may be a single token or multiple tokens depending on the tokenizer.
         # In case they're multiple tokens, suppress the first token, which is safe because:
@@ -3195,15 +2838,11 @@ class WhisperTokenizer:
         # allow hyphens "-" and single quotes "'" between words, but not at the beginning of a word
         result = {self.encoding.encode(" -")[0], self.encoding.encode(" '")[0]}
         for symbol in symbols + list(miscellaneous):
-            for tokens in [
-                self.encoding.encode(symbol),
-                self.encoding.encode(" " + symbol),
-            ]:
+            for tokens in [self.encoding.encode(symbol), self.encoding.encode(" " + symbol)]:
                 if len(tokens) == 1 or symbol in miscellaneous:
                     result.add(tokens[0])
 
         return tuple(sorted(result))
-
 
 
 @lru_cache(maxsize=None)
@@ -3212,37 +2851,17 @@ def whisper_get_encoding(name: str = "gpt2", num_languages: int = 99):
         raise RuntimeError("Whisper requires tiktoken. Install tiktoken in ComfyUI's Python environment and restart ComfyUI.")
     vocab_path = load_whisper_asset_path(f"{name}.tiktoken")
     with open(vocab_path, encoding="utf-8") as vocab_file:
-        ranks = {
-            base64.b64decode(token): int(rank)
-            for token, rank in (line.split() for line in vocab_file if line)
-        }
+        ranks = {base64.b64decode(token): int(rank) for token, rank in (line.split() for line in vocab_file if line)}
     n_vocab = len(ranks)
     special_tokens = {}
 
-    specials = [
-        "<|endoftext|>",
-        "<|startoftranscript|>",
-        *WHISPER_LANGUAGE_TOKENS[:num_languages],
-        "<|translate|>",
-        "<|transcribe|>",
-        "<|startoflm|>",
-        "<|startofprev|>",
-        "<|nospeech|>",
-        "<|notimestamps|>",
-        *[f"<|{i * 0.02:.2f}|>" for i in range(1501)],
-    ]
+    specials = ["<|endoftext|>", "<|startoftranscript|>", *WHISPER_LANGUAGE_TOKENS[:num_languages], "<|translate|>", "<|transcribe|>", "<|startoflm|>", "<|startofprev|>", "<|nospeech|>", "<|notimestamps|>", *[f"<|{i * 0.02:.2f}|>" for i in range(1501)]]
 
     for token in specials:
         special_tokens[token] = n_vocab
         n_vocab += 1
 
-    return tiktoken.Encoding(
-        name=os.path.basename(vocab_path),
-        explicit_n_vocab=n_vocab,
-        pat_str=r"""'s|'t|'re|'ve|'m|'ll|'d| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+""",
-        mergeable_ranks=ranks,
-        special_tokens=special_tokens,
-    )
+    return tiktoken.Encoding(name=os.path.basename(vocab_path), explicit_n_vocab=n_vocab, pat_str=r"""'s|'t|'re|'ve|'m|'ll|'d| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+""", mergeable_ranks=ranks, special_tokens=special_tokens)
 
 
 @lru_cache(maxsize=None)
@@ -3272,19 +2891,15 @@ def whisper_get_tokenizer(
 
     encoding = whisper_get_encoding(name=encoding_name, num_languages=num_languages)
 
-    return WhisperTokenizer(
-        encoding=encoding, num_languages=num_languages, language=language, task=task
-    )
-
+    return WhisperTokenizer(encoding=encoding, num_languages=num_languages, language=language, task=task)
 
 
 def whisper_compression_ratio(text):
     encoded = text.encode("utf-8")
     return len(encoded) / len(zlib.compress(encoded))
 
-def detect_whisper_language(
-    model: "Whisper", mel: Tensor, tokenizer: WhisperTokenizer = None
-) -> Tuple[Tensor, List[dict]]:
+
+def detect_whisper_language(model: "Whisper", mel: Tensor, tokenizer: WhisperTokenizer = None) -> Tuple[Tensor, List[dict]]:
     """
     Detect the spoken language in the audio, and return them as list of strings, along with the ids
     of the most probable language tokens and the probability distribution over all language tokens.
@@ -3298,16 +2913,9 @@ def detect_whisper_language(
         list of dictionaries containing the probability distribution over all languages.
     """
     if tokenizer is None:
-        tokenizer = whisper_get_tokenizer(
-            model.is_multilingual, num_languages=model.num_languages
-        )
-    if (
-        tokenizer.language is None
-        or tokenizer.language_token not in tokenizer.sot_sequence
-    ):
-        raise ValueError(
-            "This model doesn't have language tokens so it can't perform lang id"
-        )
+        tokenizer = whisper_get_tokenizer(model.is_multilingual, num_languages=model.num_languages)
+    if tokenizer.language is None or tokenizer.language_token not in tokenizer.sot_sequence:
+        raise ValueError("This model doesn't have language tokens so it can't perform lang id")
 
     single = mel.ndim == 2
     if single:
@@ -3328,13 +2936,7 @@ def detect_whisper_language(
     logits[:, mask] = -np.inf
     language_tokens = logits.argmax(dim=-1)
     language_token_probs = logits.softmax(dim=-1).cpu()
-    language_probs = [
-        {
-            c: language_token_probs[i, j].item()
-            for j, c in zip(tokenizer.all_language_tokens, tokenizer.all_language_codes)
-        }
-        for i in range(n_audio)
-    ]
+    language_probs = [{c: language_token_probs[i, j].item() for j, c in zip(tokenizer.all_language_tokens, tokenizer.all_language_codes)} for i in range(n_audio)]
 
     if single:
         language_tokens = language_tokens[0]
@@ -3442,9 +3044,7 @@ class WhisperPyTorchInference(WhisperInference):
 
 
 class WhisperSequenceRanker:
-    def rank(
-        self, tokens: List[List[Tensor]], sum_logprobs: List[List[float]]
-    ) -> List[int]:
+    def rank(self, tokens: List[List[Tensor]], sum_logprobs: List[List[float]]) -> List[int]:
         """
         Given a list of groups of samples and their cumulative log probabilities,
         return the indices of the samples in each group to select as the final result
@@ -3462,6 +3062,7 @@ class WhisperMaximumLikelihoodRanker(WhisperSequenceRanker):
         self.length_penalty = length_penalty
 
     def rank(self, tokens: List[List[Tensor]], sum_logprobs: List[List[float]]):
+
         def scores(logprobs, lengths):
             result = []
             for logprob, length in zip(logprobs, lengths):
@@ -3482,9 +3083,7 @@ class WhisperTokenDecoder:
     def reset(self):
         """Initialize any stateful variables for decoding a new sequence"""
 
-    def update(
-        self, tokens: Tensor, logits: Tensor, sum_logprobs: Tensor
-    ) -> Tuple[Tensor, bool]:
+    def update(self, tokens: Tensor, logits: Tensor, sum_logprobs: Tensor) -> Tuple[Tensor, bool]:
         """Specify how to select the next token, based on the current trace and logits
 
         Parameters
@@ -3509,9 +3108,7 @@ class WhisperTokenDecoder:
         """
         raise NotImplementedError
 
-    def finalize(
-        self, tokens: Tensor, sum_logprobs: Tensor
-    ) -> Tuple[Sequence[Sequence[Tensor]], List[List[float]]]:
+    def finalize(self, tokens: Tensor, sum_logprobs: Tensor) -> Tuple[Sequence[Sequence[Tensor]], List[List[float]]]:
         """Finalize search and return the final candidate sequences
 
         Parameters
@@ -3539,9 +3136,7 @@ class WhisperGreedyDecoder(WhisperTokenDecoder):
         self.temperature = temperature
         self.eot = eot
 
-    def update(
-        self, tokens: Tensor, logits: Tensor, sum_logprobs: Tensor
-    ) -> Tuple[Tensor, bool]:
+    def update(self, tokens: Tensor, logits: Tensor, sum_logprobs: Tensor) -> Tuple[Tensor, bool]:
         if self.temperature == 0:
             next_tokens = logits.argmax(dim=-1)
         else:
@@ -3564,13 +3159,7 @@ class WhisperGreedyDecoder(WhisperTokenDecoder):
 
 
 class WhisperBeamSearchDecoder(WhisperTokenDecoder):
-    def __init__(
-        self,
-        beam_size: int,
-        eot: int,
-        inference: WhisperInference,
-        patience: Optional[float] = None,
-    ):
+    def __init__(self, beam_size: int, eot: int, inference: WhisperInference, patience: Optional[float] = None):
         self.beam_size = beam_size
         self.eot = eot
         self.inference = inference
@@ -3578,16 +3167,12 @@ class WhisperBeamSearchDecoder(WhisperTokenDecoder):
         self.max_candidates: int = round(beam_size * self.patience)
         self.finished_sequences = None
 
-        assert (
-            self.max_candidates > 0
-        ), f"Invalid beam size ({beam_size}) or patience ({patience})"
+        assert self.max_candidates > 0, f"Invalid beam size ({beam_size}) or patience ({patience})"
 
     def reset(self):
         self.finished_sequences = None
 
-    def update(
-        self, tokens: Tensor, logits: Tensor, sum_logprobs: Tensor
-    ) -> Tuple[Tensor, bool]:
+    def update(self, tokens: Tensor, logits: Tensor, sum_logprobs: Tensor) -> Tuple[Tensor, bool]:
         if tokens.shape[0] % self.beam_size != 0:
             raise ValueError(f"{tokens.shape}[0] % {self.beam_size} != 0")
 
@@ -3631,41 +3216,29 @@ class WhisperBeamSearchDecoder(WhisperTokenDecoder):
 
         # add newly finished sequences to self.finished_sequences
         assert len(self.finished_sequences) == len(finished_sequences)
-        for previously_finished, newly_finished in zip(
-            self.finished_sequences, finished_sequences
-        ):
+        for previously_finished, newly_finished in zip(self.finished_sequences, finished_sequences):
             for seq in sorted(newly_finished, key=newly_finished.get, reverse=True):
                 if len(previously_finished) >= self.max_candidates:
                     break  # the candidate list is full
                 previously_finished[seq] = newly_finished[seq]
 
         # mark as completed if all audio has enough number of samples
-        completed = all(
-            len(sequences) >= self.max_candidates
-            for sequences in self.finished_sequences
-        )
+        completed = all(len(sequences) >= self.max_candidates for sequences in self.finished_sequences)
         return tokens, completed
 
     def finalize(self, preceding_tokens: Tensor, sum_logprobs: Tensor):
         # collect all finished sequences, including patience, and add unfinished ones if not enough
         sum_logprobs = sum_logprobs.cpu()
         for i, sequences in enumerate(self.finished_sequences):
-            if (
-                len(sequences) < self.beam_size
-            ):  # when not enough sequences are finished
+            if len(sequences) < self.beam_size:  # when not enough sequences are finished
                 for j in list(np.argsort(sum_logprobs[i]))[::-1]:
                     sequence = preceding_tokens[i, j].tolist() + [self.eot]
                     sequences[tuple(sequence)] = sum_logprobs[i][j].item()
                     if len(sequences) >= self.beam_size:
                         break
 
-        tokens: List[List[Tensor]] = [
-            [torch.tensor(seq) for seq in sequences.keys()]
-            for sequences in self.finished_sequences
-        ]
-        sum_logprobs: List[List[float]] = [
-            list(sequences.values()) for sequences in self.finished_sequences
-        ]
+        tokens: List[List[Tensor]] = [[torch.tensor(seq) for seq in sequences.keys()] for sequences in self.finished_sequences]
+        sum_logprobs: List[List[float]] = [list(sequences.values()) for sequences in self.finished_sequences]
         return tokens, sum_logprobs
 
 
@@ -3704,12 +3277,7 @@ class WhisperSuppressTokens(WhisperLogitFilter):
 
 
 class WhisperApplyTimestampRules(WhisperLogitFilter):
-    def __init__(
-        self,
-        tokenizer: WhisperTokenizer,
-        sample_begin: int,
-        max_initial_timestamp_index: Optional[int],
-    ):
+    def __init__(self, tokenizer: WhisperTokenizer, sample_begin: int, max_initial_timestamp_index: Optional[int]):
         self.tokenizer = tokenizer
         self.sample_begin = sample_begin
         self.max_initial_timestamp_index = max_initial_timestamp_index
@@ -3723,12 +3291,8 @@ class WhisperApplyTimestampRules(WhisperLogitFilter):
         for k in range(tokens.shape[0]):
             sampled_tokens = tokens[k, self.sample_begin :]
             seq = [t for t in sampled_tokens.tolist()]
-            last_was_timestamp = (
-                len(seq) >= 1 and seq[-1] >= self.tokenizer.timestamp_begin
-            )
-            penultimate_was_timestamp = (
-                len(seq) < 2 or seq[-2] >= self.tokenizer.timestamp_begin
-            )
+            last_was_timestamp = len(seq) >= 1 and seq[-1] >= self.tokenizer.timestamp_begin
+            penultimate_was_timestamp = len(seq) < 2 or seq[-2] >= self.tokenizer.timestamp_begin
 
             if last_was_timestamp:
                 if penultimate_was_timestamp:  # has to be non-timestamp
@@ -3736,9 +3300,7 @@ class WhisperApplyTimestampRules(WhisperLogitFilter):
                 else:  # cannot be normal text tokens
                     logits[k, : self.tokenizer.eot] = -np.inf
 
-            timestamps = sampled_tokens[
-                sampled_tokens.ge(self.tokenizer.timestamp_begin)
-            ]
+            timestamps = sampled_tokens[sampled_tokens.ge(self.tokenizer.timestamp_begin)]
             if timestamps.numel() > 0:
                 # timestamps shouldn't decrease; forbid timestamp tokens smaller than the last
                 # also force each segment to have a nonzero length, to prevent infinite looping
@@ -3754,17 +3316,13 @@ class WhisperApplyTimestampRules(WhisperLogitFilter):
 
             # apply the `max_initial_timestamp` option
             if self.max_initial_timestamp_index is not None:
-                last_allowed = (
-                    self.tokenizer.timestamp_begin + self.max_initial_timestamp_index
-                )
+                last_allowed = self.tokenizer.timestamp_begin + self.max_initial_timestamp_index
                 logits[:, last_allowed + 1 :] = -np.inf
 
         # if sum of probability over timestamps is above any other token, sample timestamp
         logprobs = F.log_softmax(logits.float(), dim=-1)
         for k in range(tokens.shape[0]):
-            timestamp_logprob = logprobs[k, self.tokenizer.timestamp_begin :].logsumexp(
-                dim=-1
-            )
+            timestamp_logprob = logprobs[k, self.tokenizer.timestamp_begin :].logsumexp(dim=-1)
             max_text_token_logprob = logprobs[k, : self.tokenizer.timestamp_begin].max()
             if timestamp_logprob > max_text_token_logprob:
                 logits[k, : self.tokenizer.timestamp_begin] = -np.inf
@@ -3780,12 +3338,7 @@ class WhisperDecodingTask:
         self.model = model
 
         language = options.language or "en"
-        tokenizer = whisper_get_tokenizer(
-            model.is_multilingual,
-            num_languages=model.num_languages,
-            language=language,
-            task=options.task,
-        )
+        tokenizer = whisper_get_tokenizer(model.is_multilingual, num_languages=model.num_languages, language=language, task=options.task)
         self.tokenizer: WhisperTokenizer = tokenizer
         self.options: WhisperDecodingOptions = self._verify_options(options)
 
@@ -3809,9 +3362,7 @@ class WhisperDecodingTask:
 
         # decoder: implements how to select the next tokens, given the autoregressive distribution
         if options.beam_size is not None:
-            self.decoder = WhisperBeamSearchDecoder(
-                options.beam_size, tokenizer.eot, self.inference, options.patience
-            )
+            self.decoder = WhisperBeamSearchDecoder(options.beam_size, tokenizer.eot, self.inference, options.patience)
         else:
             self.decoder = WhisperGreedyDecoder(options.temperature, tokenizer.eot)
 
@@ -3825,14 +3376,8 @@ class WhisperDecodingTask:
             precision = WHISPER_CHUNK_LENGTH / model.dims.n_audio_ctx  # usually 0.02 seconds
             max_initial_timestamp_index = None
             if options.max_initial_timestamp:
-                max_initial_timestamp_index = round(
-                    self.options.max_initial_timestamp / precision
-                )
-            self.logit_filters.append(
-                WhisperApplyTimestampRules(
-                    tokenizer, self.sample_begin, max_initial_timestamp_index
-                )
-            )
+                max_initial_timestamp_index = round(self.options.max_initial_timestamp / precision)
+            self.logit_filters.append(WhisperApplyTimestampRules(tokenizer, self.sample_begin, max_initial_timestamp_index))
 
     def _verify_options(self, options: WhisperDecodingOptions) -> WhisperDecodingOptions:
         if options.beam_size is not None and options.best_of is not None:
@@ -3842,9 +3387,7 @@ class WhisperDecodingTask:
                 raise ValueError("best_of with greedy sampling (T=0) is not compatible")
         if options.patience is not None and options.beam_size is None:
             raise ValueError("patience requires beam_size to be given")
-        if options.length_penalty is not None and not (
-            0 <= options.length_penalty <= 1
-        ):
+        if options.length_penalty is not None and not (0 <= options.length_penalty <= 1):
             raise ValueError("length_penalty (alpha) should be a value between 0 and 1")
 
         return options
@@ -3853,27 +3396,15 @@ class WhisperDecodingTask:
         tokens = list(self.sot_sequence)
 
         if prefix := self.options.prefix:
-            prefix_tokens = (
-                self.tokenizer.encode(" " + prefix.strip())
-                if isinstance(prefix, str)
-                else prefix
-            )
+            prefix_tokens = self.tokenizer.encode(" " + prefix.strip()) if isinstance(prefix, str) else prefix
             if self.sample_len is not None:
                 max_prefix_len = self.n_ctx // 2 - self.sample_len
                 prefix_tokens = prefix_tokens[-max_prefix_len:]
             tokens = tokens + prefix_tokens
 
         if prompt := self.options.prompt:
-            prompt_tokens = (
-                self.tokenizer.encode(" " + prompt.strip())
-                if isinstance(prompt, str)
-                else prompt
-            )
-            tokens = (
-                [self.tokenizer.sot_prev]
-                + prompt_tokens[-(self.n_ctx // 2 - 1) :]
-                + tokens
-            )
+            prompt_tokens = self.tokenizer.encode(" " + prompt.strip()) if isinstance(prompt, str) else prompt
+            tokens = [self.tokenizer.sot_prev] + prompt_tokens[-(self.n_ctx // 2 - 1) :] + tokens
 
         return tuple(tokens)
 
@@ -3891,15 +3422,7 @@ class WhisperDecodingTask:
         else:
             assert isinstance(suppress_tokens, list), "suppress_tokens must be a list"
 
-        suppress_tokens.extend(
-            [
-                self.tokenizer.transcribe,
-                self.tokenizer.translate,
-                self.tokenizer.sot,
-                self.tokenizer.sot_prev,
-                self.tokenizer.sot_lm,
-            ]
-        )
+        suppress_tokens.extend([self.tokenizer.transcribe, self.tokenizer.translate, self.tokenizer.sot, self.tokenizer.sot_prev, self.tokenizer.sot_lm])
         if self.tokenizer.no_speech is not None:
             # no-speech probability is collected separately
             suppress_tokens.append(self.tokenizer.no_speech)
@@ -3909,19 +3432,14 @@ class WhisperDecodingTask:
     def _get_audio_features(self, mel: Tensor):
         mel = mel.to(dtype=self.model.compute_dtype)
 
-        if mel.shape[-2:] == (
-            self.model.dims.n_audio_ctx,
-            self.model.dims.n_audio_state,
-        ):
+        if mel.shape[-2:] == (self.model.dims.n_audio_ctx, self.model.dims.n_audio_state):
             # encoded audio features are given; skip audio encoding
             audio_features = mel
         else:
             audio_features = self.model.encoder(mel)
 
         if audio_features.dtype != self.model.compute_dtype:
-            raise TypeError(
-                f"audio_features has an incorrect dtype: {audio_features.dtype}"
-            )
+            raise TypeError(f"audio_features has an incorrect dtype: {audio_features.dtype}")
 
         return audio_features
 
@@ -3930,9 +3448,7 @@ class WhisperDecodingTask:
         lang_probs = None
 
         if self.options.language is None or self.options.task == "lang_id":
-            lang_tokens, lang_probs = detect_whisper_language(
-                self.model, audio_features, self.tokenizer
-            )
+            lang_tokens, lang_probs = detect_whisper_language(self.model, audio_features, self.tokenizer)
             languages = [max(probs, key=probs.get) for probs in lang_probs]
             if self.options.language is None:
                 tokens[:, self.sot_index + 1] = lang_tokens  # write language tokens
@@ -3949,9 +3465,7 @@ class WhisperDecodingTask:
                 throw_exception_if_processing_interrupted()
                 logits = self.inference.logits(tokens, audio_features)
 
-                if (
-                    i == 0 and self.tokenizer.no_speech is not None
-                ):  # save no_speech_probs
+                if i == 0 and self.tokenizer.no_speech is not None:  # save no_speech_probs
                     probs_at_sot = logits[:, self.sot_index].float().softmax(dim=-1)
                     no_speech_probs = probs_at_sot[:, self.tokenizer.no_speech].tolist()
 
@@ -3983,14 +3497,7 @@ class WhisperDecodingTask:
         # detect language if requested, overwriting the language token
         languages, language_probs = self._detect_language(audio_features, tokens)
         if self.options.task == "lang_id":
-            return [
-                WhisperDecodingResult(
-                    audio_features=features, language=language, language_probs=probs
-                )
-                for features, language, probs in zip(
-                    audio_features, languages, language_probs
-                )
-            ]
+            return [WhisperDecodingResult(audio_features=features, language=language, language_probs=probs) for features, language, probs in zip(audio_features, languages, language_probs)]
 
         # repeat text tensors by the group size, for beam search or best-of-n sampling
         tokens = tokens.repeat_interleave(self.n_group, dim=0).to(audio_features.device)
@@ -4008,10 +3515,7 @@ class WhisperDecodingTask:
 
         # get the final candidates for each group, and slice between the first sampled token and EOT
         tokens, sum_logprobs = self.decoder.finalize(tokens, sum_logprobs)
-        tokens: List[List[Tensor]] = [
-            [t[self.sample_begin : (t == tokenizer.eot).nonzero()[0, 0]] for t in s]
-            for s in tokens
-        ]
+        tokens: List[List[Tensor]] = [[t[self.sample_begin : (t == tokenizer.eot).nonzero()[0, 0]] for t in s] for s in tokens]
 
         # select the top-ranked sample in each group
         selected = self.sequence_ranker.rank(tokens, sum_logprobs)
@@ -4019,44 +3523,19 @@ class WhisperDecodingTask:
         texts: List[str] = [tokenizer.decode(t).strip() for t in tokens]
 
         sum_logprobs: List[float] = [lp[i] for i, lp in zip(selected, sum_logprobs)]
-        avg_logprobs: List[float] = [
-            lp / (len(t) + 1) for t, lp in zip(tokens, sum_logprobs)
-        ]
+        avg_logprobs: List[float] = [lp / (len(t) + 1) for t, lp in zip(tokens, sum_logprobs)]
 
-        fields = (
-            texts,
-            languages,
-            tokens,
-            audio_features,
-            avg_logprobs,
-            no_speech_probs,
-        )
+        fields = (texts, languages, tokens, audio_features, avg_logprobs, no_speech_probs)
         if len(set(map(len, fields))) != 1:
             raise RuntimeError(f"inconsistent result lengths: {list(map(len, fields))}")
 
         return [
-            WhisperDecodingResult(
-                audio_features=features,
-                language=language,
-                tokens=tokens,
-                text=text,
-                avg_logprob=avg_logprob,
-                no_speech_prob=no_speech_prob,
-                temperature=self.options.temperature,
-                compression_ratio=whisper_compression_ratio(text),
-            )
-            for text, language, tokens, features, avg_logprob, no_speech_prob in zip(
-                *fields
-            )
+            WhisperDecodingResult(audio_features=features, language=language, tokens=tokens, text=text, avg_logprob=avg_logprob, no_speech_prob=no_speech_prob, temperature=self.options.temperature, compression_ratio=whisper_compression_ratio(text))
+            for text, language, tokens, features, avg_logprob, no_speech_prob in zip(*fields)
         ]
 
 
-def decode_whisper(
-    model: "Whisper",
-    mel: Tensor,
-    options: WhisperDecodingOptions = WhisperDecodingOptions(),
-    **kwargs,
-) -> Union[WhisperDecodingResult, List[WhisperDecodingResult]]:
+def decode_whisper(model: "Whisper", mel: Tensor, options: WhisperDecodingOptions = WhisperDecodingOptions(), **kwargs) -> Union[WhisperDecodingResult, List[WhisperDecodingResult]]:
     """
     Performs decoding of 30-second audio segment(s), provided as Mel spectrogram(s).
 
@@ -4087,7 +3566,6 @@ def decode_whisper(
     return result[0] if single else result
 
 
-
 WHISPER_MODELS = ("tiny", "base", "small", "medium", "large-v2", "large-v3")
 WHISPER_REPO = "silveroxides/ComfyUI-UtilsCollection-Models"
 
@@ -4095,10 +3573,7 @@ WHISPER_REPO = "silveroxides/ComfyUI-UtilsCollection-Models"
 def register_whisper_paths():
     folder_paths.add_model_folder_path("whisper", os.path.join(folder_paths.models_dir, "whisper"))
     paths, extensions = folder_paths.folder_names_and_paths["whisper"]
-    folder_paths.folder_names_and_paths["whisper"] = (
-        paths,
-        extensions | {".safetensors", ".tiktoken", ".npz", ".dict"},
-    )
+    folder_paths.folder_names_and_paths["whisper"] = (paths, extensions | {".safetensors", ".tiktoken", ".npz", ".dict"})
 
 
 def load_whisper_asset_path(filename: str) -> str:
@@ -4203,7 +3678,7 @@ def transcribe_whisper(model, waveform, task, language, word_timestamps=False):
         previous_seek = seek
         time_offset = seek * WHISPER_HOP_LENGTH / WHISPER_SAMPLE_RATE
         segment_size = min(WHISPER_N_FRAMES, content_frames - seek)
-        window = whisper_pad_or_trim(mel[:, seek:seek + segment_size], WHISPER_N_FRAMES).to(device=model.device, dtype=model.compute_dtype)
+        window = whisper_pad_or_trim(mel[:, seek : seek + segment_size], WHISPER_N_FRAMES).to(device=model.device, dtype=model.compute_dtype)
         result = whisper_decode_with_fallback(model, window, language, task, all_tokens[prompt_reset_since:])
         if result.no_speech_prob > 0.6 and result.avg_logprob <= -1.0:
             seek += segment_size
@@ -4230,8 +3705,7 @@ def transcribe_whisper(model, waveform, task, language, word_timestamps=False):
             last_slice = 0
             for current_slice in consecutive:
                 selected = tokens[last_slice:current_slice]
-                add_segment(time_offset + (selected[0] - tokenizer.timestamp_begin) * time_precision,
-                            time_offset + (selected[-1] - tokenizer.timestamp_begin) * time_precision, selected)
+                add_segment(time_offset + (selected[0] - tokenizer.timestamp_begin) * time_precision, time_offset + (selected[-1] - tokenizer.timestamp_begin) * time_precision, selected)
                 last_slice = current_slice
             if single_timestamp_ending:
                 seek += segment_size
@@ -4246,9 +3720,7 @@ def transcribe_whisper(model, waveform, task, language, word_timestamps=False):
             seek += segment_size
 
         if word_timestamps and current_segments:
-            add_word_timestamps(segments=current_segments, model=model, tokenizer=tokenizer,
-                                mel=window, num_frames=segment_size,
-                                last_speech_timestamp=last_speech_timestamp, time_offset=time_offset)
+            add_word_timestamps(segments=current_segments, model=model, tokenizer=tokenizer, mel=window, num_frames=segment_size, last_speech_timestamp=last_speech_timestamp, time_offset=time_offset)
             for segment in current_segments:
                 for word in segment["words"]:
                     word["start"] = min(max(0.0, word["start"]), duration)
@@ -4333,11 +3805,7 @@ def format_reference_transcript_phrases(segments, language, timestamp_format="00
         if "words" in segment and segment["words"]:
             words_stream.extend(segment["words"])
         else:
-            words_stream.append({
-                "word": segment.get("text", ""),
-                "start": segment.get("start", 0.0),
-                "end": segment.get("end", 0.0),
-            })
+            words_stream.append({"word": segment.get("text", ""), "start": segment.get("start", 0.0), "end": segment.get("end", 0.0)})
     for word in words_stream:
         text = word["word"].strip()
         if not text or (duration is not None and duration <= 0):
@@ -4368,14 +3836,7 @@ def format_reference_transcript_phrases(segments, language, timestamp_format="00
             start_seconds = min(duration, max(0.0, start_raw)) if duration is not None else max(0.0, start_raw)
             end_seconds = min(duration, max(0.0, end_raw)) if duration is not None else max(0.0, end_raw)
             word_count = sum(any(character.isalnum() for character in word["word"]) for word in words)
-            aligned_seconds = sum(
-                max(
-                    0.0,
-                    (min(duration, float(word["end"])) if duration is not None else float(word["end"]))
-                    - (max(0.0, float(word["start"])) if duration is not None else float(word["start"])),
-                )
-                for word in words
-            )
+            aligned_seconds = sum(max(0.0, (min(duration, float(word["end"])) if duration is not None else float(word["end"])) - (max(0.0, float(word["start"])) if duration is not None else float(word["start"]))) for word in words)
             # Gaps between words are pauses, not evidence of stretched speech.
             if aligned_seconds > word_count:
                 continue
@@ -4415,9 +3876,265 @@ def run_whisper(patcher, audio, task, language, word_timestamps=False):
     transcripts, segments, languages = [], [], []
     for waveform in recordings:
         comfy.model_management.throw_exception_if_processing_interrupted()
-        result = (transcribe_whisper(patcher.model, waveform, task, language, word_timestamps=True)
-                  if word_timestamps else transcribe_whisper(patcher.model, waveform, task, language))
+        result = transcribe_whisper(patcher.model, waveform, task, language, word_timestamps=True) if word_timestamps else transcribe_whisper(patcher.model, waveform, task, language)
         transcripts.append(result["text"])
         segments.append(json.dumps(result["segments"], ensure_ascii=False))
         languages.append(result["language"])
     return transcripts, segments, languages
+
+
+LATENT_UPSCALE_MODELS_FOLDER = "latent_upscale_models"
+MINIMAX_H3_UPSCALER_PLACEHOLDER = "(place .safetensors models in models/latent_upscale_models)"
+
+
+def get_minimax_h3_latent_upscale_model_names() -> list[str]:
+    names = [name for name in folder_paths.get_filename_list(LATENT_UPSCALE_MODELS_FOLDER) if name.lower().endswith(".safetensors")]
+    return names if names else [MINIMAX_H3_UPSCALER_PLACEHOLDER]
+
+
+def _collect_expected_module_shapes(model: torch.nn.Module) -> tuple[dict[str, tuple[int, ...]], set[str]]:
+    expected = {key: tuple(tensor.shape) for key, tensor in model.state_dict().items()}
+    lazy_parameters: set[str] = set()
+    for name, module in model.named_modules():
+        if getattr(module, "weight", "present") is not None:
+            continue
+        prefix = f"{name}." if name else ""
+        weight_shape: tuple[int, ...] | None = None
+        bias_size: int | None = None
+        if isinstance(module, torch.nn.Linear):
+            weight_shape = (module.out_features, module.in_features)
+            bias_size = module.out_features
+        elif isinstance(module, (torch.nn.Conv2d, torch.nn.Conv3d)):
+            weight_shape = (module.out_channels, module.in_channels // module.groups, *module.kernel_size)
+            bias_size = module.out_channels
+        elif isinstance(module, torch.nn.GroupNorm):
+            weight_shape = (module.num_channels,)
+            bias_size = module.num_channels
+        if weight_shape is not None:
+            expected[prefix + "weight"] = weight_shape
+            lazy_parameters.add(prefix + "weight")
+            if getattr(module, "comfy_need_lazy_init_bias", False) and bias_size is not None:
+                expected[prefix + "bias"] = (bias_size,)
+                lazy_parameters.add(prefix + "bias")
+    return expected, lazy_parameters
+
+
+def _build_minimax_h3_latent_upscaler_from_header(handler: MemoryEfficientSafeOpen, key_to_raw: Mapping[str, str], model_name: str, model_dtype: torch.dtype) -> torch.nn.Module:
+    if "resizer.conv_in.weight" in key_to_raw:
+        conv_in_shape = tuple(handler.get_shape(key_to_raw["resizer.conv_in.weight"]))
+        if len(conv_in_shape) != 4:
+            raise ValueError(f"Expected 4D resizer.conv_in.weight in {model_name}, got shape {conv_in_shape}.")
+        channels, in_channels = int(conv_in_shape[0]), int(conv_in_shape[1])
+        if "resizer.conv_out.weight" in key_to_raw:
+            out_ch = int(handler.get_shape(key_to_raw["resizer.conv_out.weight"])[0])
+            if in_channels != out_ch:
+                raise ValueError(f"Unsupported input/output channel mismatch ({in_channels} vs {out_ch}) in {model_name}.")
+        in_blocks = max((int(m.group(1)) for k in key_to_raw if (m := re.match(r"^resizer\.in_blocks\.(\d+)\.", k))), default=-1) + 1
+        out_blocks = max((int(m.group(1)) for k in key_to_raw if (m := re.match(r"^resizer\.out_blocks\.(\d+)\.", k))), default=-1) + 1
+        if in_blocks < 1 or out_blocks < 1:
+            raise ValueError(f"Missing resizer block weights in {model_name}.")
+        emb_raw = key_to_raw.get("resizer.embed.linear.0.weight")
+        if emb_raw is None:
+            raise ValueError(f"Missing resizer.embed.linear.0.weight in {model_name}.")
+        emb_shape = tuple(handler.get_shape(emb_raw))
+        embed_dim, emb_in_dim = int(emb_shape[0]), int(emb_shape[1])
+        if emb_in_dim == 96:
+            dual_embed_freq, tier_dim = 16, 32
+        elif emb_in_dim > 0 and emb_in_dim % 4 == 0:
+            dual_embed_freq, tier_dim = emb_in_dim // 4, 0
+        else:
+            raise ValueError(f"Unsupported scale embedding input dimension {emb_in_dim} in {model_name}.")
+        learned_ks = sorted({int(m.group(1)) for k in key_to_raw if (m := re.match(r"^resizer\.learned_up\.branches\.(\d+)\.", k))})
+        if "temporal_blocks.0.dwconv.weight" in key_to_raw:
+            temporal_every = 2
+            temporal_kernel = int(handler.get_shape(key_to_raw["temporal_blocks.0.dwconv.weight"])[2])
+        else:
+            temporal_every = 0
+            temporal_kernel = 5
+        return MiniMaxH3LatentUpscaler2D(
+            in_channels=in_channels,
+            channels=channels,
+            in_blocks=in_blocks,
+            out_blocks=out_blocks,
+            embed_dim=embed_dim,
+            dual_embed_freq=dual_embed_freq,
+            tier_dim=tier_dim,
+            temporal_every=temporal_every,
+            temporal_kernel=temporal_kernel,
+            learned_upsample_ks=learned_ks,
+            dtype=model_dtype,
+            operations=comfy.ops.disable_weight_init,
+        )
+
+    if "conv_in.weight" in key_to_raw and "in_blocks.0.emb_layers.1.weight" in key_to_raw:
+        conv_in_shape = tuple(handler.get_shape(key_to_raw["conv_in.weight"]))
+        if len(conv_in_shape) == 5:
+            from comfy.ldm.minimax.latent_upscaler import MiniMaxH3LatentUpscaler
+
+            in_blocks = len({k.split(".")[1] for k in key_to_raw if k.startswith("in_blocks.") and ".in_layers." in k})
+            out_blocks = len({k.split(".")[1] for k in key_to_raw if k.startswith("out_blocks.") and ".in_layers." in k})
+            dw_raw = next((raw for k, raw in key_to_raw.items() if k.startswith("in_blocks.") and k.endswith(".dwconv.weight")), None)
+            temporal_kernel = int(handler.get_shape(dw_raw)[2]) if dw_raw is not None else 5
+            return MiniMaxH3LatentUpscaler(in_channels=int(conv_in_shape[1]), channels=int(conv_in_shape[0]), in_blocks=in_blocks, out_blocks=out_blocks, temporal_kernel=temporal_kernel, dtype=model_dtype, operations=comfy.ops.disable_weight_init)
+
+    raise ValueError(f"Unsupported MiniMax H3 latent upscaler checkpoint in {model_name!r}. Expected a MiniMax H3 2D or 3D .safetensors upscaler.")
+
+
+def load_minimax_h3_latent_upscale_model(model_name: str):
+    cleaned = str(model_name or "").strip()
+    if not cleaned or cleaned.startswith("(") or not cleaned.lower().endswith(".safetensors"):
+        raise ValueError("MiniMax H3 Latent Upscale Loader requires a .safetensors checkpoint placed in models/latent_upscale_models.")
+    model_path = folder_paths.get_full_path_or_raise(LATENT_UPSCALE_MODELS_FOLDER, cleaned)
+    model_dtype = comfy.model_management.vae_dtype(allowed_dtypes=[torch.float16, torch.bfloat16, torch.float32])
+
+    handler = MemoryEfficientSafeOpen(str(model_path), low_memory=True)
+    try:
+        raw_keys = list(handler.keys())
+        has_prefix = any(k.startswith("upscaler.") for k in raw_keys)
+        key_to_raw = {k[len("upscaler.") :]: k for k in raw_keys if k.startswith("upscaler.")} if has_prefix else {k: k for k in raw_keys}
+        model = _build_minimax_h3_latent_upscaler_from_header(handler, key_to_raw, cleaned, model_dtype)
+        expected, lazy_parameters = _collect_expected_module_shapes(model)
+        missing = sorted(set(expected) - set(key_to_raw))
+        unexpected = sorted(set(key_to_raw) - set(expected))
+        if missing or unexpected:
+            raise ValueError(f"Checkpoint key mismatch in {cleaned}: missing ({len(missing)})={missing[:10]}, unexpected ({len(unexpected)})={unexpected[:10]}.")
+        for logical_key, exp_shape in expected.items():
+            actual_shape = tuple(handler.get_shape(key_to_raw[logical_key]))
+            if actual_shape != exp_shape:
+                raise ValueError(f"Checkpoint shape mismatch for {logical_key} in {cleaned}: expected {exp_shape}, got {actual_shape}.")
+
+        ordered_logical = list(expected)
+        ordered_raw = [key_to_raw[k] for k in ordered_logical]
+        stream = handler.async_stream(ordered_raw, batch_size=1, prefetch_batches=1, pin_memory=False)
+        consumed = 0
+        try:
+            for batch in stream:
+                for raw_key, tensor in batch:
+                    try:
+                        if raw_key != ordered_raw[consumed]:
+                            raise RuntimeError(f"Unexpected UEL stream key order: expected {ordered_raw[consumed]}, received {raw_key}.")
+                        logical_key = ordered_logical[consumed]
+                        if tensor.dtype == torch.float8_e4m3fn or (tensor.is_floating_point() and tensor.dtype != model_dtype):
+                            tensor = tensor.to(dtype=model_dtype)
+                        if logical_key in lazy_parameters:
+                            comfy.utils.set_attr_param(model, logical_key, tensor)
+                        else:
+                            comfy.utils.copy_to_param(model, logical_key, tensor)
+                        consumed += 1
+                    finally:
+                        handler.mark_processed(raw_key)
+            if consumed != len(ordered_raw):
+                raise RuntimeError(f"Incomplete UEL stream for {cleaned}: loaded {consumed} of {len(ordered_raw)} tensors.")
+        finally:
+            close_stream = getattr(stream, "close", None)
+            if callable(close_stream):
+                close_stream()
+    finally:
+        handler.close()
+
+    model.train(False)
+    comfy.model_management.archive_model_dtypes(model)
+    offload_device = comfy.model_management.unet_offload_device()
+    model.to(offload_device)
+    return comfy.model_patcher.CoreModelPatcher(model, load_device=comfy.model_management.get_torch_device(), offload_device=offload_device)
+
+
+def compute_minimax_h3_upscale_latent_hw(h_in: int, w_in: int, mode: Mapping[str, Any], align: int = 32, downsample: int = 16) -> tuple[int, int, float]:
+    if h_in < 1 or w_in < 1:
+        raise ValueError("Input latent spatial dimensions must be positive.")
+    selected = str(mode.get("mode", "scale_by")).strip()
+    if selected in ("scale_by", "scale by multiplier"):
+        scale_val = float(mode.get("scale", 2.0))
+        w_px = w_in * downsample * scale_val
+        h_px = h_in * downsample * scale_val
+        eff_scale = scale_val
+    elif selected in ("dimensions", "target dimensions"):
+        w_px = float(mode["width"])
+        h_px = float(mode["height"])
+        eff_scale = (w_px / (w_in * downsample) + h_px / (h_in * downsample)) / 2.0
+    elif selected == "megapixels":
+        mp = float(mode["megapixels"])
+        if mp <= 0:
+            raise ValueError("Target megapixels must be positive.")
+        target_pixels = mp * 1024.0 * 1024.0
+        aspect = w_in / h_in
+        h_px = math.sqrt(target_pixels / aspect)
+        w_px = h_px * aspect
+        eff_scale = (w_px / (w_in * downsample) + h_px / (h_in * downsample)) / 2.0
+    else:
+        raise ValueError(f"Unsupported MiniMax H3 latent upscale sizing mode: {selected!r}.")
+
+    alignment = max(1, int(align))
+    w_aligned = round(w_px / alignment) * alignment
+    h_aligned = round(h_px / alignment) * alignment
+    w_final = round(w_aligned / downsample) * downsample
+    h_final = round(h_aligned / downsample) * downsample
+    w_out = max(1, int(w_final // downsample))
+    h_out = max(1, int(h_final // downsample))
+    if eff_scale < 1.0 and (w_out < w_in or h_out < h_in):
+        raise ValueError("MiniMax H3 Latent Upscale supports upscaling only (effective scale >= 1.0).")
+    return h_out, w_out, eff_scale
+
+
+def upscale_minimax_h3_latent(patcher: Any, latent: Mapping[str, Any], mode: Mapping[str, Any], align: int = 32, sharpness: int = 1, temporal_chunking: Mapping[str, Any] | None = None) -> dict[str, Any]:
+    if not isinstance(latent, Mapping) or "samples" not in latent:
+        raise ValueError("Expected a LATENT dictionary containing 'samples'.")
+    if patcher is None or not hasattr(patcher, "model"):
+        raise ValueError("Expected a loaded LATENT_UPSCALE_MODEL.")
+
+    samples = latent["samples"]
+    is_nested = isinstance(samples, NestedTensor) or bool(getattr(samples, "is_nested", False))
+    if is_nested:
+        streams = list(samples.tensors) if hasattr(samples, "tensors") else list(samples.unbind())
+        if not streams:
+            raise ValueError("MiniMax H3 AV latent contains no tensor streams.")
+        video = streams[0]
+        extra_streams = tuple(streams[1:])
+    else:
+        video = samples
+        extra_streams = ()
+
+    if not torch.is_tensor(video) or video.ndim not in (4, 5):
+        raise ValueError(f"Expected 4D [B, C, H, W] or 5D [B, C, T, H, W] video latent, got {type(video).__name__} {tuple(getattr(video, 'shape', ()))}.")
+
+    was_4d = video.ndim == 4
+    video_5d = video.unsqueeze(2) if was_4d else video
+    expected_ch = int(getattr(patcher.model, "in_channels", getattr(getattr(patcher.model, "conv_in", None), "in_channels", 24)))
+    if video_5d.shape[1] != expected_ch:
+        raise ValueError(f"Expected {expected_ch}-channel MiniMax H3 video latent, got {video_5d.shape[1]} channels.")
+
+    _, _, t_in, h_in, w_in = video_5d.shape
+    h_out, w_out, _ = compute_minimax_h3_upscale_latent_hw(h_in, w_in, mode, align=align)
+    if (h_out, w_out) == (h_in, w_in):
+        return dict(latent)
+
+    tc = temporal_chunking or {}
+    tc_mode = str(tc.get("temporal_chunking", "chunked")).strip().lower()
+    chunk_frames = int(tc.get("chunk_frames", H3_UPSCALER_DEFAULT_CHUNK_FRAMES)) if tc_mode == "chunked" else None
+
+    comfy.model_management.throw_exception_if_processing_interrupted()
+    size = (t_in, h_out, w_out)
+    model = patcher.model
+    if isinstance(model, MiniMaxH3LatentUpscaler2D):
+        mem_req = model.memory_required(video_5d.shape, size, chunk_frames=chunk_frames)
+    elif hasattr(model, "memory_required"):
+        mem_req = model.memory_required(video_5d.shape, size)
+    else:
+        mem_req = 0
+
+    comfy.model_management.load_models_gpu([patcher], memory_required=mem_req)
+    compute_dtype = patcher.model_dtype() or torch.float16
+    vin = video_5d.to(device=patcher.load_device, dtype=compute_dtype)
+    if isinstance(model, MiniMaxH3LatentUpscaler2D):
+        upscaled = model(vin, size, sharpness=int(sharpness), chunk_frames=chunk_frames)
+    else:
+        upscaled = model(vin, size)
+
+    upscaled = upscaled.to(device=comfy.model_management.intermediate_device(), dtype=video.dtype)
+    if was_4d:
+        upscaled = upscaled.squeeze(2)
+
+    out = dict(latent)
+    out["samples"] = NestedTensor((upscaled, *extra_streams)) if is_nested else upscaled
+    out.pop("noise_mask", None)
+    return out

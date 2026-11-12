@@ -1,35 +1,41 @@
+import json
+
 from comfy_api.latest import io
+
 from nodes import MAX_RESOLUTION
+
 from ..helpers.image_helpers import DEPTH_ANYTHING_MULTI_VIEW_MODES, DEPTH_ANYTHING_NORM_SCOPES, DEPTH_ANYTHING_OUTPUT_MODES, DEPTH_ANYTHING_REF_VIEW_STRATEGIES, DEPTH_ANYTHING_RESIZE_METHODS, VIDEO_FRAME_TIMESTAMP_FORMATS, build_yolo_detectors, run_depth_anything, run_yolo_detect
 from ..helpers.model_helpers import (
     DEPTH_ANYTHING_MODELS,
-    depth_anything_forward,
-    load_depth_anything_model,
-    register_depth_anything_paths,
-    WHISPER_MODELS,
     WHISPER_LANGUAGES,
-    load_whisper_model,
-    register_whisper_paths,
-    run_whisper,
+    WHISPER_MODELS,
     YOLO_MODELS,
-    load_yolo_model,
-    register_yolo_paths,
-    yolo_forward,
-    format_reference_transcript_phrases,
     apply_minimax_h3_refs_to_conditioning,
     create_minimax_h3_audio_ref,
     create_minimax_h3_image_refs,
     create_minimax_h3_video_ref,
+    depth_anything_forward,
     detect_sam3,
     flatten_minimax_h3_ref_collections,
     format_minimax_h3_ref_info,
+    format_reference_transcript_phrases,
+    get_minimax_h3_latent_upscale_model_names,
     get_minimax_h3_ref_input_fingerprint,
     list_minimax_h3_refs,
+    load_depth_anything_model,
+    load_minimax_h3_latent_upscale_model,
     load_minimax_h3_ref_collection,
+    load_whisper_model,
+    load_yolo_model,
     minimax_h3_ref_resolution_grid,
+    register_depth_anything_paths,
+    register_whisper_paths,
+    register_yolo_paths,
+    run_whisper,
     save_minimax_h3_ref_collection,
+    upscale_minimax_h3_latent,
+    yolo_forward,
 )
-import json
 
 WhisperModel = io.Custom("WHISPER_MODEL")
 BBoxDetectorType = io.Custom("BBOX_DETECTOR")
@@ -538,3 +544,73 @@ class UC_DepthAnythingV3(io.ComfyNode):
                 forward=depth_anything_forward,
             )
         )
+
+
+class UC_MiniMaxH3LatentUpscaleLoader(io.ComfyNode):
+    @classmethod
+    def define_schema(cls):
+        return io.Schema(
+            node_id="UC_MiniMaxH3LatentUpscaleLoader",
+            display_name="MiniMax H3 Latent Upscale Loader",
+            category="model/loaders",
+            description="Loads a MiniMax H3 2D or 3D neural latent upscaler .safetensors checkpoint from models/latent_upscale_models through Unified Efficient Loader and ComfyUI model management.",
+            search_aliases=["minimax h3 latent upscaler", "h3 latent upscale loader", "minimax upscaler", "latent upscale model"],
+            inputs=[
+                io.Combo.Input(
+                    "model_name",
+                    options=get_minimax_h3_latent_upscale_model_names(),
+                    tooltip="Select a MiniMax H3 2D (2d_conv_v1) or 3D (3d_conv_v1) .safetensors checkpoint placed in ComfyUI/models/latent_upscale_models. 2D checkpoints cover 1.1x to 4.0x scales at half the size and support 6 sharpness levels; 3D checkpoints target 2x, 2.25x, 2.5x, and 4x.",
+                )
+            ],
+            outputs=[io.LatentUpscaleModel.Output("model", tooltip="Loaded MiniMax H3 latent upscale model compatible with MiniMax H3 Latent Upscale and Core MiniMax H3 Latent Upscale With Model.")],
+        )
+
+    @classmethod
+    def execute(cls, model_name: str) -> io.NodeOutput:
+        return io.NodeOutput(load_minimax_h3_latent_upscale_model(model_name))
+
+
+class UC_MiniMaxH3LatentUpscale(io.ComfyNode):
+    @classmethod
+    def define_schema(cls):
+        return io.Schema(
+            node_id="UC_MiniMaxH3LatentUpscale",
+            display_name="MiniMax H3 Latent Upscale",
+            category="model/latent/minimax",
+            description="Upscales a MiniMax H3 video or joint audio-video latent directly in latent space without decoding through the video VAE, preserving any attached audio track unchanged.",
+            search_aliases=["minimax h3 latent upscale", "h3 latent upscaler", "minimax video upscale", "h3 hires latent"],
+            inputs=[
+                io.LatentUpscaleModel.Input("model", tooltip="Connect model from MiniMax H3 Latent Upscale Loader or Core Load Latent Upscale Model."),
+                io.Latent.Input("samples", tooltip="MiniMax H3 joint audio-video latent or standalone video latent to upscale. When an audio stream is present, it passes through untouched."),
+                io.DynamicCombo.Input(
+                    "mode",
+                    tooltip="Choose how the upscaled output resolution is specified: multiply the current size, set exact pixel width and height, or target a total megapixel budget while keeping aspect ratio.",
+                    options=[
+                        io.DynamicCombo.Option("scale_by", [io.Float.Input("scale", default=2.0, min=1.0, max=4.0, step=0.05, tooltip="Multiplier applied to both width and height (1.0 leaves size unchanged; 2.0 doubles width and height).")]),
+                        io.DynamicCombo.Option(
+                            "dimensions",
+                            [
+                                io.Int.Input("width", default=1280, min=64, max=MAX_RESOLUTION, step=32, tooltip="Target output width in pixels before rounding to the alignment grid."),
+                                io.Int.Input("height", default=704, min=64, max=MAX_RESOLUTION, step=32, tooltip="Target output height in pixels before rounding to the alignment grid."),
+                            ],
+                        ),
+                        io.DynamicCombo.Option("megapixels", [io.Float.Input("megapixels", default=1.0, min=0.1, max=16.0, step=0.05, tooltip="Target total pixel area in megapixels while preserving the input aspect ratio (1.0 is roughly 1344x768 at 16:9).")]),
+                    ],
+                ),
+                io.Int.Input("sharpness", default=1, min=1, max=6, step=1, tooltip="Detail crispness for 2D checkpoints trained with sharpness levels: 1 stays closest to the source (recommended default), while 6 adds the strongest edge crispness. Ignored on 3D checkpoints."),
+                io.Int.Input("align", default=32, min=16, max=512, step=16, tooltip="Pixel-grid multiple applied independently to output width and height. Keep at 32 so dimensions align cleanly with MiniMax H3's 16x VAE and 2x2 patch grid without border artifacts."),
+                io.DynamicCombo.Input(
+                    "temporal_chunking",
+                    tooltip="Controls temporal windowing on 2D checkpoints for long clips. chunked caps VRAM while keeping exact temporal context; single_pass processes the entire clip at once (3D checkpoints always use built-in slabbing).",
+                    options=[
+                        io.DynamicCombo.Option("chunked", [io.Int.Input("chunk_frames", default=32, min=4, max=256, step=4, tooltip="Latent frames finalized per pass on 2D checkpoints (each pass automatically includes neighboring frames for seamless temporal context). Lower if VRAM is tight on long clips.")]),
+                        io.DynamicCombo.Option("single_pass", []),
+                    ],
+                ),
+            ],
+            outputs=[io.Latent.Output("latent", tooltip="Upscaled MiniMax H3 latent ready for second-pass refinement sampling or VAE decoding.")],
+        )
+
+    @classmethod
+    def execute(cls, model, samples, mode, sharpness: int = 1, align: int = 32, temporal_chunking: dict | None = None) -> io.NodeOutput:
+        return io.NodeOutput(upscale_minimax_h3_latent(model, samples, mode, align=align, sharpness=sharpness, temporal_chunking=temporal_chunking))

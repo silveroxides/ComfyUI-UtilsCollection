@@ -23,6 +23,12 @@ The eager Depth Anything 3 DINOv2, DPT/DualDPT, and camera pose architecture in
 (copyright 2025 ByteDance Ltd. and/or its affiliates) and Meta Platforms DINOv2,
 licensed under the Apache License 2.0.
 
+MiniMax H3 2D neural latent upscaler architecture (`models/minimax_h3_latent_upscaler.py`)
+and tiled audio-video refinement concepts are adapted from
+LBH-123-AI/Comfyui_Minimax_h3_latent_Upscaler (copyright 2026 LBH-123-AI,
+MIT License; model weights at LBH-123-AI/Minimax_h3_latent_Upscaler under the
+Apache License 2.0).
+
 ## MIT License
 
 Permission is hereby granted, free of charge, to any person obtaining a copy

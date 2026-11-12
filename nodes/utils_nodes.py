@@ -1792,7 +1792,10 @@ class UC_HighResolutionTilingGuide(io.ComfyNode):
                 "4. Send `tile latents` to the latent input of a Core sampler. ComfyUI pairs image conditioning and latents by list index.\n"
                 "5. Decode the sampled latent list with the same VAE.\n"
                 "6. Connect the decoded image list and the original `tile layout` to `UC_HighResolutionTileAccumulator`.\n\n"
-                "The splitter accepts one source image. It VAE-encodes tiles sequentially and returns true ComfyUI lists so downstream nodes execute once per tile. Every `tile images` item is the exact padded tensor sent to VAE encoding, keeping visual-conditioning grids aligned with their matching latents."
+                "The splitter accepts one source image. It VAE-encodes tiles sequentially and returns true ComfyUI lists so downstream nodes execute once per tile. Every `tile images` item is the exact padded tensor sent to VAE encoding, keeping visual-conditioning grids aligned with their matching latents.\n\n"
+                "For MiniMax H3 joint audio-video clips, skip pixel-space tiling and use `UC_MiniMaxH3LatentUpscaleLoader` + `UC_MiniMaxH3LatentUpscale` "
+                "followed by `UC_MiniMaxH3TiledUpscaleSampler` (with optional `UC_MiniMaxH3TemporalSplitConfig` and `UC_MiniMaxH3SpatialSplitConfig`) "
+                "to upscale and refine directly in latent space."
             ),
             "split_settings": (
                 "## Split settings\n\n"

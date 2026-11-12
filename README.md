@@ -362,6 +362,11 @@ The left sidebar stays visible and shows the selected foreground's context actio
 - `UC_MiniMaxH3SlaAttentionConfig`
 - `UC_MiniMaxH3ContextPatcher`
 - `UC_MiniMaxH3PDDAcc`
+- `UC_MiniMaxH3LatentUpscaleLoader`
+- `UC_MiniMaxH3LatentUpscale`
+- `UC_MiniMaxH3TemporalSplitConfig`
+- `UC_MiniMaxH3SpatialSplitConfig`
+- `UC_MiniMaxH3TiledUpscaleSampler`
 - `UC_UnifiedAttentionPatcher`
 - `UC_Krea2NAG`
 - `UC_Krea2EditPatcher`
@@ -390,6 +395,19 @@ Download the PDD Acc file matching the MiniMax H3 diffusion model:
 Place the downloaded `.safetensors` file in `ComfyUI/models/loras`, or in the
 configured external directory used by ComfyUI's `loras` model category. Restart
 ComfyUI or refresh model files, then select it in `UC_MiniMaxH3PDDAcc`.
+
+### MiniMax H3 latent upscaler and tiled upscale sampler
+
+`UC_MiniMaxH3LatentUpscaleLoader` and `UC_MiniMaxH3LatentUpscale` upscale MiniMax H3 video or joint audio-video latents directly in latent space without decoding and re-encoding through the heavy video VAE. Attached audio passes through unchanged. Download `.safetensors` checkpoints from [LBH-123-AI/Minimax_h3_latent_Upscaler](https://huggingface.co/LBH-123-AI/Minimax_h3_latent_Upscaler):
+
+- [MiniMax H3 2D Latent Upscaler v1 (FP16, recommended)](https://huggingface.co/LBH-123-AI/Minimax_h3_latent_Upscaler/blob/main/minimax_h3_latent_upscaler_2d_conv_v1/minimax_h3_latent_upscaler_2d_conv_v1_fp16.safetensors)
+- [MiniMax H3 2D Latent Upscaler v1 (BF16)](https://huggingface.co/LBH-123-AI/Minimax_h3_latent_Upscaler/blob/main/minimax_h3_latent_upscaler_2d_conv_v1/minimax_h3_latent_upscaler_2d_conv_v1_bf16.safetensors)
+- [MiniMax H3 3D Latent Upscaler v1 (FP16)](https://huggingface.co/LBH-123-AI/Minimax_h3_latent_Upscaler/blob/main/minimax_h3_latent_upscaler_3d_conv_v1/minimax_h3_latent_upscaler_3d_conv_v1_fp16.safetensors)
+- [MiniMax H3 3D Latent Upscaler v1 (BF16)](https://huggingface.co/LBH-123-AI/Minimax_h3_latent_Upscaler/blob/main/minimax_h3_latent_upscaler_3d_conv_v1/minimax_h3_latent_upscaler_3d_conv_v1_bf16.safetensors)
+
+Place the `.safetensors` file in `ComfyUI/models/latent_upscale_models` (or in the configured external directory for `latent_upscale_models`), then select it in `UC_MiniMaxH3LatentUpscaleLoader`. Only `.safetensors` checkpoints are loaded through Unified Efficient Loader; legacy `.pth` files are rejected. The 2D v1 checkpoint is half the size of 3D v1, covers continuous `1.1x` to `4.0x` scales (`scale_by`, `dimensions`, or `megapixels` aligned to 32-pixel steps), and supports `sharpness` levels `1` (most faithful) through `6` (crispest). The 3D v1 checkpoint targets `2x`, `2.25x`, `2.5x`, and `4x` scales and ignores `sharpness`. Loaded models also work with Core's **MiniMax H3 Latent Upscale With Model**, and Core-loaded 3D models work with `UC_MiniMaxH3LatentUpscale`.
+
+For second-pass refinement of upscaled high-resolution clips that exceed single-pass GPU memory, connect the upscaled audio-video latent to `UC_MiniMaxH3TiledUpscaleSampler` with optional `UC_MiniMaxH3TemporalSplitConfig` and `UC_MiniMaxH3SpatialSplitConfig`. Specify either `model` + `conditioning` (and optional `negative` + `cfg`) or an external `guider`. Each temporal chunk snaps cleanly to MiniMax H3's valid frame grid with optional start-frame, motion, and identity anchors, while spatial tiles blend feathered overlaps with two-stage color matching, optional `seam_denoise` capping for fast motion, and optional `seam_polish` border cleanup.
 
 ### Unified Attention Patcher
 
