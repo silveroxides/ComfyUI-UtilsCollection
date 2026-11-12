@@ -812,7 +812,9 @@ def split_h3_video_components_into_segments(
     source_frames = components.images
     source_rate = float(components.frame_rate)
     source_count = source_frames.shape[0]
-    source_seconds = source_count / source_rate
+    source_seconds = getattr(source_frames, "source_seconds", None)
+    if source_seconds is None:
+        source_seconds = source_count / source_rate
     total_frames = max(1, round(source_seconds * 24))
     out_h, out_w = int(source_frames.shape[1]), int(source_frames.shape[2])
 

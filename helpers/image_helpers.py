@@ -10,8 +10,7 @@ import threading
 from collections import namedtuple
 from contextlib import closing, contextmanager
 from pathlib import Path
-import uuid
-import zipfile
+import bisect
 import folder_paths
 from comfy.model_management import throw_exception_if_processing_interrupted
 from unifiedefficientloader import IncrementalSafetensorsWriter, MemoryEfficientSafeOpen
@@ -1264,56 +1263,23 @@ def _frame_storage(video):
     return "npz"
 
 
+H3_MAX_CACHE_FPS = 24
+MAX_H3_UNSCALED_PIXELS = 1024 * 1024
+MAX_VIDEO_CACHE_FILE_BYTES = 2 * 1024 * 1024 * 1024
+MAX_VIDEO_CACHE_TOTAL_BYTES = 6 * 1024 * 1024 * 1024
+
+
 class CachedVideoFrames:
     """Array-shaped disk view; H3 indexing reads only requested frame entries asynchronously via UEL."""
 
-    def __init__(self, path, shape, storage):
+    def __init__(self, path, shape, storage, source_seconds: float | None = None):
         self.path = Path(path)
         self.shape = tuple(shape)
         self.storage = storage
         self.ndim = len(self.shape)
-
-    def _getitem_zip(self, indices):
-        scalar = isinstance(indices, int)
-        if scalar:
-            indices = [indices]
-        elif isinstance(indices, slice):
-            indices = range(*indices.indices(self.shape[0]))
-        indices = [int(index) % self.shape[0] for index in indices]
-        positions = {}
-        frames = None
-        iterator = enumerate(indices)
-        if not scalar and len(indices) > 1:
-            iterator = tqdm(iterator, total=len(indices), desc="Reading Cached Video Frames", unit="frame", leave=False)
-        with zipfile.ZipFile(self.path) as archive:
-            for position, index in iterator:
-                if index not in positions:
-                    data = archive.read(f"frames/{index:08d}.{self.storage}")
-                    if self.storage == "png8":
-                        array = cv2.imdecode(np.frombuffer(data, dtype=np.uint8), cv2.IMREAD_COLOR)
-                        if array is None:
-                            raise ValueError(f"Invalid cached video frame {index}")
-                        array = cv2.cvtColor(array, cv2.COLOR_BGR2RGB)
-                        frame = torch.from_numpy(array).to(torch.float32).div_(255)
-                    else:
-                        with np.load(io.BytesIO(data), allow_pickle=False) as entry:
-                            frame = torch.from_numpy(entry["frame"])
-                    if frames is None:
-                        frames = torch.empty((len(indices), *self.shape[1:]), dtype=frame.dtype)
-                    frames[position].copy_(frame)
-                    positions[index] = position
-                    del frame
-                else:
-                    frames[position].copy_(frames[positions[index]])
-        if frames is None:
-            frames = torch.empty((0, *self.shape[1:]), dtype=torch.float32)
-        if scalar:
-            return frames[0]
-        return frames
+        self.source_seconds = source_seconds
 
     def __getitem__(self, indices):
-        if str(self.path).endswith(".zip"):
-            return self._getitem_zip(indices)
         scalar = isinstance(indices, int)
         if scalar:
             indices = [indices]
@@ -1354,6 +1320,45 @@ class CachedVideoFrames:
 
         if scalar:
             return frames[0]
+        return frames
+
+
+class _InMemoryVideoFrames:
+    """Chunked in-memory frame view when a clip exceeds MAX_VIDEO_CACHE_FILE_BYTES."""
+
+    def __init__(self, chunks: list[torch.Tensor], shape: tuple[int, ...], source_seconds: float | None = None):
+        self._chunks = chunks
+        self._offsets = []
+        total = 0
+        for chunk in chunks:
+            self._offsets.append(total)
+            total += int(chunk.shape[0])
+        self.shape = tuple(shape)
+        self.ndim = len(self.shape)
+        self.source_seconds = source_seconds
+
+    def _get_single(self, index: int) -> torch.Tensor:
+        pos = bisect.bisect_right(self._offsets, index) - 1
+        frame = self._chunks[pos][index - self._offsets[pos]]
+        if frame.dtype == torch.uint8:
+            return frame.float().div_(255.0)
+        return frame.to(torch.float32)
+
+    def __getitem__(self, indices):
+        scalar = isinstance(indices, int)
+        if scalar:
+            return self._get_single(int(indices) % self.shape[0])
+        if isinstance(indices, slice):
+            indices = range(*indices.indices(self.shape[0]))
+        indices = [int(index) % self.shape[0] for index in indices]
+        if not indices:
+            return torch.empty((0, *self.shape[1:]), dtype=torch.float32)
+        frames = torch.empty((len(indices), *self.shape[1:]), dtype=torch.float32)
+        loaded = {}
+        for position, index in enumerate(indices):
+            if index not in loaded:
+                loaded[index] = self._get_single(index)
+            frames[position].copy_(loaded[index])
         return frames
 
 
@@ -1398,47 +1403,76 @@ def read_legacy_components(path, key):
     return Types.VideoComponents(images=frames, audio=audio, frame_rate=Fraction(metadata["frame_rate"]))
 
 
+def _prune_video_component_cache(
+    root: Path,
+    max_total_bytes: int = MAX_VIDEO_CACHE_TOTAL_BYTES,
+    keep_paths: tuple[Path, ...] = (),
+) -> None:
+    if max_total_bytes <= 0 or not root.is_dir():
+        return
+    keep_resolved = {p.resolve() for p in keep_paths}
+    entries: list[tuple[float, int, Path]] = []
+    total_bytes = 0
+    for subdir in ("v4", "v4_raw"):
+        folder = root / subdir
+        if not folder.is_dir():
+            continue
+        for candidate in folder.glob("*.safetensors"):
+            try:
+                stat = candidate.stat()
+            except OSError:
+                continue
+            total_bytes += stat.st_size
+            if candidate.resolve() not in keep_resolved:
+                entries.append((stat.st_mtime, stat.st_size, candidate))
+    if total_bytes <= max_total_bytes:
+        return
+    entries.sort(key=lambda item: item[0])
+    for _, size, candidate in entries:
+        if total_bytes <= max_total_bytes:
+            break
+        try:
+            candidate.unlink(missing_ok=True)
+            total_bytes -= size
+        except OSError:
+            continue
+
+
 def _read_components(path, key):
     path = Path(path)
-    if path.suffix == ".safetensors":
-        with closing(MemoryEfficientSafeOpen(str(path), low_memory=True)) as handle:
-            metadata = handle.metadata() or {}
-            if metadata.get("version") != "4" or metadata.get("source_hash") != key:
-                raise ValueError("Video cache source hash/version mismatch")
-            shape = json.loads(metadata["shape"])
-            storage = metadata.get("storage", "uint8")
-            frame_rate = Fraction(metadata["frame_rate"])
-            sample_rate_str = metadata.get("sample_rate", "")
-            sample_rate = int(sample_rate_str) if sample_rate_str else None
-            has_audio = "audio" in handle.keys()
-
-        frames = CachedVideoFrames(path, shape, storage)
-        audio = None
-        if has_audio and sample_rate is not None:
-            audio_tensors, _ = read_uel_safetensors_dict(path, ["audio"])
-            if "audio" in audio_tensors:
-                audio = {
-                    "waveform": audio_tensors["audio"],
-                    "sample_rate": sample_rate,
-                }
-        return Types.VideoComponents(images=frames, audio=audio, frame_rate=frame_rate)
-    elif path.suffix == ".zip":
-        with zipfile.ZipFile(path) as archive:
-            manifest = json.loads(archive.read("manifest.json"))
-            if manifest["version"] != 2 or manifest["source_hash"] != key:
-                raise ValueError("Video cache source hash/version mismatch")
-            frames = CachedVideoFrames(path, manifest["shape"], manifest["storage"])
-            audio = None
-            if manifest["sample_rate"] is not None:
-                with archive.open("audio.npy") as entry:
-                    audio = {"waveform": torch.from_numpy(np.load(entry, allow_pickle=False)),
-                             "sample_rate": manifest["sample_rate"]}
-        return Types.VideoComponents(images=frames, audio=audio, frame_rate=Fraction(manifest["frame_rate"]))
-    else:
+    if path.suffix != ".safetensors":
         raise ValueError(f"Unknown video cache file format: {path}")
+    with closing(MemoryEfficientSafeOpen(str(path), low_memory=True)) as handle:
+        metadata = handle.metadata() or {}
+        if metadata.get("version") != "4" or metadata.get("source_hash") != key:
+            raise ValueError("Video cache source hash/version mismatch")
+        shape = json.loads(metadata["shape"])
+        storage = metadata.get("storage", "uint8")
+        frame_rate = Fraction(metadata["frame_rate"])
+        sample_rate_str = metadata.get("sample_rate", "")
+        sample_rate = int(sample_rate_str) if sample_rate_str else None
+        source_seconds_str = metadata.get("source_seconds", "")
+        source_seconds = float(source_seconds_str) if source_seconds_str else None
+        has_audio = "audio" in handle.keys()
+
+    try:
+        os.utime(path, None)
+    except OSError:
+        pass
+
+    frames = CachedVideoFrames(path, shape, storage, source_seconds=source_seconds)
+    audio = None
+    if has_audio and sample_rate is not None:
+        audio_tensors, _ = read_uel_safetensors_dict(path, ["audio"])
+        if "audio" in audio_tensors:
+            audio = {
+                "waveform": audio_tensors["audio"],
+                "sample_rate": sample_rate,
+            }
+    return Types.VideoComponents(images=frames, audio=audio, frame_rate=frame_rate)
 
 
-def _write_components(path, key, frames, shape, audio, rate, storage):
+def _write_components(path, key, frames, shape, audio, rate, storage, source_seconds: float | None = None):
     path = Path(path)
     if path.suffix != ".safetensors":
         path = path.with_suffix(".safetensors")
@@ -1452,6 +1486,8 @@ def _write_components(path, key, frames, shape, audio, rate, storage):
         "frame_rate": str(rate),
         "sample_rate": str(audio["sample_rate"]) if audio is not None and audio.get("sample_rate") is not None else "",
     }
+    if source_seconds is not None:
+        metadata["source_seconds"] = repr(float(source_seconds))
     with atomic_uel_writer(path, metadata) as writer:
         batch_size = 32
         for start in tqdm(range(0, shape[0], batch_size), desc="Caching Video Components", unit="batch"):
@@ -1472,6 +1508,29 @@ def _write_components(path, key, frames, shape, audio, rate, storage):
             del batch_items
         if audio is not None and audio.get("waveform") is not None:
             writer.write_batch([("audio", audio["waveform"].detach().cpu().to(torch.float32).contiguous())])
+    _prune_video_component_cache(path.parent.parent, keep_paths=(path,))
+
+
+def _resolve_h3_dimensions(source_width: int, source_height: int, megapixels: float) -> tuple[int, int]:
+    if megapixels <= 0:
+        area = source_width * source_height
+        if area <= MAX_H3_UNSCALED_PIXELS:
+            return source_width, source_height
+        scale = math.sqrt(MAX_H3_UNSCALED_PIXELS / area)
+        step = 16 if source_width >= 32 and source_height >= 32 else 2
+        width = max(step, int(round(source_width * scale / step)) * step)
+        height = max(step, int(round(source_height * scale / step)) * step)
+        while width * height > MAX_H3_UNSCALED_PIXELS and (width > step or height > step):
+            if width >= height and width > step:
+                width -= step
+            elif height > step:
+                height -= step
+            else:
+                break
+        return width, height
+    aspect = source_width / source_height
+    ratio = min(ASPECT_RATIOS.values(), key=lambda value: abs(aspect - value[0] / value[1]))
+    return select_video_resolution(*ratio, megapixels, 32, 32, MAX_RESOLUTION)
 
 
 def _h3_batch_capacity(source_shape, target_shape, dtype):
@@ -1491,13 +1550,13 @@ def _h3_batch_capacity(source_shape, target_shape, dtype):
     return max(1, capacity)
 
 
-def _resize_h3_batch(source, width, height):
+def _resize_h3_batch(source, width, height, crop="center"):
     if source.dtype == torch.uint8:
         source = source.float().div_(255)
     if tuple(source.shape[1:3]) == (height, width):
         return source
     return comfy.utils.common_upscale(
-        source.movedim(-1, 1), width, height, "bicubic", "center",
+        source.movedim(-1, 1), width, height, "bicubic", crop,
     ).clamp_(0, 1).movedim(1, -1)
 
 
@@ -1551,8 +1610,11 @@ def _prefetch_h3_batches(factory):
 
 
 def _decode_h3_batches(video, megapixels, audio_file, details, stopped):
-    """Installed Core's file decode semantics, without full-clip tensor assembly."""
+    """Installed Core's file decode semantics, capped at 24 fps without full-clip tensor assembly."""
     source = video.get_stream_source()
+    if isinstance(source, io.BytesIO):
+        source.seek(0)
+    crop_mode = "center" if megapixels > 0 else "disabled"
     with av.open(source, mode="r") as container:
         stream = video._get_first_video_stream(container)
         stream.thread_type = "AUTO"
@@ -1566,7 +1628,11 @@ def _decode_h3_batches(video, megapixels, audio_file, details, stopped):
         if audio_stream is not None:
             streams.append(audio_stream)
             resampler = av.audio.resampler.AudioResampler(format="fltp")
-        details["rate"] = Fraction(stream.average_rate) if stream.average_rate else Fraction(1)
+        raw_rate = Fraction(stream.average_rate) if stream.average_rate else Fraction(1)
+        raw_rate_float = float(raw_rate)
+        downsample_fps = raw_rate_float > H3_MAX_CACHE_FPS + 0.5
+        details["rate"] = Fraction(H3_MAX_CACHE_FPS) if downsample_fps else raw_rate
+        details["source_seconds"] = None
         details["sample_rate"] = None
         details["samples"] = 0
         image_format = None
@@ -1578,6 +1644,9 @@ def _decode_h3_batches(video, megapixels, audio_file, details, stopped):
         has_audio = False
         staging = None
         used = 0
+        raw_index = 0
+        kept_index = 0
+        next_keep_raw_index = 0
         for packet in container.demux(*streams):
             if stopped.is_set():
                 return
@@ -1594,6 +1663,13 @@ def _decode_h3_batches(video, megapixels, audio_file, details, stopped):
                         if duration and frame.pts >= end_pts:
                             video_done = True
                             break
+                        current_raw_index = raw_index
+                        raw_index += 1
+                        if downsample_fps:
+                            if current_raw_index < next_keep_raw_index:
+                                continue
+                            kept_index += 1
+                            next_keep_raw_index = round(kept_index * raw_rate_float / H3_MAX_CACHE_FPS)
                         if image_format is None:
                             alpha = any(comp.is_alpha for comp in frame.format.components) or frame.format.name == "pal8"
                             byte_format = frame.format.name in ("yuvj420p", "yuvj422p", "yuvj444p", "rgb24", "rgba", "pal8")
@@ -1628,9 +1704,7 @@ def _decode_h3_batches(video, megapixels, audio_file, details, stopped):
                         pixels = pixels[..., :3]
                         tensor = torch.from_numpy(pixels)
                         if staging is None:
-                            aspect = pixels.shape[1] / pixels.shape[0]
-                            ratio = min(ASPECT_RATIOS.values(), key=lambda value: abs(aspect - value[0] / value[1]))
-                            width, height = select_video_resolution(*ratio, megapixels, 32, 32, MAX_RESOLUTION)
+                            width, height = _resolve_h3_dimensions(pixels.shape[1], pixels.shape[0], megapixels)
                             capacity = _h3_batch_capacity(tensor.shape, (height, width, 3), tensor.dtype)
                             staging = torch.empty((capacity, *tensor.shape), dtype=tensor.dtype)
                         staging[used].copy_(tensor)
@@ -1638,7 +1712,7 @@ def _decode_h3_batches(video, megapixels, audio_file, details, stopped):
                         del tensor, pixels
                         if used == len(staging):
                             # Output cannot alias reusable staging while a writer owns it.
-                            output = _resize_h3_batch(staging, width, height)
+                            output = _resize_h3_batch(staging, width, height, crop_mode)
                             if output is staging:
                                 output = staging.clone()
                             yield output
@@ -1667,8 +1741,10 @@ def _decode_h3_batches(video, megapixels, audio_file, details, stopped):
                         audio_file.write(np.ascontiguousarray(samples.T).data)
                     if audio_done:
                         break
+        if downsample_fps and raw_index > 0 and raw_rate_float > 0:
+            details["source_seconds"] = raw_index / raw_rate_float
         if used:
-            yield _resize_h3_batch(staging[:used], width, height)
+            yield _resize_h3_batch(staging[:used], width, height, crop_mode)
 
 
 def _read_spooled_h3_audio_tensor(audio_file, details) -> torch.Tensor:
@@ -1677,6 +1753,90 @@ def _read_spooled_h3_audio_tensor(audio_file, details) -> torch.Tensor:
     chunk = np.frombuffer(audio_file.read(channels * samples * 4), dtype=np.float32).reshape(samples, channels)
     waveform = torch.from_numpy(np.ascontiguousarray(chunk.T)).unsqueeze(0).to(torch.float32)
     return waveform
+
+
+def _estimate_h3_cache_bytes(video, megapixels: float, storage: str) -> int | None:
+    try:
+        source = video.get_stream_source()
+        if isinstance(source, io.BytesIO):
+            pos = source.tell()
+            source.seek(0)
+        else:
+            pos = None
+        try:
+            with av.open(source, mode="r") as container:
+                stream = video._get_first_video_stream(container)
+                start, duration = video.get_active_trim_window()
+                if duration and duration > 0:
+                    clip_seconds = float(duration)
+                elif stream.duration is not None and stream.time_base is not None:
+                    clip_seconds = max(0.0, float(stream.duration * stream.time_base) - float(start))
+                elif container.duration is not None:
+                    clip_seconds = max(0.0, float(container.duration) / 1_000_000.0 - float(start))
+                elif hasattr(video, "get_duration"):
+                    clip_seconds = max(0.0, float(video.get_duration()) - float(start))
+                else:
+                    return None
+                raw_rate = float(Fraction(stream.average_rate)) if stream.average_rate else float(H3_MAX_CACHE_FPS)
+                eff_fps = min(raw_rate, float(H3_MAX_CACHE_FPS)) if raw_rate > 0 else float(H3_MAX_CACHE_FPS)
+                est_frames = max(1, round(clip_seconds * eff_fps))
+                src_w, src_h = int(stream.width or 0), int(stream.height or 0)
+                if src_w <= 0 or src_h <= 0:
+                    return None
+                crop = getattr(video, "_VideoFromFile__crop", None)
+                if crop is not None:
+                    rect = normalize_crop_rect(*crop, src_w, src_h)
+                    if rect is not None:
+                        src_w, src_h = int(rect[2]), int(rect[3])
+                width, height = _resolve_h3_dimensions(src_w, src_h, megapixels)
+                bytes_per_pixel = 3 if storage in ("png8", "uint8") else 12
+                audio_bytes = 0
+                audio_stream = last_decodable_audio_stream(container)
+                if audio_stream is not None and audio_stream.sample_rate:
+                    channels = int(getattr(audio_stream, "channels", 2) or 2)
+                    audio_bytes = round(clip_seconds * int(audio_stream.sample_rate)) * channels * 4
+                return est_frames * width * height * bytes_per_pixel + audio_bytes
+        finally:
+            if pos is not None:
+                source.seek(pos)
+    except Exception:
+        return None
+
+
+def _stream_h3_components_in_memory(video, megapixels, storage) -> Types.VideoComponents:
+    is_uint8 = storage in ("png8", "uint8")
+    details = {}
+    chunks: list[torch.Tensor] = []
+    count = 0
+    shape = None
+    temp_dir = Path(folder_paths.get_temp_directory()) / "utilscollection_video_components"
+    temp_dir.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryFile(dir=temp_dir) as audio_file:
+        def factory(stopped):
+            return closing(_decode_h3_batches(video, megapixels, audio_file, details, stopped))
+
+        with _prefetch_h3_batches(factory) as batches, tqdm(desc="Decoding H3 Video Components (Uncached)", unit="frame") as pbar:
+            for batch in batches:
+                throw_exception_if_processing_interrupted()
+                if is_uint8:
+                    chunk = (batch.clamp(0, 1) * 255.0).round().to(torch.uint8).contiguous()
+                else:
+                    chunk = batch.to(torch.float32).contiguous()
+                chunks.append(chunk)
+                count += int(chunk.shape[0])
+                shape = (count, *chunk.shape[1:])
+                pbar.update(int(chunk.shape[0]))
+                del batch
+        if not count or shape is None:
+            raise ValueError("Reference video must contain non-empty frames.")
+        audio = None
+        if details.get("sample_rate") is not None and details.get("samples", 0) > 0:
+            audio = {
+                "waveform": _read_spooled_h3_audio_tensor(audio_file, details),
+                "sample_rate": int(details["sample_rate"]),
+            }
+    frames = _InMemoryVideoFrames(chunks, shape, source_seconds=details.get("source_seconds"))
+    return Types.VideoComponents(images=frames, audio=audio, frame_rate=details["rate"])
 
 
 def _write_streamed_h3_components(path, key, video, megapixels, storage):
@@ -1720,7 +1880,10 @@ def _write_streamed_h3_components(path, key, video, megapixels, storage):
             metadata["shape"] = json.dumps(list(shape))
             metadata["frame_rate"] = str(details["rate"])
             metadata["sample_rate"] = str(details["sample_rate"]) if details.get("sample_rate") is not None else ""
+            if details.get("source_seconds") is not None:
+                metadata["source_seconds"] = repr(float(details["source_seconds"]))
 
+        _prune_video_component_cache(path.parent.parent, keep_paths=(path,))
         audio_desc = f"{details['sample_rate']}Hz ({details.get('samples', 0)} samples)" if details.get("sample_rate") else "none"
         logging.info(
             "[VideoComponents] Cached %d frame(s) at %dx%d (%s fps, storage=%s, audio=%s) -> %s",
@@ -1728,8 +1891,17 @@ def _write_streamed_h3_components(path, key, video, megapixels, storage):
         )
 
 
+def _component_payload_bytes(shape, audio, storage: str) -> int:
+    item_bytes = 1 if storage in ("png8", "uint8") else 4
+    frame_bytes = int(math.prod(shape)) * item_bytes
+    audio_bytes = 0
+    if audio is not None and audio.get("waveform") is not None:
+        audio_bytes = int(audio["waveform"].numel()) * 4
+    return frame_bytes + audio_bytes
+
+
 def cached_video_components(video, preparation=None, prepare=None):
-    """Cache all source frames via UEL safetensors; return a lazy async-readable view."""
+    """Cache source frames via UEL safetensors within byte bounds; return a lazy async-readable view."""
     key = video_source_hash(video)
     if key is None:
         components = video.get_components()
@@ -1748,33 +1920,45 @@ def cached_video_components(video, preparation=None, prepare=None):
     storage = _frame_storage(video)
     legacy = root / "v1" / f"{source_key}.safetensors"
     previous_v4_raw = root / "v4_raw" / f"{source_key}.safetensors"
-    previous_zip = root / ("v3" if preparation is not None else "v2") / f"{key}.zip"
-    if previous_zip.is_file():
-        try:
-            return _read_components(previous_zip, key)
-        except Exception:
-            pass
     if preparation is not None and previous_v4_raw.is_file():
         components = _read_components(previous_v4_raw, source_key)
-    elif preparation is not None and (root / "v2" / f"{source_key}.zip").is_file():
-        components = _read_components(root / "v2" / f"{source_key}.zip", source_key)
     elif legacy.is_file():
         components = read_legacy_components(legacy, source_key)
-    elif preparation is not None and preparation.get("resize") == "h3-bicubic-center-v2":
-        if not preparation.get("cache_long_window") and hasattr(video, "get_duration") and float(video.get_duration()) > 15.0:
-            components = video.get_components()
-            return prepare(components) if prepare is not None else components
-        _write_streamed_h3_components(path, key, video, preparation["megapixels"], storage)
+    elif preparation is not None and preparation.get("resize") in ("h3-bicubic-center-v2", "h3-native-capped-v1"):
+        megapixels = preparation["megapixels"]
+        estimated = _estimate_h3_cache_bytes(video, megapixels, storage)
+        if estimated is not None and estimated > MAX_VIDEO_CACHE_FILE_BYTES:
+            logging.info(
+                "[VideoComponents] Skipping disk cache (estimated %.1f MB exceeds %.1f MB limit); streaming in memory.",
+                estimated / (1024 * 1024),
+                MAX_VIDEO_CACHE_FILE_BYTES / (1024 * 1024),
+            )
+            return _stream_h3_components_in_memory(video, megapixels, storage)
+        _write_streamed_h3_components(path, key, video, megapixels, storage)
         return _read_components(path, key)
     else:
         components = video.get_components()
     if prepare is not None:
         components = prepare(components)
-    _write_components(path, key, components.images, components.images.shape,
-                      components.audio, components.frame_rate, storage)
+    payload_bytes = _component_payload_bytes(components.images.shape, components.audio, storage)
+    if payload_bytes > MAX_VIDEO_CACHE_FILE_BYTES:
+        logging.info(
+            "[VideoComponents] Skipping disk cache (%.1f MB exceeds %.1f MB limit).",
+            payload_bytes / (1024 * 1024),
+            MAX_VIDEO_CACHE_FILE_BYTES / (1024 * 1024),
+        )
+        return components
+    _write_components(
+        path,
+        key,
+        components.images,
+        components.images.shape,
+        components.audio,
+        components.frame_rate,
+        storage,
+        source_seconds=getattr(components.images, "source_seconds", None),
+    )
     return _read_components(path, key)
-
-
 
 
 def prepare_h3_reference_video_components(video, megapixels: float, duration_seconds: float = 0.0, start_at_timestamp: float = 0.0):
@@ -1783,14 +1967,18 @@ def prepare_h3_reference_video_components(video, megapixels: float, duration_sec
 
 
 class H3ResizedFrames:
-    """Resize bounded frame batches while the full H3 cache is written."""
+    """Resize and 24-fps-thin bounded frame batches while the H3 cache is written."""
 
     _MAX_BATCH_FRAMES = 64
     _WORKING_SET_BYTES = 128 * 1024 * 1024
 
-    def __init__(self, frames, width, height):
+    def __init__(self, frames, width, height, *, indices: list[int] | None = None, crop: str = "center", source_seconds: float | None = None):
         self.frames = frames
-        self.shape = (frames.shape[0], height, width, frames.shape[3])
+        self.indices = indices
+        self.crop = crop
+        self.source_seconds = source_seconds
+        count = len(indices) if indices is not None else frames.shape[0]
+        self.shape = (count, height, width, frames.shape[3])
         self.ndim = 4
         dtype = frames.dtype if isinstance(frames, torch.Tensor) else torch.float32
         self.batch_size = _h3_batch_capacity(frames.shape[1:], self.shape[1:], dtype)
@@ -1798,6 +1986,14 @@ class H3ResizedFrames:
         self._batch = None
 
     def _source_batch(self, start, end):
+        if self.indices is not None:
+            mapped = self.indices[start:end]
+            if isinstance(self.frames, LegacyVideoFrames):
+                output = torch.empty((len(mapped), *self.frames.shape[1:]), dtype=torch.float32)
+                for position, index in enumerate(mapped):
+                    output[position].copy_(self.frames[index])
+                return output
+            return self.frames[mapped]
         if isinstance(self.frames, LegacyVideoFrames):
             output = torch.empty((end - start, *self.frames.shape[1:]), dtype=torch.float32)
             for position, index in enumerate(range(start, end)):
@@ -1806,14 +2002,23 @@ class H3ResizedFrames:
         return self.frames[start:end]
 
     def __getitem__(self, index):
+        if isinstance(index, slice):
+            index = range(*index.indices(self.shape[0]))
         if not isinstance(index, int):
-            return torch.stack([self[i] for i in index])
+            indices = [int(i) % self.shape[0] for i in index]
+            if not indices:
+                return torch.empty((0, *self.shape[1:]), dtype=torch.float32)
+            output = torch.empty((len(indices), *self.shape[1:]), dtype=torch.float32)
+            for pos, i in enumerate(indices):
+                output[pos].copy_(self[i])
+            return output
+        index = int(index) % self.shape[0]
         batch_start = index // self.batch_size * self.batch_size
         if batch_start != self._batch_start:
             self._batch = None
             batch_end = min(batch_start + self.batch_size, self.shape[0])
             source = self._source_batch(batch_start, batch_end)
-            batch = _resize_h3_batch(source, self.shape[2], self.shape[1])
+            batch = _resize_h3_batch(source, self.shape[2], self.shape[1], self.crop)
             self._batch_start, self._batch = batch_start, batch
         return self._batch[index - self._batch_start]
 
@@ -1826,16 +2031,36 @@ def cached_h3_reference_components(video, megapixels, *, cache_long_window=False
         frames = components.images
         if frames.ndim != 4 or min(frames.shape[:3]) < 1:
             raise ValueError("Reference video must contain non-empty frames.")
-        if megapixels <= 0:
+        source_rate = float(components.frame_rate)
+        source_count = frames.shape[0]
+        source_seconds = getattr(frames, "source_seconds", None)
+        if source_seconds is None and source_rate > 0:
+            source_seconds = source_count / source_rate
+        indices = None
+        out_rate = components.frame_rate
+        if source_rate > H3_MAX_CACHE_FPS + 0.5:
+            kept_indices = []
+            kept_idx = 0
+            while True:
+                raw_idx = round(kept_idx * source_rate / H3_MAX_CACHE_FPS)
+                if raw_idx >= source_count:
+                    break
+                kept_indices.append(raw_idx)
+                kept_idx += 1
+            indices = kept_indices or [0]
+            out_rate = Fraction(H3_MAX_CACHE_FPS)
+        width, height = _resolve_h3_dimensions(frames.shape[2], frames.shape[1], megapixels)
+        if indices is None and (height, width) == tuple(frames.shape[1:3]):
             return components
-        aspect = frames.shape[2] / frames.shape[1]
-        ratio = min(ASPECT_RATIOS.values(), key=lambda value: abs(aspect - value[0] / value[1]))
-        width, height = select_video_resolution(*ratio, megapixels, 32, 32, MAX_RESOLUTION)
-        return Types.VideoComponents(images=H3ResizedFrames(frames, width, height), audio=components.audio, frame_rate=components.frame_rate)
+        crop = "center" if megapixels > 0 else "disabled"
+        resized = H3ResizedFrames(frames, width, height, indices=indices, crop=crop, source_seconds=source_seconds)
+        return Types.VideoComponents(images=resized, audio=components.audio, frame_rate=out_rate)
 
-    prep_info = {"megapixels": megapixels}
-    if megapixels > 0:
-        prep_info["resize"] = "h3-bicubic-center-v2"
+    prep_info = {
+        "megapixels": megapixels,
+        "max_fps": H3_MAX_CACHE_FPS,
+        "resize": "h3-bicubic-center-v2" if megapixels > 0 else "h3-native-capped-v1",
+    }
     if cache_long_window:
         prep_info["cache_long_window"] = True
     return cached_video_components(video, prep_info, prepare)
@@ -1921,7 +2146,10 @@ def prepare_h3_reference_components(
         raise ValueError("Start timestamp must be zero or a positive number of seconds.")
 
     source_count = source_frames.shape[0]
-    effective_source_seconds = full_source_seconds if full_source_seconds is not None else (source_count / source_rate)
+    inferred_seconds = getattr(source_frames, "source_seconds", None)
+    if inferred_seconds is None:
+        inferred_seconds = source_count / source_rate
+    effective_source_seconds = full_source_seconds if full_source_seconds is not None else inferred_seconds
     start_frame, frame_count, segment_end, prepended_t = resolve_h3_reference_window(
         effective_source_seconds, duration_seconds, start_at_timestamp, segment_count, segment_index, continuation_media
     )

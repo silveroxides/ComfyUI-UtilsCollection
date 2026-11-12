@@ -1613,3 +1613,75 @@ def test_missing_pts_is_rejected_instead_of_estimated(monkeypatch):
 
     with pytest.raises(ValueError, match="has no PTS"):
         scan_video_frame_records(_FakeVideo())
+
+
+def test_h3_cache_caps_high_fps_unscaled_resolution_and_byte_budget(tmp_path, monkeypatch):
+    import av
+    from utils_collection_video_frame_sampler_test.helpers import video_helpers
+
+    source = tmp_path / "high_fps.mkv"
+    with av.open(str(source), "w") as output:
+        stream = output.add_stream("ffv1", rate=48)
+        stream.width, stream.height = 128, 64
+        stream.pix_fmt = "bgr0"
+        stream.time_base = Fraction(1, 48)
+        for index in range(49):
+            pixels = np.full((64, 128, 3), index * 5, dtype=np.uint8)
+            frame = av.VideoFrame.from_ndarray(pixels, format="rgb24")
+            frame.pts = index
+            frame.time_base = Fraction(1, 48)
+            for packet in stream.encode(frame):
+                output.mux(packet)
+        for packet in stream.encode(None):
+            output.mux(packet)
+
+    cache_root = tmp_path / "cache"
+    monkeypatch.setattr(image_helpers.folder_paths, "get_temp_directory", lambda: str(cache_root))
+    monkeypatch.setattr(image_helpers, "MAX_H3_UNSCALED_PIXELS", 64 * 32)
+
+    def forbidden(*args, **kwargs):
+        pytest.fail("Streamed H3 caching must not call VideoFromFile.get_components")
+
+    monkeypatch.setattr(image_helpers.InputImpl.VideoFromFile, "get_components", forbidden)
+    video = image_helpers.InputImpl.VideoFromFile(str(source))
+    frames_list, _, out_w, out_h, lengths, _, _, _, trail = video_helpers.split_h3_video_components_into_segments(
+        video, megapixels=0.0, segment_count=1, enable_whisper=False, return_trim_metadata=True,
+    )
+    assert (out_w, out_h) == (64, 32)
+    assert out_w * out_h <= 64 * 32
+    assert lengths == [39]
+    assert trail == [15]
+    cached_files = list((cache_root / "utilscollection_video_components" / "v4").glob("*.safetensors"))
+    assert len(cached_files) == 1
+
+    stored = image_helpers.cached_h3_reference_components(video, 0.0)
+    assert stored.frame_rate == Fraction(24)
+    assert stored.images.shape == (25, 32, 64, 3)
+    assert float(frames_list[0][0].mean()) == pytest.approx(0.0, abs=1e-2)
+    assert float(frames_list[0][1].mean()) == pytest.approx(10 / 255, abs=1e-2)
+    assert float(frames_list[0][23].mean()) == pytest.approx(230 / 255, abs=1e-2)
+    assert float(stored.images[24].mean()) == pytest.approx(240 / 255, abs=1e-2)
+
+    # Exceeding MAX_VIDEO_CACHE_FILE_BYTES streams in memory without writing a new disk cache file.
+    uncached_dir = tmp_path / "uncached"
+    monkeypatch.setattr(image_helpers.folder_paths, "get_temp_directory", lambda: str(uncached_dir))
+    monkeypatch.setattr(image_helpers, "MAX_VIDEO_CACHE_FILE_BYTES", 1024)
+    mem_comp = image_helpers.cached_h3_reference_components(image_helpers.InputImpl.VideoFromFile(str(source)), 0.0)
+    assert mem_comp.frame_rate == Fraction(24)
+    assert mem_comp.images.shape == (25, 32, 64, 3)
+    assert float(mem_comp.images[2].mean()) == pytest.approx(20 / 255, abs=1e-4)
+    assert not list((uncached_dir / "utilscollection_video_components").rglob("*.safetensors"))
+
+    # Directory pruning evicts oldest cache files above MAX_VIDEO_CACHE_TOTAL_BYTES.
+    v4_dir = uncached_dir / "utilscollection_video_components" / "v4"
+    v4_dir.mkdir(parents=True, exist_ok=True)
+    older = v4_dir / "older.safetensors"
+    newer = v4_dir / "newer.safetensors"
+    older.write_bytes(b"a" * 600)
+    newer.write_bytes(b"b" * 600)
+    import os
+    os.utime(older, (1000, 1000))
+    os.utime(newer, (2000, 2000))
+    image_helpers._prune_video_component_cache(uncached_dir / "utilscollection_video_components", max_total_bytes=700, keep_paths=(newer,))
+    assert not older.exists()
+    assert newer.exists()

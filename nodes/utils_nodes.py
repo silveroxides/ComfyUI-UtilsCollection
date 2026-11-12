@@ -53,7 +53,7 @@ class UC_MiniMaxH3RefVid(io.ComfyNode):
                     min=0.0,
                     max=4.0,
                     step=0.0125,
-                    tooltip="Target frame size. Set to 0.0 to keep original video resolution without scaling or cropping. Otherwise matches the video to the nearest standard aspect ratio from Video Resolution Selector, chooses its preferred resolution, and center-crops to fit.",
+                    tooltip="Target frame size. Set to 0.0 to preserve the original aspect ratio without cropping (capped at 1.0 MP). Otherwise matches the video to the nearest standard aspect ratio from Video Resolution Selector, chooses its preferred resolution, and center-crops to fit.",
                 ),
                 io.Float.Input("duration_seconds", default=0.0, min=0.0, step=0.70833, tooltip="Maximum reference duration after the start offset. 0.0 uses the remaining clip. Positive values step by 17 frames (~0.708s) on the MiniMax H3 5+17k grid at 24 fps."),
                 io.Float.Input("start_at_timestamp", default=0.0, min=0.0, step=0.1, tooltip="Seconds to skip at the start, for both video and audio. 0 skips nothing; positive values use the same H3 frame-count rounding as duration. Preview frame numbers are zero-based and the end frame is inclusive."),

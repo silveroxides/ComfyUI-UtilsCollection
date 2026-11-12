@@ -299,7 +299,7 @@ class UC_H3RefVideoSegments(io.ComfyNode):
             search_aliases=["minimax", "h3", "reference", "video", "segments", "list"],
             inputs=[
                 io.Video.Input("video", tooltip="Full reference video clip to slice across all segments."),
-                io.Float.Input("megapixels", default=0.5, min=0.0, max=4.0, step=0.0125, tooltip="Target frame size. Set to 0.0 to keep original video resolution without scaling or cropping. Otherwise scales and center crops frames cleanly to the nearest standard aspect ratio."),
+                io.Float.Input("megapixels", default=0.5, min=0.0, max=4.0, step=0.0125, tooltip="Target frame size. Set to 0.0 to preserve the original aspect ratio without cropping (capped at 1.0 MP). Positive values scale and center-crop frames to the nearest standard aspect ratio."),
                 io.Float.Input("duration_seconds", default=0.0, min=0.0, step=0.70833, tooltip="Segment duration in seconds when segment_count is 0. 0.0 uses default 5.17s (124-frame) H3 segment chunks. Positive values step by 17 frames (~0.708s) on the H3 5+17k grid."),
                 io.Float.Input("start_at_timestamp", default=0.0, min=0.0, step=0.1, tooltip="Seconds to skip at the start of the source video before slicing segments."),
                 io.Int.Input("segment_count", display_name="Divide into segments (0 = manual)", default=0, min=0, step=1, optional=True, tooltip="Positive count divides the source into that many sequential H3-sized segments. 0 uses duration_seconds and start_at_timestamp."),
