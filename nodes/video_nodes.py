@@ -307,6 +307,12 @@ class UC_H3RefVideoSegments(io.ComfyNode):
                 io.Custom("WHISPER_MODEL").Input("whisper_model", optional=True, tooltip="Optional Whisper speech recognition model for word-timed transcription."),
                 io.Combo.Input("timestamp_format", options=list(VIDEO_FRAME_TIMESTAMP_FORMATS), default="00.000s", optional=True, tooltip="Timestamp format for transcript outputs matching the timeline nodes."),
                 io.Boolean.Input("enable_whisper", default=True, optional=True, tooltip="When false, skips Whisper transcription and returns an empty transcript."),
+                io.Boolean.Input(
+                    "cache_large_clips",
+                    default=False,
+                    optional=True,
+                    tooltip="Caches prepared 24 fps clips larger than the normal 2 GB (2048 MB) threshold (~55s at 0.5 MP or ~28s at 1.0 MP) to disk. When disabled (default), clips above 2 GB stream in memory with a console warning instead of writing multi-GB temp files. Enable this when segmenting long 1–2 minute videos across multiple runs so cached frames load rapidly from disk.",
+                ),
             ],
             outputs=[
                 io.Image.Output("frames_list", is_output_list=True, tooltip="List of prepared 24 fps video frames with one batch entry per segment."),
@@ -325,10 +331,10 @@ class UC_H3RefVideoSegments(io.ComfyNode):
         )
 
     @classmethod
-    def execute(cls, video, megapixels=0.5, duration_seconds=0.0, start_at_timestamp=0.0, segment_count=0, overlap_duration="0.92s (22 frames)", whisper_model=None, timestamp_format="00.000s", enable_whisper=True) -> io.NodeOutput:
+    def execute(cls, video, megapixels=0.5, duration_seconds=0.0, start_at_timestamp=0.0, segment_count=0, overlap_duration="0.92s (22 frames)", whisper_model=None, timestamp_format="00.000s", enable_whisper=True, cache_large_clips=False) -> io.NodeOutput:
         of = parse_h3_seconds_option(overlap_duration, 22)
         (frames_list, audio_list, width, height, length_list, video_list, transcript_list, tail_frames_opt, trim_trailing_list) = split_h3_video_components_into_segments(
-            video=video, megapixels=megapixels, duration_seconds=duration_seconds, start_at_timestamp=start_at_timestamp, segment_count=segment_count, overlap_frames=of, whisper_model=whisper_model, timestamp_format=timestamp_format, enable_whisper=enable_whisper, return_trim_metadata=True
+            video=video, megapixels=megapixels, duration_seconds=duration_seconds, start_at_timestamp=start_at_timestamp, segment_count=segment_count, overlap_frames=of, whisper_model=whisper_model, timestamp_format=timestamp_format, enable_whisper=enable_whisper, return_trim_metadata=True, cache_large_clips=cache_large_clips
         )
         durations = [float(length) / 24.0 for length in length_list]
         return io.NodeOutput(frames_list, audio_list, width, height, length_list, video_list, transcript_list, tail_frames_opt, trim_trailing_list, durations)

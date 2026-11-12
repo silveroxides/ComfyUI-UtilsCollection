@@ -801,6 +801,7 @@ def split_h3_video_components_into_segments(
     enable_whisper: bool = True,
     *,
     return_trim_metadata: bool = False,
+    cache_large_clips: bool = False,
 ):
     """Split reference video components across sequential H3 windows with exact overlap and trailing-padding tracking."""
     from comfy_api.latest import InputImpl
@@ -808,7 +809,7 @@ def split_h3_video_components_into_segments(
     from .model_helpers import transcribe_reference_audio
     from .sampling_helpers import h3_snap_frame_count
 
-    components = cached_h3_reference_components(video, megapixels)
+    components = cached_h3_reference_components(video, megapixels, cache_large_clips=cache_large_clips)
     source_frames = components.images
     source_rate = float(components.frame_rate)
     source_count = source_frames.shape[0]

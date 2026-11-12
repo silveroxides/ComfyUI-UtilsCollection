@@ -70,6 +70,12 @@ class UC_MiniMaxH3RefVid(io.ComfyNode):
                     tooltip="0 uses duration/start controls. A positive count divides the source into sequential H3-sized segments (5 + 17k frames). Non-final segments contain continuous source video and audio with zero padding, and each following segment starts on the exact next frame. Only the final segment may add padding.",
                 ),
                 io.Int.Input("segment_index", display_name="Segment index (zero-based)", default=0, min=0, step=1, optional=True, tooltip="Select 0 for the first segment, 1 for the second, through segment_count minus 1. Used only when segment_count is positive."),
+                io.Boolean.Input(
+                    "cache_large_clips",
+                    default=False,
+                    optional=True,
+                    tooltip="Caches prepared 24 fps clips larger than the normal 2 GB (2048 MB) threshold (~55s at 0.5 MP or ~28s at 1.0 MP) to disk. When disabled (default), clips above 2 GB stream in memory with a console warning instead of writing multi-GB temp files. Enable this when iterating on long reference clips so cached frames load rapidly from disk.",
+                ),
             ],
             outputs=[
                 io.Image.Output("frames", tooltip="Prepared 24 fps frames. Connect to H3 Reference to Video's reference-video input."),
@@ -87,7 +93,7 @@ class UC_MiniMaxH3RefVid(io.ComfyNode):
         )
 
     @classmethod
-    def IS_CHANGED(cls, video, megapixels=0.5, duration_seconds=0.0, start_at_timestamp=0.0, whisper_model=None, timestamp_format="00.000s", enable_whisper=True, segment_count=0, segment_index=0, continuation_media=None):
+    def IS_CHANGED(cls, video, megapixels=0.5, duration_seconds=0.0, start_at_timestamp=0.0, whisper_model=None, timestamp_format="00.000s", enable_whisper=True, segment_count=0, segment_index=0, continuation_media=None, cache_large_clips=False):
         video_hash = video_source_hash(video) or id(video)
         continuation_id = ""
         if continuation_media is not None:
@@ -99,10 +105,10 @@ class UC_MiniMaxH3RefVid(io.ComfyNode):
                 w = audio_entry["waveform"]
                 a_hash = f"{w.shape}:{float(w.mean())}"
             continuation_id = f"{f_hash}:{a_hash}:{continuation_media.get('video_merge_mode', '')}:{continuation_media.get('media_type', '')}"
-        return f"{video_hash}:{megapixels}:{duration_seconds}:{start_at_timestamp}:{timestamp_format}:{enable_whisper}:{segment_count}:{segment_index}:{id(whisper_model)}:{continuation_id}"
+        return f"{video_hash}:{megapixels}:{duration_seconds}:{start_at_timestamp}:{timestamp_format}:{enable_whisper}:{segment_count}:{segment_index}:{id(whisper_model)}:{continuation_id}:{cache_large_clips}"
 
     @classmethod
-    def execute(cls, video, megapixels=0.5, duration_seconds=0.0, start_at_timestamp=0.0, whisper_model=None, timestamp_format="00.000s", enable_whisper=True, segment_count=0, segment_index=0, continuation_media=None):
+    def execute(cls, video, megapixels=0.5, duration_seconds=0.0, start_at_timestamp=0.0, whisper_model=None, timestamp_format="00.000s", enable_whisper=True, segment_count=0, segment_index=0, continuation_media=None, cache_large_clips=False):
         components = None
         if type(video) is InputImpl.VideoFromFile:
             try:
@@ -115,14 +121,14 @@ class UC_MiniMaxH3RefVid(io.ComfyNode):
                 start_sec = decode_start / 24.0
                 dur_sec = max(1, end_frame - decode_start) / 24.0
                 windowed_video = InputImpl.VideoFromFile(video.get_stream_source(), start_time=start_sec, duration=dur_sec)
-                components = cached_h3_reference_components(windowed_video, megapixels, cache_long_window=True)
+                components = cached_h3_reference_components(windowed_video, megapixels, cache_long_window=True, cache_large_clips=cache_large_clips)
                 frames, audio, width, height, length, _, preview = prepare_h3_reference_components(
                     components, megapixels, duration_seconds=duration_seconds, start_at_timestamp=start_at_timestamp, spatially_prepared=True, segment_count=segment_count, segment_index=segment_index, continuation_media=continuation_media, full_source_seconds=source_seconds, window_start_frame=decode_start
                 )
             except Exception:
                 components = None
         if components is None:
-            components = cached_h3_reference_components(video, megapixels)
+            components = cached_h3_reference_components(video, megapixels, **({"cache_large_clips": True} if cache_large_clips else {}))
             frames, audio, width, height, length, _, preview = prepare_h3_reference_components(components, megapixels, duration_seconds, start_at_timestamp, spatially_prepared=True, segment_count=segment_count, segment_index=segment_index, continuation_media=continuation_media)
         transcribed_audio = transcribe_reference_audio(whisper_model, components.audio, audio, timestamp_format, length) if enable_whisper else ""
         prepared_video = InputImpl.VideoFromComponents(Types.VideoComponents(images=frames, audio=audio, frame_rate=Fraction(24)))

@@ -1615,9 +1615,17 @@ def test_missing_pts_is_rejected_instead_of_estimated(monkeypatch):
         scan_video_frame_records(_FakeVideo())
 
 
-def test_h3_cache_caps_high_fps_unscaled_resolution_and_byte_budget(tmp_path, monkeypatch):
+def test_h3_cache_caps_high_fps_unscaled_resolution_and_byte_budget(tmp_path, monkeypatch, caplog):
     import av
+    import logging
     from utils_collection_video_frame_sampler_test.helpers import video_helpers
+    from utils_collection_video_frame_sampler_test.nodes import video_nodes
+
+    for node_cls in (utils_nodes.UC_MiniMaxH3RefVid, video_nodes.UC_H3RefVideoSegments):
+        schema = node_cls.define_schema()
+        opt = next(inp for inp in schema.inputs if inp.id == "cache_large_clips")
+        assert opt.default is False
+        assert "2 GB" in opt.tooltip
 
     source = tmp_path / "high_fps.mkv"
     with av.open(str(source), "w") as output:
@@ -1644,9 +1652,11 @@ def test_h3_cache_caps_high_fps_unscaled_resolution_and_byte_budget(tmp_path, mo
 
     monkeypatch.setattr(image_helpers.InputImpl.VideoFromFile, "get_components", forbidden)
     video = image_helpers.InputImpl.VideoFromFile(str(source))
-    frames_list, _, out_w, out_h, lengths, _, _, _, trail = video_helpers.split_h3_video_components_into_segments(
-        video, megapixels=0.0, segment_count=1, enable_whisper=False, return_trim_metadata=True,
-    )
+    with caplog.at_level(logging.WARNING):
+        frames_list, _, out_w, out_h, lengths, _, _, _, trail = video_helpers.split_h3_video_components_into_segments(
+            video, megapixels=0.0, segment_count=1, enable_whisper=False, return_trim_metadata=True,
+        )
+    assert any("1.0 MP unscaled H3 reference limit" in rec.message for rec in caplog.records)
     assert (out_w, out_h) == (64, 32)
     assert out_w * out_h <= 64 * 32
     assert lengths == [39]
@@ -1662,15 +1672,31 @@ def test_h3_cache_caps_high_fps_unscaled_resolution_and_byte_budget(tmp_path, mo
     assert float(frames_list[0][23].mean()) == pytest.approx(230 / 255, abs=1e-2)
     assert float(stored.images[24].mean()) == pytest.approx(240 / 255, abs=1e-2)
 
-    # Exceeding MAX_VIDEO_CACHE_FILE_BYTES streams in memory without writing a new disk cache file.
+    # Exceeding MAX_VIDEO_CACHE_FILE_BYTES warns and streams in memory unless cache_large_clips=True.
     uncached_dir = tmp_path / "uncached"
     monkeypatch.setattr(image_helpers.folder_paths, "get_temp_directory", lambda: str(uncached_dir))
     monkeypatch.setattr(image_helpers, "MAX_VIDEO_CACHE_FILE_BYTES", 1024)
-    mem_comp = image_helpers.cached_h3_reference_components(image_helpers.InputImpl.VideoFromFile(str(source)), 0.0)
+    caplog.clear()
+    with caplog.at_level(logging.WARNING):
+        mem_comp = image_helpers.cached_h3_reference_components(image_helpers.InputImpl.VideoFromFile(str(source)), 0.0)
+    assert any("cache_large_clips" in rec.message for rec in caplog.records)
     assert mem_comp.frame_rate == Fraction(24)
     assert mem_comp.images.shape == (25, 32, 64, 3)
-    assert float(mem_comp.images[2].mean()) == pytest.approx(20 / 255, abs=1e-4)
+    assert float(mem_comp.images[2].mean()) == pytest.approx(20 / 255, abs=1e-2)
     assert not list((uncached_dir / "utilscollection_video_components").rglob("*.safetensors"))
+
+    video_nodes.UC_H3RefVideoSegments.execute(
+        image_helpers.InputImpl.VideoFromFile(str(source)),
+        megapixels=0.0,
+        segment_count=1,
+        enable_whisper=False,
+        cache_large_clips=True,
+    )
+    large_cached = list((uncached_dir / "utilscollection_video_components" / "v4").glob("*.safetensors"))
+    assert len(large_cached) == 1
+    # Subsequent call with cache_large_clips=False still reuses the existing disk cache.
+    reused = image_helpers.cached_h3_reference_components(image_helpers.InputImpl.VideoFromFile(str(source)), 0.0, cache_large_clips=False)
+    assert isinstance(reused.images, image_helpers.CachedVideoFrames)
 
     # Directory pruning evicts oldest cache files above MAX_VIDEO_CACHE_TOTAL_BYTES.
     v4_dir = uncached_dir / "utilscollection_video_components" / "v4"

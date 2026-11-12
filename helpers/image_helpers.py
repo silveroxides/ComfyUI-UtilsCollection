@@ -1428,14 +1428,25 @@ def _prune_video_component_cache(
     if total_bytes <= max_total_bytes:
         return
     entries.sort(key=lambda item: item[0])
+    evicted_count = 0
+    evicted_bytes = 0
     for _, size, candidate in entries:
         if total_bytes <= max_total_bytes:
             break
         try:
             candidate.unlink(missing_ok=True)
             total_bytes -= size
+            evicted_count += 1
+            evicted_bytes += size
         except OSError:
             continue
+    if evicted_count:
+        logging.info(
+            "[VideoComponents] Evicted %d older cache file(s) (%.1f MB) to stay within the %.0f MB cache pool.",
+            evicted_count,
+            evicted_bytes / (1024 * 1024),
+            max_total_bytes / (1024 * 1024),
+        )
 
 
 def _read_components(path, key):
@@ -1704,7 +1715,16 @@ def _decode_h3_batches(video, megapixels, audio_file, details, stopped):
                         pixels = pixels[..., :3]
                         tensor = torch.from_numpy(pixels)
                         if staging is None:
-                            width, height = _resolve_h3_dimensions(pixels.shape[1], pixels.shape[0], megapixels)
+                            src_h, src_w = pixels.shape[0], pixels.shape[1]
+                            width, height = _resolve_h3_dimensions(src_w, src_h, megapixels)
+                            if megapixels <= 0 and (width, height) != (src_w, src_h):
+                                logging.warning(
+                                    "[VideoComponents] Source resolution %dx%d exceeds the 1.0 MP unscaled H3 reference limit; scaling proportionally to %dx%d.",
+                                    src_w,
+                                    src_h,
+                                    width,
+                                    height,
+                                )
                             capacity = _h3_batch_capacity(tensor.shape, (height, width, 3), tensor.dtype)
                             staging = torch.empty((capacity, *tensor.shape), dtype=tensor.dtype)
                         staging[used].copy_(tensor)
@@ -1900,7 +1920,7 @@ def _component_payload_bytes(shape, audio, storage: str) -> int:
     return frame_bytes + audio_bytes
 
 
-def cached_video_components(video, preparation=None, prepare=None):
+def cached_video_components(video, preparation=None, prepare=None, *, cache_large_clips: bool = False):
     """Cache source frames via UEL safetensors within byte bounds; return a lazy async-readable view."""
     key = video_source_hash(video)
     if key is None:
@@ -1926,10 +1946,10 @@ def cached_video_components(video, preparation=None, prepare=None):
         components = read_legacy_components(legacy, source_key)
     elif preparation is not None and preparation.get("resize") in ("h3-bicubic-center-v2", "h3-native-capped-v1"):
         megapixels = preparation["megapixels"]
-        estimated = _estimate_h3_cache_bytes(video, megapixels, storage)
+        estimated = None if cache_large_clips else _estimate_h3_cache_bytes(video, megapixels, storage)
         if estimated is not None and estimated > MAX_VIDEO_CACHE_FILE_BYTES:
-            logging.info(
-                "[VideoComponents] Skipping disk cache (estimated %.1f MB exceeds %.1f MB limit); streaming in memory.",
+            logging.warning(
+                "[VideoComponents] Prepared clip (~%.1f MB) exceeds the %.0f MB disk-cache threshold; streaming in memory without caching to disk. Enable 'cache_large_clips' on the node to cache large multi-minute clips on disk.",
                 estimated / (1024 * 1024),
                 MAX_VIDEO_CACHE_FILE_BYTES / (1024 * 1024),
             )
@@ -1941,9 +1961,9 @@ def cached_video_components(video, preparation=None, prepare=None):
     if prepare is not None:
         components = prepare(components)
     payload_bytes = _component_payload_bytes(components.images.shape, components.audio, storage)
-    if payload_bytes > MAX_VIDEO_CACHE_FILE_BYTES:
-        logging.info(
-            "[VideoComponents] Skipping disk cache (%.1f MB exceeds %.1f MB limit).",
+    if not cache_large_clips and payload_bytes > MAX_VIDEO_CACHE_FILE_BYTES:
+        logging.warning(
+            "[VideoComponents] Prepared clip (%.1f MB) exceeds the %.0f MB disk-cache threshold; skipping disk cache. Enable 'cache_large_clips' on the node to cache large clips on disk.",
             payload_bytes / (1024 * 1024),
             MAX_VIDEO_CACHE_FILE_BYTES / (1024 * 1024),
         )
@@ -1961,8 +1981,15 @@ def cached_video_components(video, preparation=None, prepare=None):
     return _read_components(path, key)
 
 
-def prepare_h3_reference_video_components(video, megapixels: float, duration_seconds: float = 0.0, start_at_timestamp: float = 0.0):
-    components = cached_h3_reference_components(video, megapixels)
+def prepare_h3_reference_video_components(
+    video,
+    megapixels: float,
+    duration_seconds: float = 0.0,
+    start_at_timestamp: float = 0.0,
+    *,
+    cache_large_clips: bool = False,
+):
+    components = cached_h3_reference_components(video, megapixels, cache_large_clips=cache_large_clips)
     return prepare_h3_reference_components(components, megapixels, duration_seconds, start_at_timestamp, spatially_prepared=True)
 
 
@@ -2023,7 +2050,7 @@ class H3ResizedFrames:
         return self._batch[index - self._batch_start]
 
 
-def cached_h3_reference_components(video, megapixels, *, cache_long_window=False):
+def cached_h3_reference_components(video, megapixels, *, cache_long_window=False, cache_large_clips: bool = False):
     if not math.isfinite(megapixels) or megapixels < 0:
         raise ValueError("Megapixels must be non-negative.")
 
@@ -2049,8 +2076,17 @@ def cached_h3_reference_components(video, megapixels, *, cache_long_window=False
                 kept_idx += 1
             indices = kept_indices or [0]
             out_rate = Fraction(H3_MAX_CACHE_FPS)
-        width, height = _resolve_h3_dimensions(frames.shape[2], frames.shape[1], megapixels)
-        if indices is None and (height, width) == tuple(frames.shape[1:3]):
+        src_h, src_w = int(frames.shape[1]), int(frames.shape[2])
+        width, height = _resolve_h3_dimensions(src_w, src_h, megapixels)
+        if megapixels <= 0 and (width, height) != (src_w, src_h):
+            logging.warning(
+                "[VideoComponents] Source resolution %dx%d exceeds the 1.0 MP unscaled H3 reference limit; scaling proportionally to %dx%d.",
+                src_w,
+                src_h,
+                width,
+                height,
+            )
+        if indices is None and (height, width) == (src_h, src_w):
             return components
         crop = "center" if megapixels > 0 else "disabled"
         resized = H3ResizedFrames(frames, width, height, indices=indices, crop=crop, source_seconds=source_seconds)
@@ -2063,7 +2099,7 @@ def cached_h3_reference_components(video, megapixels, *, cache_long_window=False
     }
     if cache_long_window:
         prep_info["cache_long_window"] = True
-    return cached_video_components(video, prep_info, prepare)
+    return cached_video_components(video, prep_info, prepare, cache_large_clips=cache_large_clips)
 
 
 def resolve_h3_reference_window(
