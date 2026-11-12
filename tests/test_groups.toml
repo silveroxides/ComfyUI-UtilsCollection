@@ -241,9 +241,9 @@ python_tests = []
 frontend_tests = ["tests/test_load_image_alpha.mjs"]
 
 [groups.markdown_frontend]
-paths = ["web/markdown_preview.js"]
-python_tests = ["tests/test_markdown_preview.py"]
-frontend_tests = []
+paths = ["web/markdown_preview.js", "web/mermaid_canvas.js"]
+python_tests = ["tests/test_markdown_preview.py", "tests/test_primitive_nodes.py"]
+frontend_tests = ["tests/test_mermaid_canvas.mjs"]
 
 [groups.video_preview]
 paths = ["web/video_preview.js"]

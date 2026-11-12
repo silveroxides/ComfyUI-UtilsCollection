@@ -3,26 +3,30 @@ import { app } from "../../scripts/app.js";
 let mermaidPromise = null;
 
 function getMermaid() {
-  if (window.mermaid) return Promise.resolve(window.mermaid);
+  if (globalThis.mermaid) return Promise.resolve(globalThis.mermaid);
   if (mermaidPromise) return mermaidPromise;
   mermaidPromise = new Promise((resolve, reject) => {
     const script = document.createElement("script");
     script.src = new URL("./vendor/mermaid.min.js", import.meta.url).href;
     script.onload = () => {
       try {
-        window.mermaid.initialize({
+        globalThis.mermaid.initialize({
           startOnLoad: false,
           theme: "dark",
-          securityLevel: "loose",
+          securityLevel: "strict",
           fontFamily: "sans-serif",
           fontSize: 12,
         });
-        resolve(window.mermaid);
+        resolve(globalThis.mermaid);
       } catch (err) {
+        mermaidPromise = null;
         reject(err);
       }
     };
-    script.onerror = reject;
+    script.onerror = err => {
+      mermaidPromise = null;
+      reject(err);
+    };
     document.head.appendChild(script);
   });
   return mermaidPromise;
@@ -61,662 +65,336 @@ function extractMermaidCode(text) {
   return "";
 }
 
-let renderCounter = 0;
+const DIAGRAM_LABELS = {
+  flowchart: "Flowchart",
+  graph: "Flowchart",
+  sequencediagram: "Sequence Diagram",
+  classdiagram: "Class Diagram",
+  erdiagram: "ER Diagram",
+  gantt: "Gantt Chart",
+  statediagram: "State Diagram",
+  "statediagram-v2": "State Diagram",
+  pie: "Pie Chart",
+  mindmap: "Mind Map",
+  journey: "User Journey",
+  quadrantchart: "Quadrant Chart",
+  requirementdiagram: "Requirement Diagram",
+  gitgraph: "Git Graph",
+  c4context: "C4 Diagram",
+  c4container: "C4 Container",
+  c4component: "C4 Component",
+  timeline: "Timeline Diagram",
+  zenuml: "ZenUML Diagram",
+  "sankey-beta": "Sankey Diagram",
+  "xychart-beta": "XY Chart",
+  "block-beta": "Block Diagram",
+  "packet-beta": "Packet Diagram",
+  kanban: "Kanban Board",
+  "architecture-beta": "Architecture Diagram",
+};
 
-async function renderMermaidToImage(code) {
-  const mermaid = await getMermaid();
-  const id = `uc_mermaid_${Date.now()}_${++renderCounter}`;
-  const { svg } = await mermaid.render(id, code);
-
-  const stray = document.getElementById(id) || document.getElementById(`d${id}`);
-  if (stray) stray.remove();
-
-  return new Promise((resolve, reject) => {
-    const blob = new Blob([svg], { type: "image/svg+xml;charset=utf-8" });
-    const url = URL.createObjectURL(blob);
-    const img = new Image();
-    img.onload = () => {
-      URL.revokeObjectURL(url);
-      resolve({ img, svg, width: img.naturalWidth || 800, height: img.naturalHeight || 600 });
-    };
-    img.onerror = e => {
-      URL.revokeObjectURL(url);
-      reject(e);
-    };
-    img.src = url;
-  });
+function getDiagramTypeLabel(text) {
+  const code = extractMermaidCode(text);
+  if (!code) {
+    return text && text.trim() ? "Text / Markdown" : "Mermaid Viewer";
+  }
+  const firstWord = code.trim().split(/[\s\n(]/)[0].toLowerCase();
+  return DIAGRAM_LABELS[firstWord] || "Mermaid Diagram";
 }
 
-class MermaidCanvasWidget {
-  constructor(node, name, isNote, initialText = "") {
+let renderCounter = 0;
+
+class MermaidDOMWidget {
+  constructor(node, name, isNote, textWidget = null, initialText = "") {
     this.node = node;
     this.name = name;
     this.isNote = isNote;
-    this.text = initialText;
-    this.renderedImg = null;
-    this.imgWidth = 0;
-    this.imgHeight = 0;
-    this.error = null;
-    this.isRendering = false;
+    this.textWidget = textWidget;
+    this.text = String(initialText ?? "");
+    this.editing = false;
+    this.disposed = false;
     this.renderSeq = 0;
 
-    this.pan = { x: 0, y: 0 };
-    this.zoom = 1.0;
-
-    this.hitRegions = [];
-    this.hoveredRegion = null;
-    this.viewport = null;
-    this.textEditor = null;
-    this.outsidePointer = null;
-    this.abort = new AbortController();
-
-    this.widget = node.addCustomWidget({
-      name,
-      type: "custom",
-      value: this.text,
-      options: { socketless: true },
-      computeSize: () => [node.size[0], Math.max(280, node.size[1] - 40)],
-      draw: (ctx, _node, width, y) => this.draw(ctx, width, y),
-      mouse: (event, position) => this.mouse(event, position),
-      serializeValue: () => this.text,
-    });
-    this.widget.options.socketless = true;
-
-    const getWidgetOnPos = node.getWidgetOnPos;
-    node.getWidgetOnPos = (graphX, graphY, includeDisabled) => {
-      const x = graphX - node.pos[0];
-      const y = graphY - node.pos[1];
-      if (this.hitRegions.some(region => this.contains(region, x, y))) return this.widget;
-      const found = getWidgetOnPos?.call(node, graphX, graphY, includeDisabled);
-      return found === this.widget ? undefined : found;
-    };
-
-    const canvasEl = app.canvas?.canvas;
-    if (canvasEl) {
-      canvasEl.addEventListener("pointermove", event => this.onPointerMove(event), {
-        passive: true,
-        signal: this.abort.signal,
-      });
-      canvasEl.addEventListener("pointerleave", () => this.clearHoveredTooltip(), {
-        passive: true,
-        signal: this.abort.signal,
-      });
-      canvasEl.addEventListener("wheel", event => this.onWheel(event), {
-        capture: true,
-        passive: false,
-        signal: this.abort.signal,
-      });
-    }
-
-    const onRemoved = node.onRemoved;
-    node.onRemoved = (...args) => {
-      this.abort.abort();
-      this.closeTextEditor();
-      node.getWidgetOnPos = getWidgetOnPos;
-      onRemoved?.apply(node, args);
-    };
-
+    this.buildDOM();
+    this.installWidget();
     this.requestRender();
   }
 
-  setText(newText) {
-    if (this.text === newText) return;
-    this.text = newText;
-    this.widget.value = newText;
-    if (this.isNote) {
-      const textWidget = this.node.widgets?.find(w => w.name === "text");
-      if (textWidget) textWidget.value = newText;
-    }
-    this.requestRender();
-  }
-
-  async requestRender() {
-    const seq = ++this.renderSeq;
-    const code = extractMermaidCode(this.text);
-    if (!code) {
-      this.renderedImg = null;
-      this.error = this.text.trim()
-        ? "No valid Mermaid diagram found (use ```mermaid ... ``` or raw syntax)."
-        : null;
-      this.node.setDirtyCanvas(true, true);
-      return;
-    }
-    this.isRendering = true;
-    this.error = null;
-    this.node.setDirtyCanvas(true, true);
-    try {
-      const result = await renderMermaidToImage(code);
-      if (seq !== this.renderSeq) return;
-      this.renderedImg = result.img;
-      this.imgWidth = result.width;
-      this.imgHeight = result.height;
-      this.error = null;
-      this.autoFit();
-    } catch (err) {
-      if (seq !== this.renderSeq) return;
-      this.renderedImg = null;
-      this.error = (err?.message || String(err)).replace(/Error:\s*/, "");
-    } finally {
-      if (seq === this.renderSeq) {
-        this.isRendering = false;
-        this.node.setDirtyCanvas(true, true);
-      }
-    }
-  }
-
-  autoFit() {
-    if (!this.imgWidth || !this.imgHeight || !this.viewport) return;
-    const padding = 16;
-    const availW = Math.max(20, this.viewport.w - padding * 2);
-    const availH = Math.max(20, this.viewport.h - padding * 2);
-    const scaleX = availW / this.imgWidth;
-    const scaleY = availH / this.imgHeight;
-    this.zoom = Math.min(scaleX, scaleY, 2.0);
-    this.pan = {
-      x: (this.viewport.w - this.imgWidth * this.zoom) / 2,
-      y: (this.viewport.h - this.imgHeight * this.zoom) / 2,
-    };
-    this.node.setDirtyCanvas(true, true);
-  }
-
-  getDiagramTypeLabel() {
-    const code = extractMermaidCode(this.text);
-    if (!code) return "Mermaid Viewer";
-    const firstWord = code.trim().split(/[\s\n(]/)[0].toLowerCase();
-    const map = {
-      flowchart: "Flowchart",
-      graph: "Flowchart",
-      sequencediagram: "Sequence Diagram",
-      classdiagram: "Class Diagram",
-      erdiagram: "ER Diagram",
-      gantt: "Gantt Chart",
-      statediagram: "State Diagram",
-      "statediagram-v2": "State Diagram",
-      pie: "Pie Chart",
-      mindmap: "Mind Map",
-      journey: "User Journey",
-      quadrantchart: "Quadrant Chart",
-      requirementdiagram: "Requirement Diagram",
-      gitgraph: "Git Graph",
-      c4context: "C4 Diagram",
-      c4container: "C4 Container",
-      c4component: "C4 Component",
-      timeline: "Timeline Diagram",
-      zenuml: "ZenUML Diagram",
-      "sankey-beta": "Sankey Diagram",
-      "xychart-beta": "XY Chart",
-      "block-beta": "Block Diagram",
-      "packet-beta": "Packet Diagram",
-      kanban: "Kanban Board",
-      "architecture-beta": "Architecture Diagram",
-    };
-    return map[firstWord] || "Mermaid Diagram";
-  }
-
-  contains(rect, x, y) {
-    return x >= rect.x && x <= rect.x + rect.w && y >= rect.y && y <= rect.y + rect.h;
-  }
-
-  hit(x, y, w, h, action, tooltip = null) {
-    this.hitRegions.push({ x, y, w, h, action, tooltip });
-  }
-
-  box(ctx, x, y, w, h, fill, stroke, r = 0, topRound = true, botRound = true) {
-    ctx.save();
-    ctx.beginPath();
-    if (r > 0) {
-      const rtl = topRound ? r : 0;
-      const rtr = topRound ? r : 0;
-      const rbr = botRound ? r : 0;
-      const rbl = botRound ? r : 0;
-      ctx.moveTo(x + rtl, y);
-      ctx.lineTo(x + w - rtr, y);
-      ctx.quadraticCurveTo(x + w, y, x + w, y + rtr);
-      ctx.lineTo(x + w, y + h - rbr);
-      ctx.quadraticCurveTo(x + w, y + h, x + w - rbr, y + h);
-      ctx.lineTo(x + rbl, y + h);
-      ctx.quadraticCurveTo(x, y + h, x, y + h - rbl);
-      ctx.lineTo(x, y + rtl);
-      ctx.quadraticCurveTo(x, y, x + rtl, y);
-    } else {
-      ctx.rect(x, y, w, h);
-    }
-    if (fill) {
-      ctx.fillStyle = fill;
-      ctx.fill();
-    }
-    if (stroke) {
-      ctx.strokeStyle = stroke;
-      ctx.lineWidth = 1;
-      ctx.stroke();
-    }
-    ctx.restore();
-  }
-
-  button(ctx, x, y, w, h, label, action, accent = false, align = "center", tooltip = null) {
-    this.hit(x, y, w, h, action, tooltip);
-    const bg = accent ? "#2563eb" : "#242933";
-    const stroke = accent ? "#3b82f6" : "#3b4252";
-    const textCol = accent ? "#ffffff" : "#cbd5e1";
-    this.box(ctx, x, y, w, h, bg, stroke, 3);
-    ctx.save();
-    ctx.font = "bold 10px sans-serif";
-    ctx.fillStyle = textCol;
-    ctx.textAlign = align;
-    ctx.textBaseline = "middle";
-    const tx = align === "center" ? x + w / 2 : x + 6;
-    ctx.fillText(label, tx, y + h / 2);
-    ctx.restore();
-  }
-
-  drawMultilineText(ctx, text, x, y, maxWidth, lineHeight = 16, color = "#f87171") {
-    ctx.save();
-    ctx.fillStyle = color;
-    ctx.font = "11px sans-serif";
-    ctx.textAlign = "left";
-    ctx.textBaseline = "top";
-    const words = String(text).split(/\s+/);
-    let line = "";
-    let curY = y;
-    for (const word of words) {
-      const testLine = line + (line ? " " : "") + word;
-      if (ctx.measureText(testLine).width > maxWidth && line) {
-        ctx.fillText(line, x, curY);
-        line = word;
-        curY += lineHeight;
-      } else {
-        line = testLine;
-      }
-    }
-    if (line) ctx.fillText(line, x, curY);
-    ctx.restore();
-  }
-
-  drawCanvasTooltip(ctx, region, nodeWidth, yTop, nodeHeight) {
-    if (!region?.tooltip) return;
-    const text = region.tooltip;
-    const maxWidth = Math.min(260, nodeWidth - 24);
-    const font = "11px sans-serif";
-    const lineHeight = 15;
-
-    ctx.save();
-    ctx.font = font;
-
-    const words = String(text).split(/\s+/);
-    const lines = [];
-    let currentLine = "";
-    for (let i = 0; i < words.length; i++) {
-      const testLine = currentLine ? `${currentLine} ${words[i]}` : words[i];
-      if (ctx.measureText(testLine).width > maxWidth && currentLine) {
-        lines.push(currentLine);
-        currentLine = words[i];
-      } else {
-        currentLine = testLine;
-      }
-    }
-    if (currentLine) lines.push(currentLine);
-
-    let maxMeasured = 0;
-    for (const l of lines) {
-      maxMeasured = Math.max(maxMeasured, ctx.measureText(l).width);
-    }
-
-    const paddingX = 8;
-    const paddingY = 6;
-    const boxW = Math.max(50, maxMeasured + paddingX * 2);
-    const boxH = lines.length * lineHeight + paddingY * 2;
-
-    let bx = region.x + region.w / 2 - boxW / 2;
-    bx = Math.max(8, Math.min(nodeWidth - boxW - 8, bx));
-
-    let by = region.y - boxH - 6;
-    if (by < yTop + 2) {
-      by = region.y + region.h + 6;
-    }
-
-    this.box(ctx, bx, by, boxW, boxH, "#0f172a", "#38bdf8", 4);
-
-    ctx.fillStyle = "#f8fafc";
-    ctx.textAlign = "left";
-    ctx.textBaseline = "top";
-    for (let i = 0; i < lines.length; i++) {
-      ctx.fillText(lines[i], bx + paddingX, by + paddingY + i * lineHeight);
-    }
-    ctx.restore();
-  }
-
-  draw(ctx, width, y) {
-    if (this.textEditor) this.positionTextEditor();
-    this.hitRegions = [];
-
-    const nodeHeight = this.node.size[1] || 360;
-    const headerHeight = 28;
-    const totalHeight = Math.max(240, nodeHeight - y - 10);
-    const vpX = 6;
-    const vpY = y + headerHeight;
-    const vpW = width - 12;
-    const vpH = totalHeight - headerHeight - 4;
-    this.viewport = { x: vpX, y: vpY, w: vpW, h: vpH };
-
-    this.box(ctx, 4, y, width - 8, totalHeight, "#131519", "#2a2e38", 6);
-    this.box(ctx, 4, y, width - 8, headerHeight, "#1a1d24", "#2a2e38", 6, true, false);
-
-    ctx.save();
-    ctx.font = "bold 11px sans-serif";
-    ctx.fillStyle = "#94a3b8";
-    ctx.textAlign = "left";
-    ctx.textBaseline = "middle";
-    const diagramType = this.getDiagramTypeLabel();
-    ctx.fillText(diagramType, 12, y + headerHeight / 2);
-    ctx.restore();
-
-    let btnRight = width - 12;
-
-    const fitW = 30;
-    this.button(ctx, btnRight - fitW, y + 4, fitW, 20, "Fit", () => this.autoFit(), false, "center", "Auto-fit diagram to node viewport");
-    btnRight -= fitW + 4;
-
-    const zoom1W = 28;
-    this.button(ctx, btnRight - zoom1W, y + 4, zoom1W, 20, "1:1", () => {
-      this.zoom = 1.0;
-      if (this.imgWidth && this.viewport) {
-        this.pan = {
-          x: (this.viewport.w - this.imgWidth) / 2,
-          y: (this.viewport.h - this.imgHeight) / 2,
-        };
-      }
-      this.node.setDirtyCanvas(true, true);
-    }, false, "center", "Reset zoom to 100%");
-    btnRight -= zoom1W + 4;
-
-    const zoomInW = 20;
-    this.button(ctx, btnRight - zoomInW, y + 4, zoomInW, 20, "+", () => {
-      this.zoom = Math.min(10.0, this.zoom * 1.25);
-      this.node.setDirtyCanvas(true, true);
-    }, false, "center", "Zoom in");
-    btnRight -= zoomInW + 2;
-
-    const zoomOutW = 20;
-    this.button(ctx, btnRight - zoomOutW, y + 4, zoomOutW, 20, "-", () => {
-      this.zoom = Math.max(0.05, this.zoom * 0.8);
-      this.node.setDirtyCanvas(true, true);
-    }, false, "center", "Zoom out");
-    btnRight -= zoomOutW + 4;
-
-    const panW = 18;
-    this.button(ctx, btnRight - panW, y + 4, panW, 20, "▶", () => {
-      this.pan.x -= 40;
-      this.node.setDirtyCanvas(true, true);
-    }, false, "center", "Pan right");
-    btnRight -= panW + 2;
-
-    this.button(ctx, btnRight - panW, y + 4, panW, 20, "◀", () => {
-      this.pan.x += 40;
-      this.node.setDirtyCanvas(true, true);
-    }, false, "center", "Pan left");
-    btnRight -= panW + 2;
-
-    this.button(ctx, btnRight - panW, y + 4, panW, 20, "▼", () => {
-      this.pan.y -= 40;
-      this.node.setDirtyCanvas(true, true);
-    }, false, "center", "Pan down");
-    btnRight -= panW + 2;
-
-    this.button(ctx, btnRight - panW, y + 4, panW, 20, "▲", () => {
-      this.pan.y += 40;
-      this.node.setDirtyCanvas(true, true);
-    }, false, "center", "Pan up");
-    btnRight -= panW + 6;
-
-    if (this.isNote) {
-      const editW = 38;
-      this.button(ctx, btnRight - editW, y + 4, editW, 20, "Edit", () => this.openTextEditor(), true, "center", "Open text editor");
-      btnRight -= editW + 6;
-    }
-
-    ctx.save();
-    ctx.font = "10px sans-serif";
-    ctx.fillStyle = "#64748b";
-    ctx.textAlign = "right";
-    ctx.textBaseline = "middle";
-    ctx.fillText(`${Math.round(this.zoom * 100)}%`, btnRight - 4, y + headerHeight / 2);
-    ctx.restore();
-
-    this.box(ctx, vpX, vpY, vpW, vpH, "#0d0f12", "#1f232b", 4);
-
-    ctx.save();
-    ctx.beginPath();
-    ctx.rect(vpX, vpY, vpW, vpH);
-    ctx.clip();
-
-    if (this.renderedImg) {
-      ctx.translate(vpX + this.pan.x, vpY + this.pan.y);
-      ctx.scale(this.zoom, this.zoom);
-      ctx.drawImage(this.renderedImg, 0, 0);
-    } else if (this.isRendering) {
-      ctx.font = "12px sans-serif";
-      ctx.fillStyle = "#38bdf8";
-      ctx.textAlign = "center";
-      ctx.textBaseline = "middle";
-      ctx.fillText("Rendering Mermaid diagram...", vpX + vpW / 2, vpY + vpH / 2);
-    } else if (this.error) {
-      this.drawMultilineText(ctx, this.error, vpX + 16, vpY + vpH / 2 - 20, vpW - 32, 16, "#f87171");
-    } else {
-      ctx.font = "11px sans-serif";
-      ctx.fillStyle = "#475569";
-      ctx.textAlign = "center";
-      ctx.textBaseline = "middle";
-      const hint = this.isNote
-        ? "Click 'Edit' to enter Markdown or Mermaid code."
-        : "Waiting for incoming diagram text...";
-      ctx.fillText(hint, vpX + vpW / 2, vpY + vpH / 2);
-    }
-
-    ctx.restore();
-
-    if (this.hoveredRegion?.tooltip) {
-      this.drawCanvasTooltip(ctx, this.hoveredRegion, width, y, totalHeight);
-    }
-  }
-
-  mouse(event, position) {
-    if (event.button !== 0 || !/up$/.test(event.type)) return true;
-    this.clearHoveredTooltip();
-    const region = this.hitRegions.find(item => this.contains(item, position[0], position[1]));
-    region?.action?.(event, position);
-    return true;
-  }
-
-  onPointerMove(event) {
-    if (this.textEditor) {
-      this.clearHoveredTooltip();
-      return;
-    }
-    const canvas = app.canvas;
-    if (!canvas?.graph) return;
-    const bounds = canvas.canvas.getBoundingClientRect();
-    const scale = canvas.ds.scale;
-    const graphX = (event.clientX - bounds.left) / scale - canvas.ds.offset[0];
-    const graphY = (event.clientY - bounds.top) / scale - canvas.ds.offset[1];
-    const x = graphX - this.node.pos[0];
-    const y = graphY - this.node.pos[1];
-
-    if (x < 0 || x > (this.node.size[0] || 420) || y < 0 || y > (this.node.size[1] || 360)) {
-      this.clearHoveredTooltip();
-      return;
-    }
-
-    const matched = this.hitRegions.find(r => r.tooltip && this.contains(r, x, y));
-    if (matched !== this.hoveredRegion) {
-      this.hoveredRegion = matched || null;
-      canvas.setDirty(true, false);
-    }
-  }
-
-  clearHoveredTooltip() {
-    if (this.hoveredRegion) {
-      this.hoveredRegion = null;
-      app.canvas?.setDirty(true, false);
-    }
-  }
-
-  onWheel(event) {
-    if (this.textEditor) return;
-    this.clearHoveredTooltip();
-    const canvas = app.canvas;
-    if (!canvas?.graph) return;
-    const bounds = canvas.canvas.getBoundingClientRect();
-    const scale = canvas.ds.scale;
-    const graphX = (event.clientX - bounds.left) / scale - canvas.ds.offset[0];
-    const graphY = (event.clientY - bounds.top) / scale - canvas.ds.offset[1];
-    if (canvas.graph.getNodeOnPos(graphX, graphY, canvas.visible_nodes) !== this.node) return;
-    const x = graphX - this.node.pos[0];
-    const y = graphY - this.node.pos[1];
-
-    if (!this.viewport || !this.contains(this.viewport, x, y)) return;
-
-    event.preventDefault();
-    event.stopPropagation();
-    event.stopImmediatePropagation();
-
-    if (event.ctrlKey || event.metaKey) {
-      const factor = event.deltaY < 0 ? 1.15 : 0.85;
-      const newZoom = Math.max(0.05, Math.min(10.0, this.zoom * factor));
-      const relX = x - (this.viewport.x + this.pan.x);
-      const relY = y - (this.viewport.y + this.pan.y);
-      this.pan.x -= relX * (factor - 1);
-      this.pan.y -= relY * (factor - 1);
-      this.zoom = newZoom;
-    } else if (event.shiftKey) {
-      this.pan.x -= event.deltaY;
-    } else {
-      this.pan.y -= event.deltaY;
-    }
-    this.node.setDirtyCanvas(true, true);
-  }
-
-  openTextEditor() {
-    if (this.textEditor) return;
-    const container = document.createElement("div");
-    Object.assign(container.style, {
-      position: "fixed",
-      zIndex: "1000",
-      background: "#181a1f",
-      border: "1px solid #3b82f6",
-      borderRadius: "6px",
-      boxShadow: "0 10px 25px rgba(0,0,0,0.6)",
+  buildDOM() {
+    const root = document.createElement("div");
+    Object.assign(root.style, {
       display: "flex",
       flexDirection: "column",
-      padding: "8px",
+      width: "100%",
+      height: "100%",
       boxSizing: "border-box",
+      background: "#131519",
+      border: "1px solid #2a2e38",
+      borderRadius: "6px",
+      overflow: "hidden",
+      color: "#e2e8f0",
+      fontFamily: "sans-serif",
     });
 
     const header = document.createElement("div");
     Object.assign(header.style, {
+      height: "28px",
+      flexShrink: "0",
       display: "flex",
-      justifyContent: "space-between",
       alignItems: "center",
-      marginBottom: "6px",
-      color: "#94a3b8",
+      justifyContent: "space-between",
+      padding: "0 8px",
+      background: "#1a1d24",
+      borderBottom: "1px solid #2a2e38",
+      boxSizing: "border-box",
+    });
+
+    const titleEl = document.createElement("span");
+    Object.assign(titleEl.style, {
       fontSize: "11px",
-      fontFamily: "sans-serif",
-    });
-    header.innerHTML = "<span><b>Mermaid / Markdown Editor</b> (Ctrl+Enter to close, Esc to cancel)</span>";
-
-    const closeBtn = document.createElement("button");
-    closeBtn.textContent = "✕";
-    Object.assign(closeBtn.style, {
-      background: "none",
-      border: "none",
+      fontWeight: "600",
       color: "#94a3b8",
-      cursor: "pointer",
-      fontSize: "14px",
-      padding: "0 4px",
+      overflow: "hidden",
+      textOverflow: "ellipsis",
+      whiteSpace: "nowrap",
     });
-    closeBtn.onclick = () => this.closeTextEditor();
-    header.appendChild(closeBtn);
-    container.appendChild(header);
+    titleEl.textContent = getDiagramTypeLabel(this.text);
+    header.appendChild(titleEl);
 
-    const textarea = document.createElement("textarea");
-    textarea.value = this.text;
-    Object.assign(textarea.style, {
-      width: "100%",
-      height: "100%",
+    let toggleBtn = null;
+    if (this.isNote) {
+      toggleBtn = document.createElement("button");
+      toggleBtn.type = "button";
+      toggleBtn.textContent = "Edit";
+      Object.assign(toggleBtn.style, {
+        background: "#2563eb",
+        border: "1px solid #3b82f6",
+        borderRadius: "3px",
+        color: "#ffffff",
+        fontSize: "10px",
+        fontWeight: "600",
+        padding: "2px 8px",
+        cursor: "pointer",
+      });
+      toggleBtn.addEventListener("pointerdown", event => event.stopPropagation());
+      toggleBtn.addEventListener("click", event => {
+        event.stopPropagation();
+        this.setEditing(!this.editing);
+      });
+      header.appendChild(toggleBtn);
+    }
+
+    const stageEl = document.createElement("div");
+    Object.assign(stageEl.style, {
       flex: "1",
+      minHeight: "0",
+      overflow: "auto",
+      padding: "10px",
       boxSizing: "border-box",
       background: "#0d0f12",
-      color: "#f8fafc",
-      border: "1px solid #2a2e38",
-      outline: "none",
-      borderRadius: "4px",
-      padding: "8px",
-      fontSize: "12px",
-      fontFamily: "monospace",
-      resize: "none",
-      lineHeight: "1.4",
+      display: "flex",
+      flexDirection: "column",
     });
-    container.appendChild(textarea);
 
-    this.textEditor = { container, textarea };
+    let editorEl = null;
+    if (this.isNote) {
+      editorEl = document.createElement("textarea");
+      editorEl.value = this.text;
+      editorEl.spellcheck = false;
+      Object.assign(editorEl.style, {
+        display: "none",
+        flex: "1",
+        width: "100%",
+        height: "100%",
+        minHeight: "0",
+        resize: "none",
+        border: "none",
+        outline: "none",
+        background: "#0d0f12",
+        color: "#f8fafc",
+        fontFamily: "monospace",
+        fontSize: "12px",
+        lineHeight: "1.45",
+        padding: "10px",
+        boxSizing: "border-box",
+      });
+      editorEl.addEventListener("pointerdown", event => event.stopPropagation());
+      editorEl.addEventListener("input", () => {
+        this.syncTextValue(editorEl.value);
+      });
+      editorEl.addEventListener("keydown", event => {
+        event.stopPropagation();
+        if (event.key === "Escape" || (event.key === "Enter" && (event.ctrlKey || event.metaKey))) {
+          event.preventDefault();
+          this.setEditing(false);
+        }
+      });
+    }
 
-    this.outsidePointer = event => {
-      if (this.textEditor?.container && !this.textEditor.container.contains(event.target)) {
-        this.closeTextEditor();
+    root.addEventListener(
+      "wheel",
+      event => {
+        if (event.ctrlKey || event.metaKey) return;
+        const activeScroller = this.editing && editorEl ? editorEl : stageEl;
+        const canScrollY = activeScroller.scrollHeight > activeScroller.clientHeight;
+        const canScrollX = activeScroller.scrollWidth > activeScroller.clientWidth;
+        if (canScrollY || canScrollX) {
+          event.stopPropagation();
+        }
+      },
+      { passive: true },
+    );
+
+    root.appendChild(header);
+    root.appendChild(stageEl);
+    if (editorEl) root.appendChild(editorEl);
+
+    this.root = root;
+    this.titleEl = titleEl;
+    this.toggleBtn = toggleBtn;
+    this.stageEl = stageEl;
+    this.editorEl = editorEl;
+  }
+
+  installWidget() {
+    if (this.textWidget) {
+      this.textWidget.computeSize = () => [0, -4];
+      this.textWidget.draw = () => {};
+      if (this.textWidget.element) {
+        this.textWidget.element.style.display = "none";
       }
+    }
+
+    const serializePreview = !this.isNote;
+    this.domWidget = this.node.addDOMWidget(this.name, "uc_mermaid_dom", this.root, {
+      serialize: serializePreview,
+      hideOnZoom: false,
+      getMinHeight: () => 220,
+      getValue: () => this.text,
+      setValue: value => this.setText(String(value ?? "")),
+    });
+    if (this.domWidget) {
+      this.domWidget.serialize = serializePreview;
+    }
+    if (serializePreview) {
+      this.node.serialize_widgets = true;
+    }
+
+    const onRemoved = this.node.onRemoved;
+    this.node.onRemoved = (...args) => {
+      this.dispose();
+      return onRemoved?.apply(this.node, args);
     };
-    requestAnimationFrame(() => {
-      document.addEventListener("pointerdown", this.outsidePointer, true);
-    });
+  }
 
-    textarea.addEventListener("input", () => {
-      this.setText(textarea.value);
-    });
+  dispose() {
+    this.disposed = true;
+    this.renderSeq++;
+  }
 
-    textarea.addEventListener("keydown", event => {
-      event.stopPropagation();
-      if (event.key === "Escape") {
-        event.preventDefault();
-        this.closeTextEditor();
-      } else if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) {
-        event.preventDefault();
-        this.closeTextEditor();
+  syncTextValue(newText) {
+    const normalized = String(newText ?? "");
+    this.text = normalized;
+    if (this.textWidget && this.textWidget.value !== normalized) {
+      this.textWidget.value = normalized;
+    }
+    if (!this.isNote && this.domWidget) {
+      this.domWidget.value = normalized;
+    }
+    this.titleEl.textContent = getDiagramTypeLabel(normalized);
+  }
+
+  setEditing(nextEditing) {
+    if (!this.isNote || !this.editorEl || this.editing === nextEditing) return;
+    this.editing = nextEditing;
+    if (this.editing) {
+      this.editorEl.value = this.text;
+      this.stageEl.style.display = "none";
+      this.editorEl.style.display = "block";
+      if (this.toggleBtn) this.toggleBtn.textContent = "Preview";
+      this.editorEl.focus?.();
+    } else {
+      this.syncTextValue(this.editorEl.value);
+      this.editorEl.style.display = "none";
+      this.stageEl.style.display = "flex";
+      if (this.toggleBtn) this.toggleBtn.textContent = "Edit";
+      this.requestRender();
+    }
+  }
+
+  setText(newText, forceRender = false) {
+    const normalized = String(newText ?? "");
+    const changed = normalized !== this.text;
+    this.syncTextValue(normalized);
+    if (this.editorEl && this.editorEl.value !== normalized) {
+      this.editorEl.value = normalized;
+    }
+    if ((changed || forceRender) && !this.editing) {
+      return this.requestRender();
+    }
+    return Promise.resolve();
+  }
+
+  renderPlainBlock(content, color = "#e2e8f0", centered = false) {
+    this.stageEl.replaceChildren();
+    const block = document.createElement("pre");
+    Object.assign(block.style, {
+      margin: centered ? "auto" : "0",
+      whiteSpace: "pre-wrap",
+      wordBreak: "break-word",
+      color,
+      fontFamily: centered ? "sans-serif" : "monospace",
+      fontSize: centered ? "11px" : "12px",
+      lineHeight: "1.45",
+      textAlign: centered ? "center" : "left",
+    });
+    block.textContent = content;
+    this.stageEl.appendChild(block);
+  }
+
+  async requestRender() {
+    if (this.disposed) return;
+    const seq = ++this.renderSeq;
+    this.titleEl.textContent = getDiagramTypeLabel(this.text);
+
+    const trimmed = this.text.trim();
+    if (!trimmed) {
+      const hint = this.isNote
+        ? "Click 'Edit' to enter Mermaid diagram code or Markdown notes."
+        : "Waiting for incoming diagram text...";
+      this.renderPlainBlock(hint, "#64748b", true);
+      return;
+    }
+
+    const code = extractMermaidCode(this.text);
+    if (!code) {
+      this.renderPlainBlock(this.text, "#e2e8f0", false);
+      return;
+    }
+
+    this.renderPlainBlock("Rendering Mermaid diagram...", "#38bdf8", true);
+    try {
+      const mermaid = await getMermaid();
+      if (this.disposed || seq !== this.renderSeq) return;
+      const id = `uc_mermaid_${Date.now()}_${++renderCounter}`;
+      const { svg } = await mermaid.render(id, code);
+      const stray = document.getElementById?.(id) || document.getElementById?.(`d${id}`);
+      stray?.remove?.();
+      if (this.disposed || seq !== this.renderSeq) return;
+
+      this.stageEl.innerHTML = svg;
+      const svgEl = this.stageEl.querySelector?.("svg");
+      if (svgEl?.style) {
+        svgEl.style.maxWidth = "100%";
+        svgEl.style.height = "auto";
+        svgEl.style.display = "block";
+        svgEl.style.margin = "auto";
       }
-    });
-
-    document.body.appendChild(container);
-    this.positionTextEditor();
-    requestAnimationFrame(() => textarea.focus());
-  }
-
-  closeTextEditor() {
-    if (this.outsidePointer) {
-      document.removeEventListener("pointerdown", this.outsidePointer, true);
-      this.outsidePointer = null;
+    } catch (err) {
+      if (this.disposed || seq !== this.renderSeq) return;
+      const message = (err?.message || String(err)).replace(/^Error:\s*/, "");
+      this.renderPlainBlock(message, "#f87171", false);
     }
-    if (this.textEditor) {
-      this.textEditor.container?.remove();
-      this.textEditor = null;
-      this.node.setDirtyCanvas(true, true);
-    }
-  }
-
-  positionTextEditor() {
-    if (!this.textEditor || !app.canvas?.canvas) return;
-    const { container } = this.textEditor;
-    const canvas = app.canvas.canvas;
-    const canvasRect = canvas.getBoundingClientRect();
-    const scale = app.canvas.ds.scale;
-    const x = canvasRect.left + (this.node.pos[0] + app.canvas.ds.offset[0]) * scale;
-    const y = canvasRect.top + (this.node.pos[1] + app.canvas.ds.offset[1]) * scale;
-    const w = Math.max(380, this.node.size[0] * scale);
-    const h = Math.max(260, this.node.size[1] * scale);
-
-    Object.assign(container.style, {
-      left: `${Math.max(10, Math.min(window.innerWidth - w - 10, x))}px`,
-      top: `${Math.max(10, Math.min(window.innerHeight - h - 10, y))}px`,
-      width: `${w}px`,
-      height: `${h}px`,
-    });
   }
 }
 
@@ -725,41 +403,48 @@ app.registerExtension({
   async beforeRegisterNodeDef(nodeType, nodeData) {
     if (nodeData.name !== "UC_MermaidNote" && nodeData.name !== "UC_MermaidPreview") return;
 
+    const isNote = nodeData.name === "UC_MermaidNote";
+
     const onNodeCreated = nodeType.prototype.onNodeCreated;
     nodeType.prototype.onNodeCreated = function () {
       const result = onNodeCreated?.apply(this, arguments);
-      const isNote = nodeData.name === "UC_MermaidNote";
+      const textWidget = isNote ? (this.widgets?.find(w => w.name === "text") ?? null) : null;
+      const initialText = textWidget ? (textWidget.value ?? "") : "";
 
-      if (isNote) {
-        const textWidget = this.widgets?.find(w => w.name === "text");
-        if (textWidget) {
-          textWidget.type = "converted-widget";
-          textWidget.computeSize = () => [0, -4];
-        }
-      }
-
-      const initialText = isNote
-        ? (this.widgets?.find(w => w.name === "text")?.value ?? "")
-        : "";
-
-      const editor = new MermaidCanvasWidget(this, isNote ? "mermaid_note" : "mermaid_preview", isNote, initialText);
-      this.__mermaidEditor = editor;
+      this.__mermaidEditor = new MermaidDOMWidget(
+        this,
+        isNote ? "mermaid_note" : "mermaid_preview",
+        isNote,
+        textWidget,
+        initialText,
+      );
       this.setSize([
-        Math.max(this.size[0], 420),
-        Math.max(this.size[1], 360),
+        Math.max(this.size?.[0] || 0, 420),
+        Math.max(this.size?.[1] || 0, 320),
       ]);
       return result;
     };
 
-    if (nodeData.name === "UC_MermaidPreview") {
+    if (isNote) {
+      const onConfigure = nodeType.prototype.onConfigure;
+      nodeType.prototype.onConfigure = function (info) {
+        const result = onConfigure?.apply(this, arguments);
+        const savedText = this.widgets?.find(w => w.name === "text")?.value;
+        if (this.__mermaidEditor && savedText !== undefined) {
+          this.__mermaidEditor.setText(String(savedText));
+        }
+        return result;
+      };
+    } else {
       const onExecuted = nodeType.prototype.onExecuted;
       nodeType.prototype.onExecuted = function (message) {
-        onExecuted?.apply(this, arguments);
+        const result = onExecuted?.apply(this, arguments);
         const mermaidText = message?.mermaid_text;
         const val = Array.isArray(mermaidText) ? mermaidText[0] : mermaidText;
         if (this.__mermaidEditor && val !== undefined) {
           this.__mermaidEditor.setText(String(val));
         }
+        return result;
       };
     }
   },
