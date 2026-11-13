@@ -1261,3 +1261,86 @@ def test_h3_cache_caps_high_fps_unscaled_resolution_and_byte_budget(tmp_path, mo
     image_helpers._prune_video_component_cache(uncached_dir / "utilscollection_video_components", max_total_bytes=700, keep_paths=(newer,))
     assert not older.exists()
     assert newer.exists()
+
+
+def test_h3_video_segments_bounds_cpu_decode_resize_and_encode_threads(tmp_path, monkeypatch):
+    import av
+    import torch
+    from utils_collection_video_frame_sampler_test.helpers import video_helpers
+
+    source = tmp_path / "source.mp4"
+    with av.open(str(source), "w") as output:
+        stream = output.add_stream("libx264", rate=24)
+        stream.width, stream.height, stream.pix_fmt = 64, 64, "yuv420p"
+        stream.thread_count = 2
+        for index in range(12):
+            frame = av.VideoFrame.from_ndarray(np.full((64, 64, 3), index * 20, dtype=np.uint8), format="rgb24")
+            frame.pts = index
+            for packet in stream.encode(frame):
+                output.mux(packet)
+        for packet in stream.encode(None):
+            output.mux(packet)
+
+    cache_root = tmp_path / "cache"
+    monkeypatch.setattr(image_helpers.folder_paths, "get_temp_directory", lambda: str(cache_root))
+
+    observed_decode_counts = []
+    orig_get_stream = image_helpers.InputImpl.VideoFromFile._get_first_video_stream
+
+    def spy_stream(self, container):
+        s = orig_get_stream(self, container)
+        observed_decode_counts.append(s)
+        return s
+
+    monkeypatch.setattr(image_helpers.InputImpl.VideoFromFile, "_get_first_video_stream", spy_stream)
+
+    observed_resize_threads = []
+    orig_upscale = image_helpers.comfy.utils.common_upscale
+
+    def spy_upscale(*args, **kwargs):
+        observed_resize_threads.append(torch.get_num_threads())
+        return orig_upscale(*args, **kwargs)
+
+    monkeypatch.setattr(image_helpers.comfy.utils, "common_upscale", spy_upscale)
+
+    prev_threads = torch.get_num_threads()
+    expected_threads = prev_threads
+    if prev_threads < 4:
+        torch.set_num_threads(4)
+        expected_threads = 4
+    try:
+        video = image_helpers.InputImpl.VideoFromFile(str(source))
+        frames_list, _, out_w, out_h, lengths, video_list, _ = video_helpers.split_h3_video_components_into_segments(video, megapixels=0.25, segment_count=1, enable_whisper=False)
+        assert (out_w, out_h) == (512, 512)
+        assert lengths == [22]
+        assert len(video_list) == 1
+        assert observed_resize_threads and all(t <= image_helpers.H3_MAX_CPU_THREADS for t in observed_resize_threads)
+        assert any(s.thread_count == image_helpers.H3_MAX_CPU_THREADS for s in observed_decode_counts)
+
+        encoded_streams = []
+        orig_av_open = video_helpers.av.open
+
+        class _ContainerProxy:
+            def __init__(self, inner):
+                self._inner = inner
+
+            def add_stream(self, *a, **kw):
+                st = self._inner.add_stream(*a, **kw)
+                if getattr(st, "type", None) == "video":
+                    encoded_streams.append(st)
+                return st
+
+            def __getattr__(self, name):
+                return getattr(self._inner, name)
+
+        def spy_av_open(*args, **kwargs):
+            return _ContainerProxy(orig_av_open(*args, **kwargs))
+
+        monkeypatch.setattr(video_helpers.av, "open", spy_av_open)
+        clip = video_helpers.encode_keyframe_optimized_video_clip(frames_list[0][:4], fps=24.0, codec="libx264")
+        assert clip is not None
+        assert len(encoded_streams) == 1
+        assert encoded_streams[0].thread_count == image_helpers.H3_MAX_CPU_THREADS
+        assert torch.get_num_threads() == expected_threads
+    finally:
+        torch.set_num_threads(prev_threads)

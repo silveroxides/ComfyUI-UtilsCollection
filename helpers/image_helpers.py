@@ -1229,9 +1229,35 @@ def _frame_storage(video):
 
 
 H3_MAX_CACHE_FPS = 24
+H3_MAX_CPU_THREADS = 2
 MAX_H3_UNSCALED_PIXELS = 1024 * 1024
 MAX_VIDEO_CACHE_FILE_BYTES = 2 * 1024 * 1024 * 1024
 MAX_VIDEO_CACHE_TOTAL_BYTES = 6 * 1024 * 1024 * 1024
+_H3_CPU_THREAD_LOCK = threading.Lock()
+_H3_CPU_THREAD_DEPTH = 0
+_H3_PREV_CPU_THREADS: int | None = None
+
+
+@contextmanager
+def _bounded_h3_cpu_threads(max_threads: int = H3_MAX_CPU_THREADS):
+    """Temporarily cap PyTorch intra-op CPU threads so H3 resize/prep does not saturate every core."""
+    global _H3_CPU_THREAD_DEPTH, _H3_PREV_CPU_THREADS
+    with _H3_CPU_THREAD_LOCK:
+        if _H3_CPU_THREAD_DEPTH == 0:
+            prev = torch.get_num_threads()
+            _H3_PREV_CPU_THREADS = prev
+            if prev > max_threads:
+                torch.set_num_threads(max_threads)
+        _H3_CPU_THREAD_DEPTH += 1
+    try:
+        yield
+    finally:
+        with _H3_CPU_THREAD_LOCK:
+            _H3_CPU_THREAD_DEPTH -= 1
+            if _H3_CPU_THREAD_DEPTH == 0 and _H3_PREV_CPU_THREADS is not None:
+                if torch.get_num_threads() != _H3_PREV_CPU_THREADS:
+                    torch.set_num_threads(_H3_PREV_CPU_THREADS)
+                _H3_PREV_CPU_THREADS = None
 
 
 class CachedVideoFrames:
@@ -1506,7 +1532,8 @@ def _resize_h3_batch(source, width, height, crop="center"):
         source = source.float().div_(255)
     if tuple(source.shape[1:3]) == (height, width):
         return source
-    return comfy.utils.common_upscale(source.movedim(-1, 1), width, height, "bicubic", crop).clamp_(0, 1).movedim(1, -1)
+    with _bounded_h3_cpu_threads():
+        return comfy.utils.common_upscale(source.movedim(-1, 1), width, height, "bicubic", crop).clamp_(0, 1).movedim(1, -1)
 
 
 @contextmanager
@@ -1567,6 +1594,7 @@ def _decode_h3_batches(video, megapixels, audio_file, details, stopped):
     with av.open(source, mode="r") as container:
         stream = video._get_first_video_stream(container)
         stream.thread_type = "AUTO"
+        stream.thread_count = H3_MAX_CPU_THREADS
         start, duration = video.get_active_trim_window()
         start_pts = int(start / stream.time_base)
         end_pts = int((start + duration) / stream.time_base)
@@ -1768,7 +1796,7 @@ def _stream_h3_components_in_memory(video, megapixels, storage) -> Types.VideoCo
         def factory(stopped):
             return closing(_decode_h3_batches(video, megapixels, audio_file, details, stopped))
 
-        with _prefetch_h3_batches(factory) as batches, tqdm(desc="Decoding H3 Video Components (Uncached)", unit="frame") as pbar:
+        with _bounded_h3_cpu_threads(), _prefetch_h3_batches(factory) as batches, tqdm(desc="Decoding H3 Video Components (Uncached)", unit="frame") as pbar:
             for batch in batches:
                 throw_exception_if_processing_interrupted()
                 if is_uint8:
@@ -1805,7 +1833,7 @@ def _write_streamed_h3_components(path, key, video, megapixels, storage):
         count = 0
         metadata = {"version": "4", "source_hash": str(key), "storage": storage_type}
         with atomic_uel_writer(path, metadata) as writer:
-            with _prefetch_h3_batches(factory) as batches, tqdm(desc="Decoding & Caching H3 Video Components", unit="frame") as pbar:
+            with _bounded_h3_cpu_threads(), _prefetch_h3_batches(factory) as batches, tqdm(desc="Decoding & Caching H3 Video Components", unit="frame") as pbar:
                 for batch in batches:
                     batch_items = []
                     for frame in batch:
