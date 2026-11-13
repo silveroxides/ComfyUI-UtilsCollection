@@ -32,10 +32,11 @@ rules and must remain local only; do not stage or commit it.
 - Write compact single-line schema inputs, outputs, and calls within the
   320-character limit; avoid unnecessary multi-line argument expansion or
   trailing commas that force vertical wrapping.
-- Before committing touched Python files, run `isort --settings-path pyproject.toml`,
-  `yapf -i --style pyproject.toml`, `ruff check --fix --config pyproject.toml`
-  (do not abort on pre-existing `E501` long prose strings), and
-  `ruff format --config pyproject.toml`.
+- Run `isort --settings-path pyproject.toml`, `yapf -i --style pyproject.toml`,
+  `ruff check --fix --config pyproject.toml` (do not abort on pre-existing
+  `E501` long prose strings), and `ruff format --config pyproject.toml` once
+  just prior to commit after edits and tests pass; never re-run them after
+  every individual edit or test iteration.
 - Formatter CLIs may live in the system Python environment outside the ComfyUI
   virtual environment; formatting touched Python modules in full is expected and
   not scope drift.
