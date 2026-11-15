@@ -1533,7 +1533,7 @@ def _resize_h3_batch(source, width, height, crop="center"):
     if tuple(source.shape[1:3]) == (height, width):
         return source
     with _bounded_h3_cpu_threads():
-        return comfy.utils.common_upscale(source.movedim(-1, 1), width, height, "bicubic", crop).clamp_(0, 1).movedim(1, -1)
+        return resize_nchw(source.movedim(-1, 1), width, height, "bicubic", crop).clamp_(0, 1).movedim(1, -1)
 
 
 @contextmanager
@@ -1897,7 +1897,7 @@ def cached_video_components(video, preparation=None, prepare=None, *, cache_larg
         components = _read_components(previous_v4_raw, source_key)
     elif legacy.is_file():
         components = read_legacy_components(legacy, source_key)
-    elif preparation is not None and preparation.get("resize") in ("h3-bicubic-center-v2", "h3-native-capped-v1"):
+    elif preparation is not None and preparation.get("resize") in ("h3-bicubic-aa-center-v3", "h3-native-aa-capped-v2"):
         megapixels = preparation["megapixels"]
         estimated = None if cache_large_clips else _estimate_h3_cache_bytes(video, megapixels, storage)
         if estimated is not None and estimated > MAX_VIDEO_CACHE_FILE_BYTES:
@@ -2015,7 +2015,7 @@ def cached_h3_reference_components(video, megapixels, *, cache_long_window=False
         resized = H3ResizedFrames(frames, width, height, indices=indices, crop=crop, source_seconds=source_seconds)
         return Types.VideoComponents(images=resized, audio=components.audio, frame_rate=out_rate)
 
-    prep_info = {"megapixels": megapixels, "max_fps": H3_MAX_CACHE_FPS, "resize": "h3-bicubic-center-v2" if megapixels > 0 else "h3-native-capped-v1"}
+    prep_info = {"megapixels": megapixels, "max_fps": H3_MAX_CACHE_FPS, "resize": "h3-bicubic-aa-center-v3" if megapixels > 0 else "h3-native-aa-capped-v2"}
     if cache_long_window:
         prep_info["cache_long_window"] = True
     return cached_video_components(video, prep_info, prepare, cache_large_clips=cache_large_clips)

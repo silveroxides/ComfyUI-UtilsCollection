@@ -869,13 +869,13 @@ def test_h3_video_disk_cache_reuses_full_decode_across_ranges(tmp_path, monkeypa
     assert isinstance(raw_components.images, cache.CachedVideoFrames)
     assert len(calls) == 1
     resizes = []
-    original_resize = image_helpers.comfy.utils.common_upscale
+    original_resize = image_helpers.resize_nchw
 
-    def resize(*args):
+    def resize(*args, **kwargs):
         resizes.append((args[0].shape[0], args[0].dtype, args[0].device.type))
-        return original_resize(*args)
+        return original_resize(*args, **kwargs)
 
-    monkeypatch.setattr(image_helpers.comfy.utils, "common_upscale", resize)
+    monkeypatch.setattr(image_helpers, "resize_nchw", resize)
     utils_nodes.UC_MiniMaxH3RefVid.execute(video, megapixels=0.01, duration_seconds=2)
     assert sum(size for size, _, _ in resizes) == len(frames)
     assert all(dtype == torch.float32 and device == "cpu" for _, dtype, device in resizes)
@@ -990,7 +990,7 @@ def test_h3_streamed_decode_matches_core(tmp_path, monkeypatch, codec, tracks, t
     frames = baseline.images
     ratio = min(cache.ASPECT_RATIOS.values(), key=lambda value: abs(frames.shape[2] / frames.shape[1] - value[0] / value[1]))
     width, height = cache.select_video_resolution(*ratio, 0.01, 32, 32, cache.MAX_RESOLUTION)
-    expected = cache.comfy.utils.common_upscale(frames.movedim(-1, 1), width, height, "bicubic", "center").clamp(0, 1).movedim(1, -1)
+    expected = cache.resize_nchw(frames.movedim(-1, 1), width, height, "bicubic", "center").clamp(0, 1).movedim(1, -1)
     if storage == "png8":
         expected = expected.mul(255).round().div(255)
 
@@ -1295,13 +1295,13 @@ def test_h3_video_segments_bounds_cpu_decode_resize_and_encode_threads(tmp_path,
     monkeypatch.setattr(image_helpers.InputImpl.VideoFromFile, "_get_first_video_stream", spy_stream)
 
     observed_resize_threads = []
-    orig_upscale = image_helpers.comfy.utils.common_upscale
+    orig_upscale = image_helpers.resize_nchw
 
     def spy_upscale(*args, **kwargs):
         observed_resize_threads.append(torch.get_num_threads())
         return orig_upscale(*args, **kwargs)
 
-    monkeypatch.setattr(image_helpers.comfy.utils, "common_upscale", spy_upscale)
+    monkeypatch.setattr(image_helpers, "resize_nchw", spy_upscale)
 
     prev_threads = torch.get_num_threads()
     expected_threads = prev_threads
@@ -1342,5 +1342,11 @@ def test_h3_video_segments_bounds_cpu_decode_resize_and_encode_threads(tmp_path,
         assert len(encoded_streams) == 1
         assert encoded_streams[0].thread_count == image_helpers.H3_MAX_CPU_THREADS
         assert torch.get_num_threads() == expected_threads
+
+        # High-frequency checkerboard downscale must antialias instead of moire/ringing.
+        yy, xx = torch.meshgrid(torch.arange(128), torch.arange(128), indexing="ij")
+        checker = (((xx // 2 + yy // 2) % 2) == 0).float()[None, ..., None].repeat(1, 1, 1, 3)
+        downscaled = image_helpers._resize_h3_batch(checker, 32, 32, "disabled")
+        assert float(downscaled.std()) < 0.15
     finally:
         torch.set_num_threads(prev_threads)
