@@ -1,8 +1,9 @@
 import os
 
 from comfy_api.latest import io
-from ..helpers.helper_functions import join_words_in_text, to_bold_fraktur_style, from_bold_fraktur_style, remove_joiners, unescape_string, repair_and_minify_json
-from ..helpers.text_helpers import TEXT_FILE_DELIMITER_OPTIONS, concatenate_aligned_text_inputs, load_text_file_as_list, normalize_text_file_path
+
+from ..helpers.helper_functions import from_bold_fraktur_style, join_words_in_text, remove_joiners, repair_and_minify_json, to_bold_fraktur_style, unescape_string
+from ..helpers.text_helpers import TEXT_FILE_DELIMITER_OPTIONS, concatenate_aligned_text_inputs, fingerprint_text_directory, load_text_file_as_list, load_text_files_from_directory, normalize_text_file_path, validate_text_directory
 
 
 class UC_BoldFrakturTextStyle(io.ComfyNode):
@@ -157,3 +158,33 @@ class UC_LoadTextFilePath(io.ComfyNode):
         if not os.path.isfile(normalized):
             return f"Invalid file path: {file_path} (resolved to: {normalized})"
         return True
+
+
+class UC_LoadTextDirectory(io.ComfyNode):
+    @classmethod
+    def define_schema(cls) -> io.Schema:
+        return io.Schema(
+            node_id="UC_LoadTextDirectory",
+            display_name="Load Texts (Directory)",
+            category="advanced/text",
+            description="Loads .txt files from a directory in alphabetical order as a list of full file strings.",
+            search_aliases=["load texts directory", "text folder", "import text directory", "batch text loader"],
+            inputs=[
+                io.String.Input("directory_path", multiline=False, placeholder="path/to/text-directory", tooltip="Directory containing .txt files. Files are sorted alphabetically."),
+                io.Int.Input("start_index", default=0, min=0, step=1, tooltip="Zero-based index of the first .txt file to load in sorted order."),
+                io.Int.Input("load_count", default=1, min=1, max=1024, step=1, tooltip="Maximum number of .txt files to load starting from start_index."),
+            ],
+            outputs=[io.String.Output("text_list", display_name="text_list", is_output_list=True, tooltip="List of file contents with one full text entry per loaded .txt file.")],
+        )
+
+    @classmethod
+    def execute(cls, directory_path: str, start_index: int = 0, load_count: int = 1) -> io.NodeOutput:
+        return io.NodeOutput(load_text_files_from_directory(directory_path, start_index=start_index, load_count=load_count))
+
+    @classmethod
+    def fingerprint_inputs(cls, directory_path: str, start_index: int = 0, load_count: int = 1):
+        return fingerprint_text_directory(directory_path, start_index=start_index, load_count=load_count)
+
+    @classmethod
+    def validate_inputs(cls, directory_path: str, start_index: int = 0, load_count: int = 1):
+        return validate_text_directory(directory_path, start_index=start_index, load_count=load_count)

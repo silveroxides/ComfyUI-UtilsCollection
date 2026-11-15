@@ -245,6 +245,7 @@ class SamplingUtils(ComfyExtension):
                 UC_TextConcatenateListsAutogrow,
                 UC_Newline,
                 UC_LoadTextFilePath,
+                UC_LoadTextDirectory,
                 AdjustedResolutionParameters,
                 ResolutionSelectorExtended,
                 ImageScaleAndResolutionPicker,

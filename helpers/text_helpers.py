@@ -3,7 +3,6 @@ import os
 import re
 from typing import Any, Union
 
-
 H3_PROMPT_CHANNELS = ("visual", "speech", "sounds", "music")
 _H3_TIME = re.compile(r"(?:(\d+):)?(\d+)(?:\.(\d{1,3}))?")
 
@@ -14,16 +13,9 @@ def default_h3_prompt_state() -> dict:
         "precision": 2,
         "active_tab": "subjects",
         "definitions": [],
-        "summary": {
-            "task_types": ["reference generation"],
-            "text": "",
-        },
+        "summary": {"task_types": ["reference generation"], "text": ""},
         "retention": [],
-        "detailed": {
-            "has_timeline": True,
-            "continuous_text": "",
-            "segment_duration": 2.333,
-        },
+        "detailed": {"has_timeline": True, "continuous_text": "", "segment_duration": 2.333},
         "segments": [],
         "overall_soundscape": "",
         "non_diegetic_music": "N/A",
@@ -270,23 +262,7 @@ def compile_h3_prompt(serialized: str) -> str:
 
 
 def default_h3_base_prompt_state() -> dict[str, Any]:
-    return {
-        "version": 1,
-        "task": "T2VA",
-        "duration": 5.0,
-        "final_shot": 1,
-        "auto_final_shot": True,
-        "precision": 2,
-        "active_tab": "task",
-        "description": {
-            "mode": "timeline",
-            "continuous_text": "",
-            "segment_duration": 2.333,
-        },
-        "segments": [],
-        "overall_soundscape": "",
-        "non_diegetic_music": "N/A",
-    }
+    return {"version": 1, "task": "T2VA", "duration": 5.0, "final_shot": 1, "auto_final_shot": True, "precision": 2, "active_tab": "task", "description": {"mode": "timeline", "continuous_text": "", "segment_duration": 2.333}, "segments": [], "overall_soundscape": "", "non_diegetic_music": "N/A"}
 
 
 def compile_h3_base_prompt(prompt_state: Union[str, dict[str, Any]]) -> str:
@@ -338,16 +314,9 @@ def compile_h3_base_prompt(prompt_state: Union[str, dict[str, Any]]) -> str:
     if task == "I2VA":
         instruction = "For the target video, at 0.00 seconds into the target video, <Picture 1> (from [Shot 1]) is fully referenced."
     elif task == "FL2VA":
-        instruction = (
-            f"How the reference pictures align with the target video — "
-            f"Picture 1 (from Shot 1) aligns with the 0.00-second mark of the target video; "
-            f"Picture 2 (from Shot {final_shot}) aligns with the {dur_str}-second mark of the target video."
-        )
+        instruction = f"How the reference pictures align with the target video — Picture 1 (from Shot 1) aligns with the 0.00-second mark of the target video; Picture 2 (from Shot {final_shot}) aligns with the {dur_str}-second mark of the target video."
     elif task == "L2VA":
-        instruction = (
-            f"How the reference pictures align with the target video — "
-            f"<Picture 1> (from [Shot {final_shot}]) aligns with the {dur_str}-second mark of the target video."
-        )
+        instruction = f"How the reference pictures align with the target video — <Picture 1> (from [Shot {final_shot}]) aligns with the {dur_str}-second mark of the target video."
 
     blocks: list[str] = []
 
@@ -422,47 +391,20 @@ def compile_h3_base_prompt(prompt_state: Union[str, dict[str, Any]]) -> str:
     return "\n\n".join(parts)
 
 
-def concatenate_aligned_text_inputs(
-    text_inputs: dict[str, list[Any]] | None,
-    delimiter_values: list[Any] | None,
-) -> list[str]:
-    ordered_inputs = [
-        values
-        for _, values in sorted(
-            (text_inputs or {}).items(),
-            key=lambda item: int(item[0].removeprefix("text_")),
-        )
-    ]
+def concatenate_aligned_text_inputs(text_inputs: dict[str, list[Any]] | None, delimiter_values: list[Any] | None) -> list[str]:
+    ordered_inputs = [values for _, values in sorted((text_inputs or {}).items(), key=lambda item: int(item[0].removeprefix("text_")))]
     output_count = max((len(values) for values in ordered_inputs), default=1)
     delimiters = delimiter_values or [""]
 
     outputs = []
     for index in range(output_count):
         delimiter = delimiters[min(index, len(delimiters) - 1)]
-        parts = [
-            values[min(index, len(values) - 1)] if values else ""
-            for values in ordered_inputs
-        ]
+        parts = [values[min(index, len(values) - 1)] if values else "" for values in ordered_inputs]
         outputs.append(str(delimiter).join(str(value) for value in parts))
     return outputs
 
 
-TEXT_FILE_DELIMITER_OPTIONS = [
-    "Newline [\n] or [\r\n]",
-    'Triple Quote ["""]',
-    "Triple Equals [===]",
-    "Triple Dash [---]",
-    "Period [.]",
-    "Comma [,]",
-    "Colon [:]",
-    "Semicolon [;]",
-    "Space [ ]",
-    "Tab [\t]",
-    "Pipe [|]",
-    "Double Newline [\n\n] (Paragraphs)",
-    "None (Single Entry)",
-    "Custom",
-]
+TEXT_FILE_DELIMITER_OPTIONS = ["Newline [\n] or [\r\n]", 'Triple Quote ["""]', "Triple Equals [===]", "Triple Dash [---]", "Period [.]", "Comma [,]", "Colon [:]", "Semicolon [;]", "Space [ ]", "Tab [\t]", "Pipe [|]", "Double Newline [\n\n] (Paragraphs)", "None (Single Entry)", "Custom"]
 
 TEXT_FILE_DELIMITER_MAP = {
     "Newline [\n] or [\r\n]": r"\r?\n",
@@ -508,13 +450,7 @@ def read_arbitrary_text_file(file_path: str) -> str:
         return raw_bytes.decode("utf-8", errors="replace")
 
 
-def split_text_content(
-    content: str,
-    delimiter: str,
-    custom_delimiter: str = "",
-    trim_entries: bool = True,
-    skip_empty: bool = True,
-) -> list[str]:
+def split_text_content(content: str, delimiter: str, custom_delimiter: str = "", trim_entries: bool = True, skip_empty: bool = True) -> list[str]:
     if delimiter == "Newline [\n] or [\r\n]":
         parts = re.split(r"\r?\n", content)
     elif delimiter == "Double Newline [\n\n] (Paragraphs)":
@@ -539,26 +475,70 @@ def split_text_content(
     return parts
 
 
-def load_text_file_as_list(
-    file_path: str,
-    delimiter: str = "Newline [\n] or [\r\n]",
-    custom_delimiter: str = "",
-    trim_entries: bool = True,
-    skip_empty: bool = True,
-) -> list[str]:
+def load_text_file_as_list(file_path: str, delimiter: str = "Newline [\n] or [\r\n]", custom_delimiter: str = "", trim_entries: bool = True, skip_empty: bool = True) -> list[str]:
     normalized = normalize_text_file_path(file_path)
     if not normalized or not os.path.isfile(normalized):
-        raise ValueError(
-            f"Invalid file path: {file_path} (resolved to: {normalized})"
-        )
+        raise ValueError(f"Invalid file path: {file_path} (resolved to: {normalized})")
     content = read_arbitrary_text_file(normalized)
-    return split_text_content(
-        content,
-        delimiter=delimiter,
-        custom_delimiter=custom_delimiter,
-        trim_entries=trim_entries,
-        skip_empty=skip_empty,
-    )
+    return split_text_content(content, delimiter=delimiter, custom_delimiter=custom_delimiter, trim_entries=trim_entries, skip_empty=skip_empty)
+
+
+TEXT_FILE_EXTENSIONS = {".txt"}
+
+
+def list_text_files(directory: str, extensions: set[str] | None = None) -> list[str]:
+    allowed = extensions if extensions is not None else TEXT_FILE_EXTENSIONS
+    return sorted(os.path.join(directory, name) for name in os.listdir(directory) if os.path.isfile(os.path.join(directory, name)) and os.path.splitext(name)[1].lower() in allowed)
+
+
+def load_text_files_from_directory(directory_path: str, start_index: int = 0, load_count: int = 1) -> list[str]:
+    normalized = normalize_text_file_path(directory_path)
+    if not normalized or not os.path.isdir(normalized):
+        raise ValueError(f"Invalid text directory: {directory_path}")
+    start = int(start_index)
+    count = int(load_count)
+    if start < 0 or count < 1:
+        raise ValueError("Text directory start_index must be >= 0 and load_count must be >= 1.")
+    end = start + count
+    selected = list_text_files(normalized)[start:end]
+    if not selected:
+        raise ValueError(f"No .txt files found in range [{start}:{end}] in directory: {directory_path}")
+    return [read_arbitrary_text_file(path) for path in selected]
+
+
+def fingerprint_text_directory(directory_path: str, start_index: int = 0, load_count: int = 1) -> str:
+    import hashlib
+
+    normalized = normalize_text_file_path(directory_path)
+    if not normalized or not os.path.isdir(normalized):
+        return ""
+    start = int(start_index)
+    count = int(load_count)
+    if start < 0 or count < 1:
+        return ""
+    selected = list_text_files(normalized)[start : start + count]
+    digest = hashlib.sha256()
+    for path in selected:
+        stat = os.stat(path)
+        digest.update(path.encode("utf-8"))
+        digest.update(str(stat.st_mtime_ns).encode("ascii"))
+        digest.update(str(stat.st_size).encode("ascii"))
+    return digest.hexdigest()
+
+
+def validate_text_directory(directory_path: str, start_index: int = 0, load_count: int = 1):
+    normalized = normalize_text_file_path(directory_path)
+    if not normalized:
+        return "Directory path cannot be empty"
+    if not os.path.isdir(normalized):
+        return f"Invalid text directory: {directory_path}"
+    start = int(start_index)
+    count = int(load_count)
+    if start < 0 or count < 1:
+        return "Text directory start_index must be >= 0 and load_count must be >= 1"
+    if not list_text_files(normalized)[start : start + count]:
+        return f"No .txt files found in requested range: {directory_path}"
+    return True
 
 
 _MOSS_IMAGE_RESPONSE_SCHEMA: dict[str, Any] = {
@@ -567,20 +547,9 @@ _MOSS_IMAGE_RESPONSE_SCHEMA: dict[str, Any] = {
         "summary": {
             "type": "object",
             "properties": {
-                "meta": {
-                    "type": "array",
-                    "description": "1 to 3 concise medium or genre tags describing the image format or genre.",
-                    "items": {"type": "string"},
-                },
-                "canvas": {
-                    "type": "string",
-                    "enum": ["single", "multi_panel", "collage"],
-                    "description": "Canvas layout type: single, multi_panel, or collage.",
-                },
-                "caption": {
-                    "type": "string",
-                    "description": "Whole-scene description combining subject overview, camera viewpoint, background environment, lighting, medium, and aesthetics.",
-                },
+                "meta": {"type": "array", "description": "1 to 3 concise medium or genre tags describing the image format or genre.", "items": {"type": "string"}},
+                "canvas": {"type": "string", "enum": ["single", "multi_panel", "collage"], "description": "Canvas layout type: single, multi_panel, or collage."},
+                "caption": {"type": "string", "description": "Whole-scene description combining subject overview, camera viewpoint, background environment, lighting, medium, and aesthetics."},
             },
             "required": ["meta", "canvas", "caption"],
         },
@@ -590,41 +559,17 @@ _MOSS_IMAGE_RESPONSE_SCHEMA: dict[str, Any] = {
             "items": {
                 "type": "object",
                 "properties": {
-                    "label": {
-                        "type": "string",
-                        "enum": ["character", "object", "text"],
-                        "description": "Item category: character for subjects/creatures, object for props/clothing/body-part sub-boxes, text for rendered text.",
-                    },
-                    "caption": {
-                        "type": "string",
-                        "description": "Detailed visual description of this item (30 to 60 words).",
-                    },
-                    "text": {
-                        "type": "string",
-                        "description": "Verbatim rendered characters when label is text.",
-                    },
-                    "palette": {
-                        "type": "array",
-                        "description": "2 to 5 dominant colors of this item as uppercase #RRGGBB hex codes.",
-                        "items": {"type": "string"},
-                    },
-                    "bbox": {
-                        "type": "array",
-                        "description": "Four integers [ymin, xmin, ymax, xmax] on a 0..1000 normalized top-left grid.",
-                        "items": {"type": "integer", "minimum": 0, "maximum": 1000},
-                    },
+                    "label": {"type": "string", "enum": ["character", "object", "text"], "description": "Item category: character for subjects/creatures, object for props/clothing/body-part sub-boxes, text for rendered text."},
+                    "caption": {"type": "string", "description": "Detailed visual description of this item (30 to 60 words)."},
+                    "text": {"type": "string", "description": "Verbatim rendered characters when label is text."},
+                    "palette": {"type": "array", "description": "2 to 5 dominant colors of this item as uppercase #RRGGBB hex codes.", "items": {"type": "string"}},
+                    "bbox": {"type": "array", "description": "Four integers [ymin, xmin, ymax, xmax] on a 0..1000 normalized top-left grid.", "items": {"type": "integer", "minimum": 0, "maximum": 1000}},
                 },
                 "required": ["label", "caption", "palette", "bbox"],
             },
         },
-        "bbox_coord_space": {
-            "type": "string",
-            "enum": ["abs_centralized"],
-        },
-        "bbox_format": {
-            "type": "string",
-            "enum": ["yxyx"],
-        },
+        "bbox_coord_space": {"type": "string", "enum": ["abs_centralized"]},
+        "bbox_format": {"type": "string", "enum": ["yxyx"]},
     },
     "required": ["summary", "items", "bbox_coord_space", "bbox_format"],
 }
@@ -635,20 +580,9 @@ _MOSS_IMAGE_SHORT_RESPONSE_SCHEMA: dict[str, Any] = {
         "summary": {
             "type": "object",
             "properties": {
-                "meta": {
-                    "type": "array",
-                    "description": "1 to 3 concise medium or genre tags describing the image format or genre.",
-                    "items": {"type": "string"},
-                },
-                "canvas": {
-                    "type": "string",
-                    "enum": ["single", "multi_panel", "collage"],
-                    "description": "Canvas layout type: single, multi_panel, or collage.",
-                },
-                "caption": {
-                    "type": "string",
-                    "description": "Concise whole-scene description combining subject overview, camera viewpoint, background environment, lighting, medium, and aesthetics.",
-                },
+                "meta": {"type": "array", "description": "1 to 3 concise medium or genre tags describing the image format or genre.", "items": {"type": "string"}},
+                "canvas": {"type": "string", "enum": ["single", "multi_panel", "collage"], "description": "Canvas layout type: single, multi_panel, or collage."},
+                "caption": {"type": "string", "description": "Concise whole-scene description combining subject overview, camera viewpoint, background environment, lighting, medium, and aesthetics."},
             },
             "required": ["meta", "canvas", "caption"],
         },
@@ -658,35 +592,16 @@ _MOSS_IMAGE_SHORT_RESPONSE_SCHEMA: dict[str, Any] = {
             "items": {
                 "type": "object",
                 "properties": {
-                    "label": {
-                        "type": "string",
-                        "enum": ["character", "object", "text"],
-                    },
-                    "caption": {
-                        "type": "string",
-                        "description": "Detailed visual description of this item (30 to 60 words).",
-                    },
-                    "text": {
-                        "type": "string",
-                        "description": "Verbatim rendered characters when label is text.",
-                    },
-                    "bbox": {
-                        "type": "array",
-                        "description": "Four integers [ymin, xmin, ymax, xmax] on a 0..1000 normalized top-left grid.",
-                        "items": {"type": "integer", "minimum": 0, "maximum": 1000},
-                    },
+                    "label": {"type": "string", "enum": ["character", "object", "text"]},
+                    "caption": {"type": "string", "description": "Detailed visual description of this item (30 to 60 words)."},
+                    "text": {"type": "string", "description": "Verbatim rendered characters when label is text."},
+                    "bbox": {"type": "array", "description": "Four integers [ymin, xmin, ymax, xmax] on a 0..1000 normalized top-left grid.", "items": {"type": "integer", "minimum": 0, "maximum": 1000}},
                 },
                 "required": ["label", "caption", "bbox"],
             },
         },
-        "bbox_coord_space": {
-            "type": "string",
-            "enum": ["abs_centralized"],
-        },
-        "bbox_format": {
-            "type": "string",
-            "enum": ["yxyx"],
-        },
+        "bbox_coord_space": {"type": "string", "enum": ["abs_centralized"]},
+        "bbox_format": {"type": "string", "enum": ["yxyx"]},
     },
     "required": ["summary", "items", "bbox_coord_space", "bbox_format"],
 }
@@ -697,20 +612,9 @@ _MOSS_IMAGE_LAYOUT_RESPONSE_SCHEMA: dict[str, Any] = {
         "summary": {
             "type": "object",
             "properties": {
-                "meta": {
-                    "type": "array",
-                    "description": "1 to 3 concise medium or genre tags describing the image format or genre.",
-                    "items": {"type": "string"},
-                },
-                "canvas": {
-                    "type": "string",
-                    "enum": ["single", "multi_panel", "collage"],
-                    "description": "Canvas layout type: single, multi_panel, or collage.",
-                },
-                "caption": {
-                    "type": "string",
-                    "description": "Complete natural language scene description combining viewpoint, spatial arrangement, primary subjects, actions, background environment, lighting, medium, and atmosphere.",
-                },
+                "meta": {"type": "array", "description": "1 to 3 concise medium or genre tags describing the image format or genre.", "items": {"type": "string"}},
+                "canvas": {"type": "string", "enum": ["single", "multi_panel", "collage"], "description": "Canvas layout type: single, multi_panel, or collage."},
+                "caption": {"type": "string", "description": "Complete natural language scene description combining viewpoint, spatial arrangement, primary subjects, actions, background environment, lighting, medium, and atmosphere."},
             },
             "required": ["meta", "canvas", "caption"],
         },
@@ -720,36 +624,16 @@ _MOSS_IMAGE_LAYOUT_RESPONSE_SCHEMA: dict[str, Any] = {
             "items": {
                 "type": "object",
                 "properties": {
-                    "label": {
-                        "type": "string",
-                        "enum": ["character", "object", "text"],
-                        "description": "Item category: character for human, humanoid, anthropomorphic, feral, or creature subjects; object for distinct physical objects or props; text for visible rendered text regions.",
-                    },
-                    "caption": {
-                        "type": "string",
-                        "description": "Detailed natural language visual description of this coherent item's identity, species, gender, anatomy, pose, action, interactions, colors, and surface traits in the resulting scene, or typography and surface treatment for text items.",
-                    },
-                    "text": {
-                        "type": "string",
-                        "description": "Exact verbatim visible characters when label is text.",
-                    },
-                    "bbox": {
-                        "type": "array",
-                        "description": "Four integers [ymin, xmin, ymax, xmax] on a 0 to 1000 top left grid measured strictly from the first input image's canvas coordinates.",
-                        "items": {"type": "integer", "minimum": 0, "maximum": 1000},
-                    },
+                    "label": {"type": "string", "enum": ["character", "object", "text"], "description": "Item category: character for human, humanoid, anthropomorphic, feral, or creature subjects; object for distinct physical objects or props; text for visible rendered text regions."},
+                    "caption": {"type": "string", "description": "Detailed natural language visual description of this coherent item's identity, species, gender, anatomy, pose, action, interactions, colors, and surface traits in the resulting scene, or typography and surface treatment for text items."},
+                    "text": {"type": "string", "description": "Exact verbatim visible characters when label is text."},
+                    "bbox": {"type": "array", "description": "Four integers [ymin, xmin, ymax, xmax] on a 0 to 1000 top left grid measured strictly from the first input image's canvas coordinates.", "items": {"type": "integer", "minimum": 0, "maximum": 1000}},
                 },
                 "required": ["label", "caption", "bbox"],
             },
         },
-        "bbox_coord_space": {
-            "type": "string",
-            "enum": ["abs_centralized"],
-        },
-        "bbox_format": {
-            "type": "string",
-            "enum": ["yxyx"],
-        },
+        "bbox_coord_space": {"type": "string", "enum": ["abs_centralized"]},
+        "bbox_format": {"type": "string", "enum": ["yxyx"]},
     },
     "required": ["summary", "items", "bbox_coord_space", "bbox_format"],
 }
@@ -760,16 +644,7 @@ _IDEOGRAM_4_RESPONSE_SCHEMA: dict[str, Any] = {
         "high_level_description": {"type": "string"},
         "style_description": {
             "type": "object",
-            "properties": {
-                "aesthetics": {"type": "string"},
-                "lighting": {"type": "string"},
-                "photo": {"type": "string"},
-                "medium": {"type": "string"},
-                "color_palette": {
-                    "type": "array",
-                    "items": {"type": "string"},
-                },
-            },
+            "properties": {"aesthetics": {"type": "string"}, "lighting": {"type": "string"}, "photo": {"type": "string"}, "medium": {"type": "string"}, "color_palette": {"type": "array", "items": {"type": "string"}}},
             "required": ["aesthetics", "lighting", "photo", "medium", "color_palette"],
         },
         "compositional_deconstruction": {
@@ -780,16 +655,7 @@ _IDEOGRAM_4_RESPONSE_SCHEMA: dict[str, Any] = {
                     "type": "array",
                     "items": {
                         "type": "object",
-                        "properties": {
-                            "type": {"type": "string", "enum": ["obj", "text"]},
-                            "bbox": {"type": "array", "items": {"type": "integer"}},
-                            "desc": {"type": "string"},
-                            "text": {"type": "string"},
-                            "color_palette": {
-                                "type": "array",
-                                "items": {"type": "string"},
-                            },
-                        },
+                        "properties": {"type": {"type": "string", "enum": ["obj", "text"]}, "bbox": {"type": "array", "items": {"type": "integer"}}, "desc": {"type": "string"}, "text": {"type": "string"}, "color_palette": {"type": "array", "items": {"type": "string"}}},
                         "required": ["type", "bbox", "desc", "color_palette"],
                     },
                 },
@@ -809,19 +675,7 @@ _IDEOGRAM_4_SHORT_RESPONSE_SCHEMA: dict[str, Any] = {
             "type": "object",
             "properties": {
                 "background": {"type": "string"},
-                "elements": {
-                    "type": "array",
-                    "items": {
-                        "type": "object",
-                        "properties": {
-                            "type": {"type": "string", "enum": ["obj", "text"]},
-                            "bbox": {"type": "array", "items": {"type": "integer"}},
-                            "text": {"type": "string"},
-                            "desc": {"type": "string"},
-                        },
-                        "required": ["type", "bbox", "desc"],
-                    },
-                },
+                "elements": {"type": "array", "items": {"type": "object", "properties": {"type": {"type": "string", "enum": ["obj", "text"]}, "bbox": {"type": "array", "items": {"type": "integer"}}, "text": {"type": "string"}, "desc": {"type": "string"}}, "required": ["type", "bbox", "desc"]}},
             },
             "required": ["background", "elements"],
         },
@@ -834,34 +688,12 @@ _IDEOGRAM_4_STYLE_RESPONSE_SCHEMA: dict[str, Any] = {
     "properties": {
         "aspect_ratio": {"type": "string"},
         "high_level_description": {"type": "string"},
-        "style_description": {
-            "type": "object",
-            "properties": {
-                "aesthetics": {"type": "string"},
-                "lighting": {"type": "string"},
-                "photo": {"type": "string"},
-                "medium": {"type": "string"},
-                "art_style": {"type": "string"},
-            },
-            "required": ["aesthetics", "lighting", "medium"],
-        },
+        "style_description": {"type": "object", "properties": {"aesthetics": {"type": "string"}, "lighting": {"type": "string"}, "photo": {"type": "string"}, "medium": {"type": "string"}, "art_style": {"type": "string"}}, "required": ["aesthetics", "lighting", "medium"]},
         "compositional_deconstruction": {
             "type": "object",
             "properties": {
                 "background": {"type": "string"},
-                "elements": {
-                    "type": "array",
-                    "items": {
-                        "type": "object",
-                        "properties": {
-                            "type": {"type": "string", "enum": ["obj", "text"]},
-                            "bbox": {"type": "array", "items": {"type": "integer"}},
-                            "text": {"type": "string"},
-                            "desc": {"type": "string"},
-                        },
-                        "required": ["type", "bbox", "desc"],
-                    },
-                },
+                "elements": {"type": "array", "items": {"type": "object", "properties": {"type": {"type": "string", "enum": ["obj", "text"]}, "bbox": {"type": "array", "items": {"type": "integer"}}, "text": {"type": "string"}, "desc": {"type": "string"}}, "required": ["type", "bbox", "desc"]}},
             },
             "required": ["background", "elements"],
         },
@@ -876,17 +708,7 @@ _IDEOGRAM_4_COLOR_RESPONSE_SCHEMA: dict[str, Any] = {
         "high_level_description": {"type": "string"},
         "style_description": {
             "type": "object",
-            "properties": {
-                "aesthetics": {"type": "string"},
-                "lighting": {"type": "string"},
-                "photo": {"type": "string"},
-                "medium": {"type": "string"},
-                "art_style": {"type": "string"},
-                "color_palette": {
-                    "type": "array",
-                    "items": {"type": "string"},
-                },
-            },
+            "properties": {"aesthetics": {"type": "string"}, "lighting": {"type": "string"}, "photo": {"type": "string"}, "medium": {"type": "string"}, "art_style": {"type": "string"}, "color_palette": {"type": "array", "items": {"type": "string"}}},
             "required": ["aesthetics", "lighting", "medium"],
         },
         "compositional_deconstruction": {
@@ -897,16 +719,7 @@ _IDEOGRAM_4_COLOR_RESPONSE_SCHEMA: dict[str, Any] = {
                     "type": "array",
                     "items": {
                         "type": "object",
-                        "properties": {
-                            "type": {"type": "string", "enum": ["obj", "text"]},
-                            "bbox": {"type": "array", "items": {"type": "integer"}},
-                            "text": {"type": "string"},
-                            "desc": {"type": "string"},
-                            "color_palette": {
-                                "type": "array",
-                                "items": {"type": "string"},
-                            },
-                        },
+                        "properties": {"type": {"type": "string", "enum": ["obj", "text"]}, "bbox": {"type": "array", "items": {"type": "integer"}}, "text": {"type": "string"}, "desc": {"type": "string"}, "color_palette": {"type": "array", "items": {"type": "string"}}},
                         "required": ["type", "bbox", "desc"],
                     },
                 },

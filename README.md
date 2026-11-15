@@ -382,6 +382,7 @@ The left sidebar stays visible and shows the selected foreground's context actio
 - `UC_TextConcatenateListsAutogrow`
 - `UC_Newline`
 - `UC_LoadTextFilePath`
+- `UC_LoadTextDirectory`
 
 ### MiniMax H3 PDD Acc models
 
