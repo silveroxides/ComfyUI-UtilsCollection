@@ -3,7 +3,7 @@ import logging
 import math
 import numbers
 import re
-from contextlib import ExitStack, contextmanager, nullcontext
+from contextlib import ExitStack, contextmanager
 from typing import Any
 
 import torch
@@ -18,12 +18,7 @@ from comfy import model_management
 from comfy.text_encoders.minimax import process_video_block
 from comfy.text_encoders.qwen_vl import qwen2vl_mrope_position_ids
 
-from .encoder_helpers import (
-    fuse_deepstack_layers,
-    fuse_visual_token_sources,
-    prepare_vlm_image,
-)
-
+from .encoder_helpers import fuse_deepstack_layers, fuse_visual_token_sources, prepare_vlm_image
 
 QWEN_IMAGE_PAD_ID = 151655
 QWEN_VIDEO_PAD_ID = 151656
@@ -32,31 +27,22 @@ QWEN35_VIDEO_PAD_ID = 248057
 QWEN_IMAGE_PAD_IDS = frozenset({QWEN_IMAGE_PAD_ID, QWEN35_IMAGE_PAD_ID})
 QWEN_VIDEO_PAD_IDS = frozenset({QWEN_VIDEO_PAD_ID, QWEN35_VIDEO_PAD_ID})
 QWEN_VIDEO_TOKEN = "<|vision_start|><|video_pad|><|vision_end|>"
+QWEN_MAX_VIDEO_FRAMES = 768
 
 
 def _positive_fps(value, name: str) -> float:
-    if (
-        isinstance(value, bool)
-        or not isinstance(value, numbers.Real)
-        or not math.isfinite(float(value))
-        or value <= 0
-    ):
+    if isinstance(value, bool) or not isinstance(value, numbers.Real) or not math.isfinite(float(value)) or value <= 0:
         raise ValueError(f"Qwen3-VL {name} must be a finite value greater than zero.")
     return float(value)
 
 
-def prepare_qwen3vl_video_frames(
-    video,
-    resolution,
-    video_fps,
-    sample_fps,
-) -> tuple[torch.Tensor, list[int]]:
+def prepare_qwen3vl_video_frames(video, resolution, video_fps, sample_fps, max_frames: int = QWEN_MAX_VIDEO_FRAMES) -> tuple[torch.Tensor, list[int]]:
     sources = list(video) if isinstance(video, (list, tuple)) else [video]
     source_frames = []
     for source in sources:
         if not torch.is_tensor(source) or source.ndim != 4 or source.shape[-1] != 3:
             raise ValueError("Qwen3-VL video requires BHWC RGB IMAGE tensors.")
-        source_frames.extend(source[index:index + 1] for index in range(source.shape[0]))
+        source_frames.extend(source[index : index + 1] for index in range(source.shape[0]))
     frame_count = len(source_frames)
     if frame_count < 1:
         raise ValueError("Qwen3-VL video requires at least one source frame.")
@@ -71,38 +57,26 @@ def prepare_qwen3vl_video_frames(
         if not indices or source_index != indices[-1]:
             indices.append(source_index)
         sample_index += 1
+    if max_frames and len(indices) > max_frames:
+        logging.warning("[UC_TextGenerate] Sampled %d video frames at %.2f fps exceeds the %d-frame Qwen video limit; uniformly subsampling to %d frames.", len(indices), target_fps, max_frames, max_frames)
+        indices = [indices[round(i * (len(indices) - 1) / (max_frames - 1))] for i in range(max_frames)]
     prepared = [prepare_vlm_image(source_frames[index], resolution) for index in indices]
     if len({tuple(frame.shape[1:3]) for frame in prepared}) != 1:
         raise ValueError("Qwen3-VL video frames must resolve to one common spatial size.")
     frames = torch.cat(prepared, dim=0)
-    motion_delta = (
-        float((frames[1:] - frames[:-1]).abs().mean()) if frames.shape[0] > 1 else 0.0
-    )
-    logging.info(
-        "UC_TextGenerate Qwen3-VL video: source_frames=%d sampled_frames=%d temporal_blocks=%d source_fps=%.4f sample_fps=%.4f first_index=%d last_index=%d motion_delta=%.8f",
-        frame_count,
-        len(indices),
-        (len(indices) + 1) // 2,
-        source_fps,
-        target_fps,
-        indices[0],
-        indices[-1],
-        motion_delta,
-    )
+    motion_delta = float((frames[1:] - frames[:-1]).abs().mean()) if frames.shape[0] > 1 else 0.0
+    logging.info("UC_TextGenerate Qwen3-VL video: source_frames=%d sampled_frames=%d temporal_blocks=%d source_fps=%.4f sample_fps=%.4f first_index=%d last_index=%d motion_delta=%.8f", frame_count, len(indices), (len(indices) + 1) // 2, source_fps, target_fps, indices[0], indices[-1], motion_delta)
     if len(indices) % 2 == 1:
         frames = torch.cat([frames, frames[-1:]], dim=0)
         indices.append(indices[-1])
     return frames, indices
 
 
-def qwen3vl_video_prompt(indices: list[int], video_fps) -> str:
+def qwen3vl_video_prompt(indices: list[int], video_fps, video_number: int = 1) -> str:
     source_fps = _positive_fps(video_fps, "video_fps")
     if not indices or len(indices) % 2 != 0:
         raise ValueError("Qwen3-VL video sampling must produce paired frame indices.")
-    return "Video 1: " + "".join(
-        f"<{((indices[index] + indices[index + 1]) / 2) / source_fps:.1f} seconds>{QWEN_VIDEO_TOKEN}"
-        for index in range(0, len(indices), 2)
-    )
+    return f"Video {int(video_number)}: " + "".join(f"<{((indices[index] + indices[index + 1]) / 2) / source_fps:.1f} seconds>{QWEN_VIDEO_TOKEN}" for index in range(0, len(indices), 2))
 
 
 def _qwen_clip_model(clip):
@@ -111,9 +85,7 @@ def _qwen_clip_model(clip):
         return None
     for name in (getattr(stage, "clip", None), getattr(stage, "clip_name", None)):
         candidate = getattr(stage, name, None) if isinstance(name, str) else None
-        if candidate is not None and hasattr(candidate, "process_tokens") and hasattr(
-            candidate, "transformer"
-        ):
+        if candidate is not None and hasattr(candidate, "process_tokens") and hasattr(candidate, "transformer"):
             return candidate
     if hasattr(stage, "process_tokens") and hasattr(stage, "transformer"):
         return stage
@@ -148,9 +120,7 @@ def _load_qwen_generation_model(clip):
         model.reset_clip_options()
     if hasattr(clip, "load_model"):
         clip.load_model()
-    device = getattr(getattr(clip, "patcher", None), "load_device", None) or getattr(
-        model, "execution_device", None
-    )
+    device = getattr(getattr(clip, "patcher", None), "load_device", None) or getattr(model, "execution_device", None)
     if device is None:
         device = model.transformer.get_input_embeddings().weight.device
     if hasattr(model, "set_clip_options"):
@@ -163,27 +133,15 @@ def _qwen_execution_context(clip, device):
     if hasattr(model_management, "cuda_device_context"):
         stack.enter_context(model_management.cuda_device_context(device))
     stage = getattr(clip, "cond_stage_model", None)
-    if (
-        stage is not None
-        and hasattr(stage, "modules")
-        and getattr(device, "type", None) == "cuda"
-        and hasattr(comfy.ops, "use_quantized_matmul")
-    ):
+    if stage is not None and hasattr(stage, "modules") and getattr(device, "type", None) == "cuda" and hasattr(comfy.ops, "use_quantized_matmul"):
         stack.enter_context(comfy.ops.use_quantized_matmul(stage, device))
     return stack
 
 
 def _preprocess_qwen3vl_image(model, device, image):
-    embedding, extra = model.transformer.preprocess_embed(
-        {"type": "image", "data": image, "original_type": "image"}, device=device
-    )
+    embedding, extra = model.transformer.preprocess_embed({"type": "image", "data": image, "original_type": "image"}, device=device)
     if hasattr(model.transformer, "build_image_inputs"):
-        if (
-            embedding is None
-            or not isinstance(extra, dict)
-            or extra.get("grid") is None
-            or not extra.get("deepstack")
-        ):
+        if embedding is None or not isinstance(extra, dict) or extra.get("grid") is None or not extra.get("deepstack"):
             raise ValueError("Qwen3-VL image preprocessing did not return grid and DeepStack metadata.")
         return {"kind": "image", "embedding": embedding, "extra": extra}
     grid = extra.get("grid") if isinstance(extra, dict) else extra
@@ -194,34 +152,18 @@ def _preprocess_qwen3vl_image(model, device, image):
 
 def _preprocess_qwen3vl_video_pair(model, device, frames):
     flatten, grid = process_video_block(frames)
-    visual_out = model.transformer.visual(
-        flatten.to(device, dtype=torch.float32), grid
-    )
+    visual_out = model.transformer.visual(flatten.to(device, dtype=torch.float32), grid)
     if hasattr(model.transformer, "build_image_inputs"):
         if not isinstance(visual_out, tuple) or len(visual_out) != 2:
-            raise ValueError(
-                "Qwen3-VL video preprocessing did not return temporal and DeepStack embeddings."
-            )
+            raise ValueError("Qwen3-VL video preprocessing did not return temporal and DeepStack embeddings.")
         embedding, deepstack = visual_out
         if embedding is None or not deepstack:
-            raise ValueError(
-                "Qwen3-VL video preprocessing did not return temporal and DeepStack embeddings."
-            )
-        return {
-            "kind": "video",
-            "embedding": embedding,
-            "extra": {"grid": grid, "deepstack": deepstack},
-        }
+            raise ValueError("Qwen3-VL video preprocessing did not return temporal and DeepStack embeddings.")
+        return {"kind": "video", "embedding": embedding, "extra": {"grid": grid, "deepstack": deepstack}}
     embedding = visual_out[0] if isinstance(visual_out, tuple) else visual_out
     if embedding is None:
-        raise ValueError(
-            "Qwen3.5 video preprocessing did not return temporal embeddings."
-        )
-    return {
-        "kind": "video",
-        "embedding": embedding,
-        "extra": {"grid": grid},
-    }
+        raise ValueError("Qwen3.5 video preprocessing did not return temporal embeddings.")
+    return {"kind": "video", "embedding": embedding, "extra": {"grid": grid}}
 
 
 def _fuse_preprocessed_qwen3vl_images(blocks, config, device):
@@ -229,20 +171,13 @@ def _fuse_preprocessed_qwen3vl_images(blocks, config, device):
         raise ValueError("Active visual fusion with video requires at least one image source.")
     shapes = [_visual_grid_shape(block) for block in blocks]
     size = blocks[0]["embedding"].reshape(-1, blocks[0]["embedding"].shape[-1]).shape[0]
-    primary = [
-        block["embedding"].reshape(-1, block["embedding"].shape[-1]).to(device)
-        for block in blocks
-    ]
+    primary = [block["embedding"].reshape(-1, block["embedding"].shape[-1]).to(device) for block in blocks]
     mask_cache = {}
     fused = fuse_visual_token_sources(primary, config, device, mask_cache, size, shapes)
     extra = dict(blocks[0]["extra"])
-    deepstacks = {
-        index: block["extra"].get("deepstack") for index, block in enumerate(blocks)
-    }
+    deepstacks = {index: block["extra"].get("deepstack") for index, block in enumerate(blocks)}
     if all(deepstacks.values()):
-        extra["deepstack"] = fuse_deepstack_layers(
-            deepstacks, config, device, mask_cache, size, shapes
-        )
+        extra["deepstack"] = fuse_deepstack_layers(deepstacks, config, device, mask_cache, size, shapes)
     return {"kind": "image", "embedding": fused, "extra": extra}
 
 
@@ -259,72 +194,36 @@ def _attach_preprocessed_visuals(rows, image_blocks, video_blocks):
         elif isinstance(value, numbers.Integral) and int(value) in QWEN_VIDEO_PAD_IDS and video_queue:
             block = video_queue.pop(0)
         if block is not None:
-            marker = {
-                "type": "embedding",
-                "data": block["embedding"],
-                "_textgen_visual": block,
-            }
+            marker = {"type": "embedding", "data": block["embedding"], "_textgen_visual": block}
             rows[0][index] = marker
             tagged.append(marker)
     if image_queue or video_queue:
-        raise ValueError(
-            "Qwen3-VL prompt did not contain every required image and video placeholder."
-        )
+        raise ValueError("Qwen3-VL prompt did not contain every required image and video placeholder.")
     return tagged
 
 
-def generate_qwen3vl_video(
-    clip,
-    full_prompt,
-    images,
-    video_frames,
-    fusion_config,
-    generation_args,
-    thinking=False,
-):
+def generate_qwen3vl_video(clip, full_prompt, images, video_frames, fusion_config, generation_args, thinking=False):
     model, device = _load_qwen_generation_model(clip)
     has_deepstack = hasattr(model.transformer, "build_image_inputs")
-    if not has_deepstack and (
-        not hasattr(model.transformer, "visual")
-        or not callable(getattr(model.transformer, "preprocess_embed", None))
-    ):
+    if not has_deepstack and (not hasattr(model.transformer, "visual") or not callable(getattr(model.transformer, "preprocess_embed", None))):
         raise ValueError("Video input requires a Core Qwen3-VL or Qwen3.5 model wrapper.")
 
     with _qwen_execution_context(clip, device):
-        image_blocks = [
-            _preprocess_qwen3vl_image(model, device, image) for image in images
-        ]
+        image_blocks = [_preprocess_qwen3vl_image(model, device, image) for image in images]
         if fusion_config is not None:
             if fusion_config.get("save_blended_embeds", False):
-                logging.warning(
-                    "UC_TextGenerate ignores save_blended_embeds in mixed image/video generation."
-                )
-            image_blocks = [
-                _fuse_preprocessed_qwen3vl_images(image_blocks, fusion_config, device)
-            ]
-        video_blocks = [
-            _preprocess_qwen3vl_video_pair(
-                model, device, video_frames[index:index + 2]
-            )
-            for index in range(0, video_frames.shape[0], 2)
-        ]
+                logging.warning("UC_TextGenerate ignores save_blended_embeds in mixed image/video generation.")
+            image_blocks = [_fuse_preprocessed_qwen3vl_images(image_blocks, fusion_config, device)]
+        video_batches = list(video_frames) if isinstance(video_frames, (list, tuple)) else [video_frames]
+        video_blocks = [_preprocess_qwen3vl_video_pair(model, device, batch[index : index + 2]) for batch in video_batches for index in range(0, batch.shape[0], 2)]
 
-        tokens = clip.tokenize(
-            full_prompt, skip_template=True, min_length=1, thinking=thinking
-        )
+        tokens = clip.tokenize(full_prompt, skip_template=True, min_length=1, thinking=thinking)
         rows = _token_rows(tokens)
         tagged = _attach_preprocessed_visuals(rows, image_blocks, video_blocks)
-        other_values = [
-            value
-            for row in rows
-            for value in row
-            if not isinstance(value, numbers.Integral)
-        ]
+        other_values = [value for row in rows for value in row if not isinstance(value, numbers.Integral)]
         embeds, _, _, embeds_info = model.process_tokens(rows, device)
         if len(embeds_info) != len(other_values):
-            raise ValueError(
-                "Qwen3-VL could not preserve the prepared multimodal token layout."
-            )
+            raise ValueError("Qwen3-VL could not preserve the prepared multimodal token layout.")
 
         tagged_ids = {id(marker) for marker in tagged}
         mapped = 0
@@ -337,47 +236,18 @@ def generate_qwen3vl_video(
             info["textgen_source_kind"] = block["kind"]
             mapped += 1
         if mapped != len(tagged):
-            raise ValueError(
-                "Qwen3-VL could not map every prepared visual embedding into the prompt."
-            )
+            raise ValueError("Qwen3-VL could not map every prepared visual embedding into the prompt.")
 
-        logging.info(
-            "UC_TextGenerate Qwen3-VL media blocks: %s",
-            [
-                (
-                    info.get("textgen_source_kind"),
-                    int(info["index"]),
-                    int(info["size"]),
-                )
-                for info in embeds_info
-                if info.get("textgen_source_kind") is not None
-            ],
-        )
+        logging.info("UC_TextGenerate Qwen3-VL media blocks: %s", [(info.get("textgen_source_kind"), int(info["index"]), int(info["size"])) for info in embeds_info if info.get("textgen_source_kind") is not None])
 
         if has_deepstack:
-            position_ids, visual_mask, deepstack = model.transformer.build_image_inputs(
-                embeds, embeds_info
-            )
+            position_ids, visual_mask, deepstack = model.transformer.build_image_inputs(embeds, embeds_info)
             transformer_args = {k: v for k, v in generation_args.items() if k != "mtp"}
-            return model.transformer.generate(
-                embeds,
-                **transformer_args,
-                position_ids=position_ids,
-                visual_pos_masks=visual_mask,
-                deepstack_embeds=deepstack,
-            )
-        position_ids = qwen2vl_mrope_position_ids(
-            embeds_info, embeds.shape[1], embeds.device
-        )
+            return model.transformer.generate(embeds, **transformer_args, position_ids=position_ids, visual_pos_masks=visual_mask, deepstack_embeds=deepstack)
+        position_ids = qwen2vl_mrope_position_ids(embeds_info, embeds.shape[1], embeds.device)
         if position_ids is None:
-            raise ValueError(
-                "Qwen3.5 video generation could not rebuild multimodal MRoPE positions."
-            )
-        return model.transformer.generate(
-            embeds,
-            **generation_args,
-            position_ids=position_ids,
-        )
+            raise ValueError("Qwen3.5 video generation could not rebuild multimodal MRoPE positions.")
+        return model.transformer.generate(embeds, **generation_args, position_ids=position_ids)
 
 
 def _strip_thinking_and_fences(text: str) -> str:
@@ -511,15 +381,7 @@ def _conform_value_to_schema(value: Any, schema: dict[str, Any]) -> Any:
         props = schema.get("properties") if isinstance(schema.get("properties"), dict) else {}
         req = schema.get("required") if isinstance(schema.get("required"), list) else []
         out: dict[str, Any] = {}
-        alias_map = {
-            "caption": ("desc", "description", "summary"),
-            "desc": ("caption", "description"),
-            "label": ("type", "category"),
-            "type": ("label", "category"),
-            "palette": ("color_palette", "colors"),
-            "color_palette": ("palette", "colors"),
-            "bbox": ("box_2d", "box"),
-        }
+        alias_map = {"caption": ("desc", "description", "summary"), "desc": ("caption", "description"), "label": ("type", "category"), "type": ("label", "category"), "palette": ("color_palette", "colors"), "color_palette": ("palette", "colors"), "bbox": ("box_2d", "box")}
         for key, prop_schema in props.items():
             raw_val = source.get(key)
             if raw_val is None and key in alias_map:
@@ -529,12 +391,7 @@ def _conform_value_to_schema(value: Any, schema: dict[str, Any]) -> Any:
                         break
             if raw_val is not None:
                 conformed_val = _conform_value_to_schema(raw_val, prop_schema)
-                if (
-                    key == "text"
-                    and key not in req
-                    and str(out.get("label", source.get("label", "")) or "").strip().lower() not in ("", "text")
-                    and not str(conformed_val or "").strip()
-                ):
+                if key == "text" and key not in req and str(out.get("label", source.get("label", "")) or "").strip().lower() not in ("", "text") and not str(conformed_val or "").strip():
                     continue
                 out[key] = conformed_val
             elif key in req:
@@ -551,18 +408,8 @@ def _conform_value_to_schema(value: Any, schema: dict[str, Any]) -> Any:
         if isinstance(item_schema, dict) and item_schema.get("type") == "object":
             item_req = item_schema.get("required") if isinstance(item_schema.get("required"), list) else []
             if "bbox" in item_req:
-                items = [
-                    it
-                    for it in items
-                    if isinstance(it, dict)
-                    and isinstance(it.get("bbox"), list)
-                    and len(it["bbox"]) == 4
-                ]
-        elif (
-            isinstance(item_schema, dict)
-            and item_schema.get("type") == "string"
-            and "hex" in str(schema.get("description", "")).lower()
-        ):
+                items = [it for it in items if isinstance(it, dict) and isinstance(it.get("bbox"), list) and len(it["bbox"]) == 4]
+        elif isinstance(item_schema, dict) and item_schema.get("type") == "string" and "hex" in str(schema.get("description", "")).lower():
             items = [s for s in items if isinstance(s, str) and re.fullmatch(r"#[0-9A-Fa-f]{6}", s.strip())]
         max_items = schema.get("maxItems")
         if isinstance(max_items, int) and max_items >= 0:
@@ -617,10 +464,7 @@ def _conform_value_to_schema(value: Any, schema: dict[str, Any]) -> Any:
     return value
 
 
-def conform_and_validate_response_schema(
-    text: str,
-    response_schema: dict[str, Any] | None,
-) -> tuple[str, bool]:
+def conform_and_validate_response_schema(text: str, response_schema: dict[str, Any] | None) -> tuple[str, bool]:
     if not isinstance(response_schema, dict) or not response_schema:
         return text, True
     expect_array = response_schema.get("type") == "array"
@@ -638,11 +482,7 @@ def conform_and_validate_response_schema(
 
 
 @contextmanager
-def schema_guided_generation_context(
-    clip: Any,
-    response_schema: dict[str, Any] | None,
-    prefilled_open: str = "",
-):
+def schema_guided_generation_context(clip: Any, response_schema: dict[str, Any] | None, prefilled_open: str = ""):
     if not isinstance(response_schema, dict) or not response_schema:
         yield
         return

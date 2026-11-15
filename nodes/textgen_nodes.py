@@ -1,15 +1,12 @@
-import re
 import logging
-import torch
-from contextlib import nullcontext
+import re
 from enum import Enum
 
-from comfy_api.latest import io
-import comfy.ops
-from comfy import model_management
+import torch
 from comfy.text_encoders.qwen_vl import qwen2vl_mrope_position_ids
+from comfy_api.latest import io
 
-from ..helpers.encoder_helpers import evaluate_tensor_expression, fuse_visual_token_sources, fuse_deepstack_layers, prepare_vlm_image
+from ..helpers.encoder_helpers import evaluate_tensor_expression, fuse_deepstack_layers, fuse_visual_token_sources, prepare_vlm_image
 from ..helpers.textgen_helpers import _qwen_execution_context, conform_and_validate_response_schema, generate_qwen3vl_video, prepare_qwen3vl_video_frames, qwen3vl_video_prompt, schema_guided_generation_context
 
 VisualFusionConfig = io.Custom("VISUAL_FUSION_CONFIG")
@@ -199,7 +196,7 @@ def generate_fused_qwen35(clip, full_prompt, images, config, generation_args, th
 # -----------------------------------------------------------------------------
 
 MODEL_TEMPLATES = {
-    "qwen35": {"system_prefix": "<|im_start|>system\n", "system_suffix": "<|im_end|>\n", "user_prefix": "<|im_start|>user\n", "user_suffix": "<|im_end|>\n", "assistant_prefix": "<|im_start|>assistant\n", "visual_token": "<|vision_start|><|image_pad|><|vision_end|>", "suppress_thinking": "<think>\n</think>\n"},
+    "qwen35": {"system_prefix": "<|im_start|>system\n", "system_suffix": "<|im_end|>\n", "user_prefix": "<|im_start|>user\n", "user_suffix": "<|im_end|>\n", "assistant_prefix": "<|im_start|>assistant\n", "visual_token": "<|vision_start|><|image_pad|><|vision_end|>", "suppress_thinking": "<think>\n\n</think>\n\n"},
     "qwen3vl": {"system_prefix": "<|im_start|>system\n", "system_suffix": "<|im_end|>\n", "user_prefix": "<|im_start|>user\n", "user_suffix": "<|im_end|>\n", "assistant_prefix": "<|im_start|>assistant\n", "visual_token": "<|vision_start|><|image_pad|><|vision_end|>", "suppress_thinking": None},
     "llama3": {
         "system_prefix": "<|start_header_id|>system<|end_header_id|>\n\n",
@@ -211,6 +208,7 @@ MODEL_TEMPLATES = {
         "suppress_thinking": None,
     },
     "gemma": {"system_prefix": "<start_of_turn>system\n", "system_suffix": "<end_of_turn>\n", "user_prefix": "<start_of_turn>user\n", "user_suffix": "<end_of_turn>\n", "assistant_prefix": "<start_of_turn>model\n", "visual_token": "<img><image_soft_token><end_of_image>", "suppress_thinking": "<think>\n\n</think>\n\n"},
+    "gemma4": {"system_prefix": "", "system_suffix": "", "user_prefix": "", "user_suffix": "", "assistant_prefix": "", "visual_token": "<|image><|image|><image|>", "suppress_thinking": None},
     "custom": {"system_prefix": "", "system_suffix": "\n", "user_prefix": "\nUser: ", "user_suffix": "", "assistant_prefix": "\nAssistant: ", "visual_token": "<image>", "suppress_thinking": None},
 }
 
@@ -235,6 +233,8 @@ def detect_textgen_template(clip) -> str:
         return "qwen3vl"
     if "llama" in identity:
         return "llama3"
+    if "gemma4" in identity:
+        return "gemma4"
     if "gemma" in identity:
         return "gemma"
     raise ValueError(f"UC_TextGenerate could not identify a supported tokenizer family from the connected clip ({identity or 'no tokenizer identity'}).")
@@ -292,7 +292,7 @@ class UC_TextGenerate(io.ComfyNode):
                 io.Int.Input("max_length", default=512, min=1, max=32768, tooltip="Maximum response length."),
                 io.String.Input("formula", default="", multiline=False, tooltip="Optional image blend. Leave empty to keep images separate."),
                 io.Boolean.Input("thinking", optional=True, default=False, tooltip="Include model thinking text when available."),
-                io.Combo.Input("mtp", options=["auto", "off", "2", "3", "4", "5"], default="auto", optional=True, tooltip="Multi-token speculative decoding when supported by the loaded model (auto adapts depth; off disables it)."),
+                io.Combo.Input("mtp", options=["auto", "off", "2", "3", "4", "5", "tree2s1", "tree2s2", "tree3s1", "tree4s1m8"], default="auto", optional=True, tooltip="Multi-token speculative decoding when supported by the loaded model (auto adapts depth; off disables it; tree modes fix draft breadth and depth)."),
                 io.Boolean.Input("escape_parentheses", optional=True, default=False, tooltip="Prevents errors from parentheses left in generated text."),
                 VisualFusionConfig.Input("visual_fusion_config", display_name="Fusion Config", optional=True, tooltip="Optional settings for combining images before generation."),
                 ResponseSchema.Input("response_schema", display_name="Response Schema", optional=True, tooltip="Optional JSON Schema (such as from VLM System Instruction Presets or Configure Gemini Response Schema) to enforce structured JSON output."),
@@ -300,17 +300,25 @@ class UC_TextGenerate(io.ComfyNode):
                 io.Image.Input("video", optional=True, tooltip="Chronological frame batch from Get Video Components."),
                 io.Float.Input("video_fps", default=24.0, min=0.01, max=1000.0, step=0.01, tooltip="Source frame rate from Get Video Components."),
                 io.Float.Input("sample_fps", default=2.0, min=0.01, max=1000.0, step=0.01, tooltip="Frames per second presented to Qwen3-VL or Qwen3.5."),
+                io.Autogrow.Input("videos", optional=True, template=io.Autogrow.TemplateNames(io.Image.Input("video", tooltip="Additional video frame batch."), names=[f"video{i}" for i in range(1, 101)], min=0), tooltip="Optional additional video clips passed in order."),
+                io.Autogrow.Input("audios", optional=True, template=io.Autogrow.TemplateNames(io.Audio.Input("audio", tooltip="Audio clip for Gemma 4 models."), names=[f"audio{i}" for i in range(1, 101)], min=0), tooltip="Optional audio clips passed in order (supported by Gemma 4)."),
                 io.Autogrow.Input("image_inputs", template=autogrow_template, tooltip="Add images in order. Each image in a batch is added in order."),
             ],
-            outputs=[io.String.Output("generated_text", display_name="Generated Text"), io.Int.Output("seed", display_name="Seed")],
+            outputs=[
+                io.String.Output("generated_text", display_name="Generated Text", tooltip="Final generated response text with thinking stripped when separated."),
+                io.Int.Output("seed", display_name="Seed", tooltip="Seed used to generate the response."),
+                io.String.Output("thinking", display_name="Thinking", tooltip="Model reasoning text when thinking mode is enabled."),
+            ],
         )
 
     @classmethod
-    def execute(cls, clip, prompt, system_prompt, vlm_resolution, max_length, sampling_mode, formula="", thinking=False, mtp="auto", escape_parentheses=False, image_inputs=None, visual_fusion_config=None, response_schema=None, video=None, video_fps=24.0, sample_fps=2.0, vlm_video_resolution=384) -> io.NodeOutput:
+    def execute(
+        cls, clip, prompt, system_prompt, vlm_resolution, max_length, sampling_mode, formula="", thinking=False, mtp="auto", escape_parentheses=False, image_inputs=None, visual_fusion_config=None, response_schema=None, video=None, video_fps=24.0, sample_fps=2.0, vlm_video_resolution=384, videos=None, audios=None
+    ) -> io.NodeOutput:
         if clip is None:
             raise RuntimeError("ERROR: CLIP/TextEncoder input is invalid: None")
 
-        mtp_val = False if mtp == "off" else (True if mtp == "auto" else int(mtp))
+        mtp_val = {"off": False, "auto": True}.get(mtp, int(mtp) if str(mtp).isdigit() else mtp)
 
         template_name = detect_textgen_template(clip)
 
@@ -386,102 +394,134 @@ class UC_TextGenerate(io.ComfyNode):
         pattern = re.compile(r"image_input_(\d+)", re.IGNORECASE)
         has_keywords = bool(pattern.search(modified_prompt)) or bool(resolved_visuals)
 
-        if has_keywords:
+        all_videos = ([video] if video is not None else []) + [v for v in (videos or {}).values() if v is not None]
+        all_audios = [a for a in (audios or {}).values() if a is not None]
 
-            def replace_keyword(match):
-                num = int(match.group(1))
-                dict_key = ImageInputMapping.get_dict_key(num, is_zero_indexed)
-                if dict_key in raw_images:
-                    img = raw_images[dict_key]
-                    display_name = ImageInputMapping.get_display_name(dict_key, is_zero_indexed)
-                    processed_img = processed_images.get(display_name, prepare_vlm_image(img, vlm_resolution))
-                    return register_visual(processed_img)
-                return ""
+        if fusion_active and template_name not in {"qwen3vl", "qwen35"}:
+            raise ValueError(f"Active visual fusion is supported only by Core Qwen3-VL and Qwen3.5, not {template_name}.")
 
-            modified_prompt = pattern.sub(replace_keyword, modified_prompt)
-
-            def resolve_visual(match):
-                image = resolved_visuals[int(match.group(1))]
-                tokens = []
-                for index in range(image.shape[0]):
-                    images_vl.append(image[index : index + 1])
-                    tokens.append(v_token)
-                return "".join(tokens)
-
-            modified_prompt = visual_marker_pattern.sub(resolve_visual, modified_prompt)
-        else:
-            # Fallback behavior: prepend all connected images in index-sorted order
-            image_prompt_prefix = ""
-            for num in sorted(raw_images.keys()):
-                display_name = ImageInputMapping.get_display_name(num, is_zero_indexed)
-                processed_img = processed_images[display_name]
-                for index in range(processed_img.shape[0]):
-                    images_vl.append(processed_img[index : index + 1])
-                    image_prompt_prefix += v_token
-            modified_prompt = image_prompt_prefix + modified_prompt
-
-        video_frames = None
-        if video is not None:
-            if template_name not in {"qwen3vl", "qwen35"}:
-                raise ValueError("Video input is supported only by Core Qwen3-VL and Qwen3.5 models.")
-            video_frames, sampled_indices = prepare_qwen3vl_video_frames(video, vlm_video_resolution, video_fps, sample_fps)
-            modified_prompt = qwen3vl_video_prompt(sampled_indices, video_fps) + modified_prompt
-
-        if fusion_active:
-            if template_name not in {"qwen3vl", "qwen35"}:
-                raise ValueError(f"Active visual fusion is supported only by Core Qwen3-VL and Qwen3.5, not {template_name}.")
-            if not images_vl:
-                raise ValueError("Active visual fusion requires at least one resolved image source.")
-            first = modified_prompt.find(v_token)
-            if first < 0:
-                raise ValueError("Active visual fusion could not locate the resolved visual marker in the prompt.")
-            modified_prompt = modified_prompt[:first] + v_token + modified_prompt[first + len(v_token) :].replace(v_token, "")
-
-        if template_name in {"qwen3vl", "qwen35"}:
-            picture_number = 0
-
-            def add_picture_id(_match):
-                nonlocal picture_number
-                picture_number += 1
-                return f"Picture {picture_number}: {v_token}"
-
-            modified_prompt = re.sub(re.escape(v_token), add_picture_id, modified_prompt)
-
-        # 5. Build Safe Non-Formatting Chat Template
-        # We completely avoid standard formatting or f-strings which fail if prompts contain { } braces.
-        full_prompt = ""
-
-        # System prompt segment
-        if system_prompt and system_prompt.strip():
-            full_prompt += temp["system_prefix"] + system_prompt + temp["system_suffix"]
-
-        # User query segment
-        full_prompt += temp["user_prefix"] + modified_prompt + temp["user_suffix"]
-
-        # Assistant block entry
-        full_prompt += temp["assistant_prefix"]
-
-        # If thinking is disabled, explicitly append reasoning suppression sequences if the model template has them
-        if not thinking and temp["suppress_thinking"]:
-            full_prompt += temp["suppress_thinking"]
-
-        schema_active = isinstance(response_schema, dict) and bool(response_schema)
-        prefill_open = ""
-        if schema_active and not thinking:
-            prefill_open = "[" if response_schema.get("type") == "array" else "{"
-            full_prompt += prefill_open
-
-        # 6. Setup Tokenizer Dispatch Arguments
-        kwargs = {}
-        if len(images_vl) > 0:
-            kwargs["images"] = images_vl
+        if template_name == "gemma4":
+            if has_keywords:
+                modified_prompt = visual_marker_pattern.sub(lambda m: (images_vl.extend(resolved_visuals[int(m.group(1))][i : i + 1] for i in range(resolved_visuals[int(m.group(1))].shape[0])), "")[1], modified_prompt)
+            else:
+                for num in sorted(raw_images.keys()):
+                    processed_img = processed_images[ImageInputMapping.get_display_name(num, is_zero_indexed)]
+                    images_vl.extend(processed_img[i : i + 1] for i in range(processed_img.shape[0]))
+            video_frames = None
+            schema_active = isinstance(response_schema, dict) and bool(response_schema)
+            prefill_open = ""
+            full_prompt = modified_prompt
+            tok_kwargs = {"images": images_vl, "videos": all_videos, "audios": all_audios, "fps": video_fps, "system_prompt": system_prompt}
             if len(images_vl) == 1:
-                kwargs["image"] = images_vl[0]
+                tok_kwargs["image"] = images_vl[0]
+            tokens = clip.tokenize(modified_prompt, skip_template=False, min_length=1, thinking=thinking, **tok_kwargs)
+        else:
+            if all_audios:
+                raise ValueError("Audio input is supported only by Gemma 4 models.")
+            if has_keywords:
 
-        # Use skip_template=True because we have assembled perfect, model-specific delimiters ourselves.
-        tokens = None
-        if not fusion_active and video_frames is None:
-            tokens = clip.tokenize(full_prompt, skip_template=True, min_length=1, thinking=thinking, **kwargs)
+                def replace_keyword(match):
+                    num = int(match.group(1))
+                    dict_key = ImageInputMapping.get_dict_key(num, is_zero_indexed)
+                    if dict_key in raw_images:
+                        img = raw_images[dict_key]
+                        display_name = ImageInputMapping.get_display_name(dict_key, is_zero_indexed)
+                        processed_img = processed_images.get(display_name, prepare_vlm_image(img, vlm_resolution))
+                        return register_visual(processed_img)
+                    return ""
+
+                modified_prompt = pattern.sub(replace_keyword, modified_prompt)
+
+                def resolve_visual(match):
+                    image = resolved_visuals[int(match.group(1))]
+                    tokens_list = []
+                    for index in range(image.shape[0]):
+                        images_vl.append(image[index : index + 1])
+                        tokens_list.append(v_token)
+                    return "".join(tokens_list)
+
+                modified_prompt = visual_marker_pattern.sub(resolve_visual, modified_prompt)
+            else:
+                # Fallback behavior: prepend all connected images in index-sorted order
+                image_prompt_prefix = ""
+                for num in sorted(raw_images.keys()):
+                    display_name = ImageInputMapping.get_display_name(num, is_zero_indexed)
+                    processed_img = processed_images[display_name]
+                    for index in range(processed_img.shape[0]):
+                        images_vl.append(processed_img[index : index + 1])
+                        image_prompt_prefix += v_token
+                modified_prompt = image_prompt_prefix + modified_prompt
+
+            video_frames = None
+            if all_videos:
+                if template_name not in {"qwen3vl", "qwen35"}:
+                    raise ValueError("Video input is supported only by Core Qwen3-VL, Qwen3.5, and Gemma 4 models.")
+                video_batches = []
+                video_prompt_prefix = ""
+                for vid_idx, vid in enumerate(all_videos, start=1):
+                    vf, sampled_indices = prepare_qwen3vl_video_frames(vid, vlm_video_resolution, video_fps, sample_fps)
+                    video_batches.append(vf)
+                    vp = qwen3vl_video_prompt(sampled_indices, video_fps)
+                    if vid_idx > 1 and vp.startswith("Video 1:"):
+                        vp = f"Video {vid_idx}:" + vp[len("Video 1:") :]
+                    video_prompt_prefix += vp
+                video_frames = video_batches[0] if len(video_batches) == 1 else video_batches
+                modified_prompt = video_prompt_prefix + modified_prompt
+
+            if fusion_active:
+                if not images_vl:
+                    raise ValueError("Active visual fusion requires at least one resolved image source.")
+                first = modified_prompt.find(v_token)
+                if first < 0:
+                    raise ValueError("Active visual fusion could not locate the resolved visual marker in the prompt.")
+                modified_prompt = modified_prompt[:first] + v_token + modified_prompt[first + len(v_token) :].replace(v_token, "")
+
+            if template_name in {"qwen3vl", "qwen35"}:
+                picture_number = 0
+
+                def add_picture_id(_match):
+                    nonlocal picture_number
+                    picture_number += 1
+                    return f"Picture {picture_number}: {v_token}"
+
+                modified_prompt = re.sub(re.escape(v_token), add_picture_id, modified_prompt)
+
+            # 5. Build Safe Non-Formatting Chat Template
+            # We completely avoid standard formatting or f-strings which fail if prompts contain { } braces.
+            full_prompt = ""
+
+            # System prompt segment
+            if system_prompt and system_prompt.strip():
+                full_prompt += temp["system_prefix"] + system_prompt + temp["system_suffix"]
+
+            # User query segment
+            full_prompt += temp["user_prefix"] + modified_prompt + temp["user_suffix"]
+
+            # Assistant block entry
+            full_prompt += temp["assistant_prefix"]
+
+            schema_active = isinstance(response_schema, dict) and bool(response_schema)
+            if thinking and template_name == "qwen35":
+                full_prompt += "<think>\n"
+            elif not thinking and temp["suppress_thinking"]:
+                full_prompt += temp["suppress_thinking"]
+
+            prefill_open = ""
+            if schema_active and not thinking:
+                prefill_open = "[" if response_schema.get("type") == "array" else "{"
+                full_prompt += prefill_open
+
+            # 6. Setup Tokenizer Dispatch Arguments
+            kwargs = {}
+            if len(images_vl) > 0:
+                kwargs["images"] = images_vl
+                if len(images_vl) == 1:
+                    kwargs["image"] = images_vl[0]
+
+            # Use skip_template=True because we have assembled perfect, model-specific delimiters ourselves.
+            tokens = None
+            if not fusion_active and video_frames is None:
+                tokens = clip.tokenize(full_prompt, skip_template=True, min_length=1, thinking=thinking, **kwargs)
 
         # 7. Extract Parameters from sampling_mode dynamic combo
         do_sample = sampling_mode.get("sampling_mode") == "on"
@@ -499,6 +539,7 @@ class UC_TextGenerate(io.ComfyNode):
         attempts = empty_response_retries + 1 if do_sample and seed is not None else 1
         used_seed = int(seed) if seed is not None else 0
         generated_text = ""
+        thinking_text = ""
         for attempt in range(attempts):
             if seed is not None:
                 used_seed = (int(seed) + attempt) & 0xFFFFFFFFFFFFFFFF
@@ -515,7 +556,12 @@ class UC_TextGenerate(io.ComfyNode):
                 else:
                     generated_ids = clip.generate(tokens, **generation_args)
 
-            generated_text = prefill_open + clip.decode(generated_ids, skip_special_tokens=True)
+            raw_decoded = prefill_open + clip.decode(generated_ids, skip_special_tokens=True)
+            reasoning, sep, answer = raw_decoded.partition("</think>")
+            if not sep and not reasoning.lstrip().startswith("<think>") and not full_prompt.rstrip().endswith("<think>"):
+                reasoning, answer = "", raw_decoded
+            thinking_text = reasoning.replace("<think>", "", 1).strip()
+            generated_text = answer.strip()
             if schema_active:
                 generated_text, schema_valid = conform_and_validate_response_schema(generated_text, response_schema)
                 if schema_valid and generated_text.strip():
@@ -525,7 +571,7 @@ class UC_TextGenerate(io.ComfyNode):
 
         if escape_parentheses:
             generated_text = generated_text.replace("(", r"\(").replace(")", r"\)")
-        return io.NodeOutput(generated_text, used_seed)
+        return io.NodeOutput(generated_text, used_seed, thinking_text)
 
 
 class UC_TextGenerateQwen35SystemPrompt(io.ComfyNode):
