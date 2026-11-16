@@ -6,37 +6,17 @@ import runpy
 import sys
 import types
 
-
 CUSTOM_NODE_ROOT = pathlib.Path(__file__).parents[1]
 PACKAGE_NAME = "utils_collection_vlm_preset_test"
 package = types.ModuleType(PACKAGE_NAME)
 package.__path__ = [str(CUSTOM_NODE_ROOT)]
 sys.modules.setdefault(PACKAGE_NAME, package)
 
-from utils_collection_vlm_preset_test import (
-    vlm_experimental_presets,
-    vlm_legacy_presets,
-    vlm_motion_presets,
-    vlm_presets,
-)
+from utils_collection_vlm_preset_test import vlm_experimental_presets, vlm_legacy_presets, vlm_motion_presets, vlm_presets
 from utils_collection_vlm_preset_test.nodes import vlm_nodes
 
-
-HARDENED_IMAGE_PRESETS = (
-    "neutral_system_instruction",
-    "action_system_instruction",
-    "photo_system_instruction",
-    "toon_system_instruction",
-    "neutral_system_instruction_crude",
-    "action_system_instruction_crude",
-    "photo_system_instruction_crude",
-    "toon_system_instruction_crude",
-)
-HARDENING_HEADINGS = (
-    "## Perspective and Spatial Description",
-    "## Visible Text Quotation",
-    "## Direct Language Constraints",
-)
+HARDENED_IMAGE_PRESETS = ("neutral_system_instruction", "action_system_instruction", "photo_system_instruction", "toon_system_instruction", "neutral_system_instruction_crude", "action_system_instruction_crude", "photo_system_instruction_crude", "toon_system_instruction_crude")
+HARDENING_HEADINGS = ("## Perspective and Spatial Description", "## Visible Text Quotation", "## Direct Language Constraints")
 APPROVED_PERSPECTIVE_BLOCK = """## Perspective and Spatial Description
 
 Determine the source image's viewpoint from the complete visible composition, and preserve it unless the user explicitly requests a change. State the most specific perspective description supported by the resulting composition. Use an established perspective term when it accurately describes that composition; when it does not fully express the geometry, describe the geometry directly without forcing a category. Ground the viewpoint in concrete spatial relationships consistent with the source image and request, without inventing a viewing location or precision those inputs do not establish. When the resulting composition establishes that the viewing position belongs to a scene participant, explicitly state first person perspective. State whose viewpoint it is only when the source image or request establishes that identity, and never assign first person perspective to an external viewpoint. Describe the complete resulting spatial arrangement, preserving every unchanged visible relationship and applying every requested change. State the framing, each relevant subject's orientation and pose, and the placement, relative scale, overlap, occlusion, and depth of all relevant subjects and objects. Include only depth relationships established by the source image or request, without filling a fixed layer template. Describe every visible or requested action and interaction concretely, stating what each involved subject or object does and all established directions and physical responses. When contact occurs, state which bodies or parts meet and where and how they meet. Never replace these relationships with vague interaction wording or treat contact alone as proof of an abstract participant role. Keep every claim grounded in visible source content or an explicit user request. Do not introduce terminology for physical image capture devices unless the device itself is visible in the image or explicitly requested by the user."""
@@ -60,90 +40,29 @@ HARDENING_FORBIDDEN = re.compile(
 HARDENING_LIST_LINE = re.compile(r"^\s*(?:[-*+]\s+|\d+[.)]\s+)", re.MULTILINE)
 
 H3_DEDICATED_SCENARIO_PRESETS = (
-    (
-        "video_timeline_minimax_h3_ref2va_general",
-        "VIDEO_TIMELINE_MINIMAX_H3_REF2VA_GENERAL",
-    ),
-    (
-        "video_timeline_minimax_h3_ref2va_attribute_transfer",
-        "VIDEO_TIMELINE_MINIMAX_H3_REF2VA_ATTRIBUTE_TRANSFER",
-    ),
-    (
-        "video_timeline_minimax_h3_fl2va_system_instruction",
-        "VIDEO_TIMELINE_MINIMAX_H3_FL2VA_SYSTEM_INSTRUCTION",
-    ),
-    (
-        "video_timeline_minimax_h3_scene_image_any2va_system_instruction",
-        "VIDEO_TIMELINE_MINIMAX_H3_SCENE_IMAGE_ANY2VA_SYSTEM_INSTRUCTION",
-    ),
-    (
-        "video_timeline_minimax_h3_storyboard_any2va_system_instruction",
-        "VIDEO_TIMELINE_MINIMAX_H3_STORYBOARD_ANY2VA_SYSTEM_INSTRUCTION",
-    ),
-    (
-        "video_timeline_minimax_h3_scene_image_t2va_system_instruction",
-        "VIDEO_TIMELINE_MINIMAX_H3_SCENE_IMAGE_T2VA_SYSTEM_INSTRUCTION",
-    ),
-    (
-        "video_timeline_minimax_h3_storyboard_t2va_system_instruction",
-        "VIDEO_TIMELINE_MINIMAX_H3_STORYBOARD_T2VA_SYSTEM_INSTRUCTION",
-    ),
-    (
-        "video_timeline_minimax_h3_ref2va_attr_transfer_audio_copy",
-        "VIDEO_TIMELINE_MINIMAX_H3_REF2VA_ATTR_TRANSFER_AUDIO_COPY",
-    ),
-    (
-        "video_timeline_minimax_h3_ref2va_attr_transfer_audio_timbre",
-        "VIDEO_TIMELINE_MINIMAX_H3_REF2VA_ATTR_TRANSFER_AUDIO_TIMBRE",
-    ),
-    (
-        "video_timeline_minimax_h3_ref2va_attr_transfer_no_audio",
-        "VIDEO_TIMELINE_MINIMAX_H3_REF2VA_ATTR_TRANSFER_NO_AUDIO",
-    ),
+    ("video_timeline_minimax_h3_ref2va_general", "VIDEO_TIMELINE_MINIMAX_H3_REF2VA_GENERAL"),
+    ("video_timeline_minimax_h3_ref2va_attribute_transfer", "VIDEO_TIMELINE_MINIMAX_H3_REF2VA_ATTRIBUTE_TRANSFER"),
+    ("video_timeline_minimax_h3_fl2va_system_instruction", "VIDEO_TIMELINE_MINIMAX_H3_FL2VA_SYSTEM_INSTRUCTION"),
+    ("video_timeline_minimax_h3_scene_image_any2va_system_instruction", "VIDEO_TIMELINE_MINIMAX_H3_SCENE_IMAGE_ANY2VA_SYSTEM_INSTRUCTION"),
+    ("video_timeline_minimax_h3_storyboard_any2va_system_instruction", "VIDEO_TIMELINE_MINIMAX_H3_STORYBOARD_ANY2VA_SYSTEM_INSTRUCTION"),
+    ("video_timeline_minimax_h3_scene_image_t2va_system_instruction", "VIDEO_TIMELINE_MINIMAX_H3_SCENE_IMAGE_T2VA_SYSTEM_INSTRUCTION"),
+    ("video_timeline_minimax_h3_storyboard_t2va_system_instruction", "VIDEO_TIMELINE_MINIMAX_H3_STORYBOARD_T2VA_SYSTEM_INSTRUCTION"),
+    ("video_timeline_minimax_h3_ref2va_attr_transfer_audio_copy", "VIDEO_TIMELINE_MINIMAX_H3_REF2VA_ATTR_TRANSFER_AUDIO_COPY"),
+    ("video_timeline_minimax_h3_ref2va_attr_transfer_audio_timbre", "VIDEO_TIMELINE_MINIMAX_H3_REF2VA_ATTR_TRANSFER_AUDIO_TIMBRE"),
+    ("video_timeline_minimax_h3_ref2va_attr_transfer_no_audio", "VIDEO_TIMELINE_MINIMAX_H3_REF2VA_ATTR_TRANSFER_NO_AUDIO"),
 )
 
 H3_FULL_REFERENCE_PRESETS = (
-    (
-        "video_timeline_minimax_h3_ref2va_general",
-        "VIDEO_TIMELINE_MINIMAX_H3_REF2VA_GENERAL",
-    ),
-    (
-        "video_timeline_minimax_h3_reference_alt_system_instruction",
-        "VIDEO_TIMELINE_MINIMAX_H3_REFERENCE_ALT_SYSTEM_INSTRUCTION",
-    ),
-    (
-        "video_timeline_minimax_h3_mixed_system_instruction",
-        "VIDEO_TIMELINE_MINIMAX_H3_MIXED_SYSTEM_INSTRUCTION",
-    ),
-    (
-        "video_timeline_minimax_h3_reference_system_instruction_new",
-        "VIDEO_TIMELINE_MINIMAX_H3_REFERENCE_SYSTEM_INSTRUCTION_NEW",
-    ),
-    (
-        "video_timeline_minimax_h3_reference_alt_system_instruction_new",
-        "VIDEO_TIMELINE_MINIMAX_H3_REFERENCE_ALT_SYSTEM_INSTRUCTION_NEW",
-    ),
-    (
-        "video_timeline_minimax_h3_mixed_system_instruction_new",
-        "VIDEO_TIMELINE_MINIMAX_H3_MIXED_SYSTEM_INSTRUCTION_NEW",
-    ),
+    ("video_timeline_minimax_h3_ref2va_general", "VIDEO_TIMELINE_MINIMAX_H3_REF2VA_GENERAL"),
+    ("video_timeline_minimax_h3_reference_alt_system_instruction", "VIDEO_TIMELINE_MINIMAX_H3_REFERENCE_ALT_SYSTEM_INSTRUCTION"),
+    ("video_timeline_minimax_h3_mixed_system_instruction", "VIDEO_TIMELINE_MINIMAX_H3_MIXED_SYSTEM_INSTRUCTION"),
+    ("video_timeline_minimax_h3_reference_system_instruction_new", "VIDEO_TIMELINE_MINIMAX_H3_REFERENCE_SYSTEM_INSTRUCTION_NEW"),
+    ("video_timeline_minimax_h3_reference_alt_system_instruction_new", "VIDEO_TIMELINE_MINIMAX_H3_REFERENCE_ALT_SYSTEM_INSTRUCTION_NEW"),
+    ("video_timeline_minimax_h3_mixed_system_instruction_new", "VIDEO_TIMELINE_MINIMAX_H3_MIXED_SYSTEM_INSTRUCTION_NEW"),
 )
 
-REAL_LIFE_PHOTO_PRESETS = (
-    "photo_system_instruction",
-    "photo_system_instruction_qwen",
-    "photo_system_instruction_crude",
-)
-REAL_WORLD_PHYSICAL_PRESETS = (
-    "ideogram_4_json_instruction",
-    "ideogram_4_json_instruction_short",
-    "ideogram_4_json_instruction_style",
-    "ideogram_4_json_instruction_color",
-    "moss_image_json_instruction",
-    "moss_image_json_instruction_short",
-    "moss_image_json_instruction_color",
-    "moss_image_json_instruction_action",
-)
+REAL_LIFE_PHOTO_PRESETS = ("photo_system_instruction", "photo_system_instruction_qwen", "photo_system_instruction_crude")
+REAL_WORLD_PHYSICAL_PRESETS = ("ideogram_4_json_instruction", "ideogram_4_json_instruction_short", "ideogram_4_json_instruction_style", "ideogram_4_json_instruction_color", "moss_image_json_instruction", "moss_image_json_instruction_short", "moss_image_json_instruction_color", "moss_image_json_instruction_action")
 REAL_LIFE_VIDEO_PRESETS = (
     "video_basic_system_instruction",
     "video_8sec_system_instruction",
@@ -161,23 +80,8 @@ REAL_LIFE_VIDEO_PRESETS = (
     "video_timeline_minimax_h3_reference_alt_system_instruction_new",
     "video_timeline_minimax_h3_mixed_system_instruction_new",
 )
-REAL_LIFE_PROHIBITION_PRESETS = (
-    "photo_system_instruction",
-    "toon_system_instruction",
-    "photo_system_instruction_qwen",
-    "toon_system_instruction_qwen",
-    "photo_system_instruction_crude",
-    "toon_system_instruction_crude",
-)
-REAL_LIFE_CHANGED_PRESETS = tuple(
-    dict.fromkeys(
-        REAL_LIFE_PHOTO_PRESETS
-        + REAL_WORLD_PHYSICAL_PRESETS
-        + ("cinematic_dumb_intelligent",)
-        + REAL_LIFE_VIDEO_PRESETS
-        + REAL_LIFE_PROHIBITION_PRESETS
-    )
-)
+REAL_LIFE_PROHIBITION_PRESETS = ("photo_system_instruction", "toon_system_instruction", "photo_system_instruction_qwen", "toon_system_instruction_qwen", "photo_system_instruction_crude", "toon_system_instruction_crude")
+REAL_LIFE_CHANGED_PRESETS = tuple(dict.fromkeys(REAL_LIFE_PHOTO_PRESETS + REAL_WORLD_PHYSICAL_PRESETS + ("cinematic_dumb_intelligent",) + REAL_LIFE_VIDEO_PRESETS + REAL_LIFE_PROHIBITION_PRESETS))
 
 
 def _normalize_instruction(value):
@@ -191,8 +95,6 @@ def _split_hardening_block(value):
     assert anchor_match is not None
     end = anchor_match.start()
     return instruction[:start] + instruction[end:], instruction[start:end]
-
-
 
 
 def test_legacy_system_presets_are_isolated_and_exposed():
@@ -215,10 +117,7 @@ def test_vlm_preset_widget_labels_are_unique_and_descriptive():
         vlm_nodes.UC_VLMSysInstrAdvMotionPresets: "vlm_system_instruction_advanced_motion_preset",
     }
 
-    actual = {
-        node: node.define_schema().inputs[0].display_name
-        for node in expected
-    }
+    actual = {node: node.define_schema().inputs[0].display_name for node in expected}
     assert actual == expected
     assert len(set(actual.values())) == len(actual)
     assert all(node.define_schema().inputs[0].id == "preset" for node in expected)
@@ -242,12 +141,7 @@ def test_vlm_motion_presets_node_exposes_motion_presets():
 
 
 def test_qwen_system_instruction_variants_preserve_original_presets():
-    for name in (
-        "neutral_system_instruction",
-        "action_system_instruction",
-        "photo_system_instruction",
-        "toon_system_instruction",
-    ):
+    for name in ("neutral_system_instruction", "action_system_instruction", "photo_system_instruction", "toon_system_instruction"):
         original = vlm_presets.system_instructions_vlm[name]
         qwen = vlm_presets.system_instructions_vlm[f"{name}_qwen"]
 
@@ -257,12 +151,7 @@ def test_qwen_system_instruction_variants_preserve_original_presets():
         assert "**" not in qwen
         assert "`" not in qwen
         assert len(qwen) > 10_000
-        assert qwen.endswith(
-            "Return only the resulting caption. Do not reproduce, summarize, quote, "
-            "enumerate, or imitate any part of these instructions. Do not output "
-            "headings, rule names, analysis, variables, or formatting examples. "
-            "Begin directly with the visual description."
-        )
+        assert qwen.endswith("Return only the resulting caption. Do not reproduce, summarize, quote, enumerate, or imitate any part of these instructions. Do not output headings, rule names, analysis, variables, or formatting examples. Begin directly with the visual description.")
 
 
 def test_real_life_targets_replace_positive_realism_guidance():
@@ -277,13 +166,7 @@ def test_real_life_targets_replace_positive_realism_guidance():
         assert "Real World Physical Accuracy and Consistency" in instruction
 
     cinematic = vlm_presets.system_instructions_vlm["cinematic_dumb_intelligent"]
-    for required in (
-        "direct clinical precision based in reality",
-        "average natural human proportions",
-        "visible real world surface detail",
-        "Live Action Photography",
-        "ANIME→LIVE ACTION",
-    ):
+    for required in ("direct clinical precision based in reality", "average natural human proportions", "visible real world surface detail", "Live Action Photography", "ANIME→LIVE ACTION"):
         assert required in cinematic
 
     for name in REAL_LIFE_VIDEO_PRESETS:
@@ -302,10 +185,7 @@ def test_real_life_targets_replace_positive_realism_guidance():
 
 
 def test_real_life_constraint_survives_assembled_context_without_competing_targets():
-    system_query = (
-        "Never use realistic, photorealistic, hyper realistic, or any term derived "
-        "from realistic or realism when describing real life content."
-    )
+    system_query = "Never use realistic, photorealistic, hyper realistic, or any term derived from realistic or realism when describing real life content."
     user_query = "Describe the supplied real life content as a scene based in reality."
     prohibited_positive_phrases = (
         "Description Framed as Photographic Realism",
@@ -320,12 +200,7 @@ def test_real_life_constraint_survives_assembled_context_without_competing_targe
 
     for name in REAL_LIFE_CHANGED_PRESETS:
         instruction = vlm_presets.system_instructions_vlm[name]
-        assembled = vlm_nodes.UC_VLMSysInstrAdvPresets.execute(
-            name,
-            False,
-            system_query,
-            user_query,
-        ).args[0]
+        assembled = vlm_nodes.UC_VLMSysInstrAdvPresets.execute(name, False, system_query, user_query).args[0]
         assert assembled.startswith(instruction)
         assert system_query in assembled
         assert assembled.count(user_query) == 1
@@ -346,10 +221,7 @@ def test_qwen_query_variants_use_plain_request_delimiters():
 
 def test_character_transfer_query_presets_keep_provider_reference_contracts_separate():
     presets = vlm_presets.system_query_additional_vlm
-    variants = {
-        "character_transfer_gemma": ("[`image 1`]", "[`image 2`]"),
-        "character_transfer_qwen": ("<Picture 1>", "<Picture 2>"),
-    }
+    variants = {"character_transfer_gemma": ("[`image 1`]", "[`image 2`]"), "character_transfer_qwen": ("<Picture 1>", "<Picture 2>")}
 
     for name, (composition_reference, character_reference) in variants.items():
         prefix = presets[f"{name}_prefix"]
@@ -378,20 +250,10 @@ def test_raw_query_presets_preserve_instructions_without_request_carriers():
     wrapped = vlm_presets.system_query_additional_vlm
     raw = vlm_presets.system_query_raw_vlm
     normalize = lambda value: value.replace("\r\n", "\n")
-    expected_names = {
-        key.removesuffix("_prefix").removesuffix("_suffix") for key in wrapped
-    }
+    expected_names = {key.removesuffix("_prefix").removesuffix("_suffix") for key in wrapped}
     assert set(raw) == expected_names
 
-    json_carriers = {
-        "character_transfer_gemma": "current edit request",
-        "character_transfer_qwen": "current edit request",
-        "ideogram_4": "current request",
-        "moss_image": "current request",
-        "image2image": "current edit request",
-        "text2image": "current request",
-        "video_basic": "current video request",
-    }
+    json_carriers = {"character_transfer_gemma": "current edit request", "character_transfer_qwen": "current edit request", "ideogram_4": "current request", "moss_image": "current request", "image2image": "current edit request", "text2image": "current request", "video_basic": "current video request"}
     json_suffix = '\r\n\u2060 \u2060\u2060"\\}'
     for name, request_key in json_carriers.items():
         carrier = f' \\{{"{request_key}": "'
@@ -400,9 +262,7 @@ def test_raw_query_presets_preserve_instructions_without_request_carriers():
 
     for name in ("image2image_qwen", "text2image_qwen"):
         assert wrapped[f"{name}_suffix"] == ""
-        assert normalize(raw[name]) == normalize(wrapped[f"{name}_prefix"]).removesuffix(
-            " Current request:\n"
-        )
+        assert normalize(raw[name]) == normalize(wrapped[f"{name}_prefix"]).removesuffix(" Current request:\n")
 
     for name in (
         "h3_fl2va",
@@ -419,34 +279,16 @@ def test_raw_query_presets_preserve_instructions_without_request_carriers():
         "h3_scene_image_t2va",
         "h3_storyboard_t2va",
     ):
-        prefix = normalize(wrapped[f"{name}_prefix"]).removesuffix(
-            "\n\nBEGIN VIDEO REQUEST:\n"
-        )
-        suffix = normalize(wrapped[f"{name}_suffix"]).removeprefix(
-            "\nEND VIDEO REQUEST.\n\n"
-        )
+        prefix = normalize(wrapped[f"{name}_prefix"]).removesuffix("\n\nBEGIN VIDEO REQUEST:\n")
+        suffix = normalize(wrapped[f"{name}_suffix"]).removeprefix("\nEND VIDEO REQUEST.\n\n")
         assert normalize(raw[name]) == f"{prefix}\n\n{suffix}"
 
-    t2va_prefix = wrapped["h3_t2va_prefix"].removesuffix(
-        "\r\n\r\nBEGIN VIDEO REQUEST:\r\n"
-    )
-    t2va_suffix = wrapped["h3_t2va_suffix"].removeprefix(
-        "\r\nEND VIDEO REQUEST.\r\n\r\n"
-    )
+    t2va_prefix = wrapped["h3_t2va_prefix"].removesuffix("\r\n\r\nBEGIN VIDEO REQUEST:\r\n")
+    t2va_suffix = wrapped["h3_t2va_suffix"].removeprefix("\r\nEND VIDEO REQUEST.\r\n\r\n")
     assert raw["h3_t2va"] == f"{t2va_prefix}\r\n\r\n{t2va_suffix}"
 
-    forbidden = (
-        '\\{"current request": "',
-        '\\{"current edit request": "',
-        '\\{"current video request": "',
-        "Current request:",
-        "BEGIN VIDEO REQUEST",
-        "END VIDEO REQUEST",
-    )
-    assert all(
-        value and not any(marker in value for marker in forbidden)
-        for value in raw.values()
-    )
+    forbidden = ('\\{"current request": "', '\\{"current edit request": "', '\\{"current video request": "', "Current request:", "BEGIN VIDEO REQUEST", "END VIDEO REQUEST")
+    assert all(value and not any(marker in value for marker in forbidden) for value in raw.values())
     assert "<Picture" not in raw["character_transfer_gemma"]
     assert "[`image" not in raw["character_transfer_qwen"]
 
@@ -463,9 +305,7 @@ def test_raw_query_preset_node_outputs_selected_instruction_directly():
     assert schema.outputs[0].display_name == "system_query"
 
     preset = schema.inputs[0].options[0]
-    assert vlm_nodes.UC_VLMSysQueryRawPresets.execute(preset).args == (
-        vlm_presets.system_query_raw_vlm[preset],
-    )
+    assert vlm_nodes.UC_VLMSysQueryRawPresets.execute(preset).args == (vlm_presets.system_query_raw_vlm[preset],)
 
 
 def test_experimental_system_instruction_nodes_are_dedicated():
@@ -478,20 +318,10 @@ def test_experimental_system_instruction_nodes_are_dedicated():
     assert basic.display_name == "VLM System Instruction Presets Experimental"
     assert basic.inputs[0].options == sorted(presets)
     assert advanced.node_id == "UC_VLMSysInstrAdvPresetsExperimental"
-    assert (
-        advanced.display_name
-        == "VLM System Instruction Advanced Presets Experimental"
-    )
+    assert advanced.display_name == "VLM System Instruction Advanced Presets Experimental"
     assert advanced.inputs[0].options == sorted(presets)
-    assert vlm_nodes.UC_VLMSysInstrPresetsExperimental.execute(preset).args == (
-        presets[preset],
-    )
-    result = vlm_nodes.UC_VLMSysInstrAdvPresetsExperimental.execute(
-        preset,
-        False,
-        "system query",
-        "user query",
-    ).args[0]
+    assert vlm_nodes.UC_VLMSysInstrPresetsExperimental.execute(preset).args == (presets[preset],)
+    result = vlm_nodes.UC_VLMSysInstrAdvPresetsExperimental.execute(preset, False, "system query", "user query").args[0]
     assert result.startswith(presets[preset])
     assert "system query" in result
     assert "user query" in result
@@ -499,24 +329,11 @@ def test_experimental_system_instruction_nodes_are_dedicated():
 
 def test_h3_query_presets_are_paired_and_wrap_the_request_once():
     presets = vlm_presets.system_query_additional_vlm
-    base_names = {
-        key.removesuffix("_prefix").removesuffix("_suffix") for key in presets
-    }
-    assert {
-        "h3_t2va",
-        "h3_fl2va",
-        "h3_ref2va",
-        "h3_fl2va_experimental",
-        "h3_ref2va_experimental",
-    } <= base_names
+    base_names = {key.removesuffix("_prefix").removesuffix("_suffix") for key in presets}
+    assert {"h3_t2va", "h3_fl2va", "h3_ref2va", "h3_fl2va_experimental", "h3_ref2va_experimental"} <= base_names
 
     request = "Make the subjects cross the clearing."
-    for name in (
-        "h3_fl2va",
-        "h3_ref2va",
-        "h3_fl2va_experimental",
-        "h3_ref2va_experimental",
-    ):
+    for name in ("h3_fl2va", "h3_ref2va", "h3_fl2va_experimental", "h3_ref2va_experimental"):
         prefix = presets[f"{name}_prefix"]
         suffix = presets[f"{name}_suffix"]
         wrapped = f"{prefix}{request}{suffix}"
@@ -525,12 +342,7 @@ def test_h3_query_presets_are_paired_and_wrap_the_request_once():
         assert suffix.startswith("\r\nEND VIDEO REQUEST.")
         assert wrapped.count(request) == 1
 
-    for name in (
-        "h3_fl2va",
-        "h3_ref2va",
-        "h3_fl2va_experimental",
-        "h3_ref2va_experimental",
-    ):
+    for name in ("h3_fl2va", "h3_ref2va", "h3_fl2va_experimental", "h3_ref2va_experimental"):
         prefix = presets[f"{name}_prefix"]
         suffix = presets[f"{name}_suffix"]
         assert "ComfyUI has already assigned" in prefix
@@ -544,11 +356,7 @@ def test_h3_t2va_query_uses_images_only_as_prompt_evidence():
     prefix = wrapped["h3_t2va_prefix"]
     suffix = wrapped["h3_t2va_suffix"]
     request = "Make the subjects cross the clearing."
-    expected_raw = (
-        prefix.removesuffix("\r\n\r\nBEGIN VIDEO REQUEST:\r\n")
-        + "\r\n\r\n"
-        + suffix.removeprefix("\r\nEND VIDEO REQUEST.\r\n\r\n")
-    )
+    expected_raw = prefix.removesuffix("\r\n\r\nBEGIN VIDEO REQUEST:\r\n") + "\r\n\r\n" + suffix.removeprefix("\r\nEND VIDEO REQUEST.\r\n\r\n")
 
     assert prefix.endswith("BEGIN VIDEO REQUEST:\r\n")
     assert suffix.startswith("\r\nEND VIDEO REQUEST.")
@@ -561,22 +369,19 @@ def test_h3_t2va_query_uses_images_only_as_prompt_evidence():
     assert "concrete target-appropriate visual vocabulary" in prefix
     assert "state the governing target visual direction in `summary:`" in prefix
     assert "Do not invent production methods or unsupported visual additions" in prefix
-    assert ("never output `<Picture N>`" in prefix or "never output <Picture N>" in prefix)
+    assert "never output `<Picture N>`" in prefix or "never output <Picture N>" in prefix
     assert "MiniMax H3 receives this text and none of the supplied VLM images" in suffix
     assert "governs every subject definition and `summary:`" in suffix
     assert "without being restated inside [VISUAL]" in suffix
     assert "cannot substitute for requested visual-style adherence in those fields" in suffix
-    assert ("Do not output `<Picture N>`" in suffix or "Do not output <Picture N>" in suffix)
+    assert "Do not output `<Picture N>`" in suffix or "Do not output <Picture N>" in suffix
     assert "ComfyUI has already assigned" not in prefix
     assert "first frame" not in prefix.lower()
     assert "final frame" not in prefix.lower()
     assert raw["h3_t2va"] == expected_raw
     assert "BEGIN VIDEO REQUEST" not in raw["h3_t2va"]
     assert "END VIDEO REQUEST" not in raw["h3_t2va"]
-    assert all(
-        value.count("\n") == value.count("\r\n")
-        for value in (prefix, suffix, raw["h3_t2va"])
-    )
+    assert all(value.count("\n") == value.count("\r\n") for value in (prefix, suffix, raw["h3_t2va"]))
     for value in (prefix, suffix, raw["h3_t2va"]):
         lowered = value.lower()
         assert "example:" not in lowered
@@ -585,33 +390,10 @@ def test_h3_t2va_query_uses_images_only_as_prompt_evidence():
     assert "h3_t2va" in vlm_nodes.UC_VLMSysQueryAddPresets.get_presets()
     assert "h3_t2va" in vlm_nodes.UC_VLMSysQueryRawPresets.define_schema().inputs[0].options
 
-    source = ast.parse(
-        (CUSTOM_NODE_ROOT / "vlm_presets.py").read_text(encoding="utf-8")
-    )
-    dictionaries = {
-        target.id: node.value
-        for node in source.body
-        if isinstance(node, ast.Assign)
-        for target in node.targets
-        if isinstance(target, ast.Name)
-        and target.id in {"system_query_additional_vlm", "system_query_raw_vlm"}
-    }
-    wrapped_literals = {
-        ast.literal_eval(key): value
-        for key, value in zip(
-            dictionaries["system_query_additional_vlm"].keys,
-            dictionaries["system_query_additional_vlm"].values,
-        )
-        if isinstance(key, ast.Constant)
-    }
-    raw_literals = {
-        ast.literal_eval(key): value
-        for key, value in zip(
-            dictionaries["system_query_raw_vlm"].keys,
-            dictionaries["system_query_raw_vlm"].values,
-        )
-        if isinstance(key, ast.Constant)
-    }
+    source = ast.parse((CUSTOM_NODE_ROOT / "vlm_presets.py").read_text(encoding="utf-8"))
+    dictionaries = {target.id: node.value for node in source.body if isinstance(node, ast.Assign) for target in node.targets if isinstance(target, ast.Name) and target.id in {"system_query_additional_vlm", "system_query_raw_vlm"}}
+    wrapped_literals = {ast.literal_eval(key): value for key, value in zip(dictionaries["system_query_additional_vlm"].keys, dictionaries["system_query_additional_vlm"].values) if isinstance(key, ast.Constant)}
+    raw_literals = {ast.literal_eval(key): value for key, value in zip(dictionaries["system_query_raw_vlm"].keys, dictionaries["system_query_raw_vlm"].values) if isinstance(key, ast.Constant)}
     assert isinstance(wrapped_literals["h3_t2va_prefix"], ast.Constant)
     assert isinstance(wrapped_literals["h3_t2va_suffix"], ast.Constant)
     assert isinstance(raw_literals["h3_t2va"], ast.Constant)
@@ -622,15 +404,10 @@ def test_h3_fl2va_query_preset_enforces_available_boundary_pictures():
     prefix = presets["h3_fl2va_prefix"]
     suffix = presets["h3_fl2va_suffix"]
 
-    assert ("Treat `<Picture 1>` as the fixed first frame" in prefix or "Treat <Picture 1> as the fixed first frame" in prefix)
-    assert (
-        "If and only if a second image was supplied, treat `<Picture 2>` as the fixed final frame"
-        in prefix
-        or "If and only if a second image was supplied, treat <Picture 2> as the fixed final frame"
-        in prefix
-    )
-    assert ("When only one image was supplied, do not mention `<Picture 2>`" in prefix or "When only one image was supplied, do not mention <Picture 2>" in prefix)
-    assert ("use `<Picture 2>` as the fixed ending only when it exists" in suffix or "use <Picture 2> as the fixed ending only when it exists" in suffix)
+    assert "Treat `<Picture 1>` as the fixed first frame" in prefix or "Treat <Picture 1> as the fixed first frame" in prefix
+    assert "If and only if a second image was supplied, treat `<Picture 2>` as the fixed final frame" in prefix or "If and only if a second image was supplied, treat <Picture 2> as the fixed final frame" in prefix
+    assert "When only one image was supplied, do not mention `<Picture 2>`" in prefix or "When only one image was supplied, do not mention <Picture 2>" in prefix
+    assert "use `<Picture 2>` as the fixed ending only when it exists" in suffix or "use <Picture 2> as the fixed ending only when it exists" in suffix
 
 
 def test_h3_ref2va_alt_preserves_explicit_timeline_and_replacement_contract():
@@ -653,14 +430,7 @@ def test_h3_ref2va_alt_preserves_explicit_timeline_and_replacement_contract():
         ("Determine the governing visual style",),
     ):
         assert any(r in prefix for r in required)
-    for required in (
-        "Preserve every explicit Picture/timestamp association",
-        "output exactly that segment count",
-        "copy each supplied start literally",
-        "Do not replace supplied starts with equal-duration divisions",
-        "Depict the completed final subject continuously",
-        "without media bookkeeping",
-    ):
+    for required in ("Preserve every explicit Picture/timestamp association", "output exactly that segment count", "copy each supplied start literally", "Do not replace supplied starts with equal-duration divisions", "Depict the completed final subject continuously", "without media bookkeeping"):
         assert required in suffix
     assert "<Video 1>" not in prefix + suffix + raw
     assert "numbered `<Picture 1>`" not in prefix + suffix + raw
@@ -678,12 +448,8 @@ def test_h3_mixed_ref2va_uses_explicit_picture_timeline_associations():
     suffix = wrapped["h3_mixed_ref2va_suffix"]
 
     assert "h3_mixed_ref2va" in vlm_nodes.UC_VLMSysQueryAddPresets.get_presets()
-    assert "h3_mixed_ref2va" in (
-        vlm_nodes.UC_VLMSysQueryRawPresets.define_schema().inputs[0].options
-    )
-    assert "video_timeline_minimax_h3_mixed_system_instruction" in (
-        vlm_presets.system_instructions_vlm
-    )
+    assert "h3_mixed_ref2va" in (vlm_nodes.UC_VLMSysQueryRawPresets.define_schema().inputs[0].options)
+    assert "video_timeline_minimax_h3_mixed_system_instruction" in (vlm_presets.system_instructions_vlm)
     for required in (
         ("exact `<Picture N>` identifier already assigned by ComfyUI", "exact <Picture N> identifier already assigned by ComfyUI"),
         ("explicit `<Picture N> at TIMESTAMP` associations", "explicit <Picture N> at TIMESTAMP associations"),
@@ -709,23 +475,10 @@ def test_h3_mixed_ref2va_uses_explicit_picture_timeline_associations():
 
 
 def test_h3_mixed_system_instruction_preserves_media_partition_contract():
-    instruction = vlm_presets.system_instructions_vlm[
-        "video_timeline_minimax_h3_mixed_system_instruction"
-    ]
+    instruction = vlm_presets.system_instructions_vlm["video_timeline_minimax_h3_mixed_system_instruction"]
 
-    assert "video_timeline_minimax_h3_mixed_system_instruction" in (
-        vlm_nodes.UC_VLMSysInstrPresets.get_presets()
-    )
-    for required in (
-        "mixed-media partition",
-        "regular user request",
-        "leading ordered images",
-        "<Video 1>",
-        "<Picture N>",
-        "Never write <Video N> inside a timestamp block",
-        "subject_definitions:",
-        "retention_analysis:",
-    ):
+    assert "video_timeline_minimax_h3_mixed_system_instruction" in (vlm_nodes.UC_VLMSysInstrPresets.get_presets())
+    for required in ("mixed-media partition", "regular user request", "leading ordered images", "<Video 1>", "<Picture N>", "Never write <Video N> inside a timestamp block", "subject_definitions:", "retention_analysis:"):
         assert required in instruction
 
 
@@ -736,24 +489,14 @@ def test_readable_h3_reference_sources_match_runtime_presets():
         return value.replace("\r\n", "\n").replace("\r", "\n")
 
     for runtime_key, readable_name in H3_FULL_REFERENCE_PRESETS:
-        assert normalize(vlm_presets.system_instructions_vlm[runtime_key]) == normalize(
-            readable[readable_name]
-        )
+        assert normalize(vlm_presets.system_instructions_vlm[runtime_key]) == normalize(readable[readable_name])
     for name in ("H3_REF2VA", "H3_REF2VA_ALT", "H3_MIXED_REF2VA"):
         key = name.lower()
         prefix = normalize(readable[f"{name}_PREFIX"])
         suffix = normalize(readable[f"{name}_SUFFIX"])
-        assert normalize(
-            vlm_presets.system_query_additional_vlm[f"{key}_prefix"]
-        ) == prefix
-        assert normalize(
-            vlm_presets.system_query_additional_vlm[f"{key}_suffix"]
-        ) == suffix
-        expected_raw = (
-            prefix.removesuffix("\n\nBEGIN VIDEO REQUEST:\n")
-            + "\n\n"
-            + suffix.removeprefix("\nEND VIDEO REQUEST.\n\n")
-        )
+        assert normalize(vlm_presets.system_query_additional_vlm[f"{key}_prefix"]) == prefix
+        assert normalize(vlm_presets.system_query_additional_vlm[f"{key}_suffix"]) == suffix
+        expected_raw = prefix.removesuffix("\n\nBEGIN VIDEO REQUEST:\n") + "\n\n" + suffix.removeprefix("\nEND VIDEO REQUEST.\n\n")
         assert normalize(vlm_presets.system_query_raw_vlm[key]) == expected_raw
 
 
@@ -762,24 +505,14 @@ def test_old_video_timeline_readable_source_matches_exposed_runtime_preset():
     expected = readable["VIDEO_TIMELINE_SYSTEM_INSTRUCTION_OLD"]
     expected = expected.replace("\r\n", "\n").replace("\n", "\r\n")
 
-    assert vlm_presets.system_instructions_vlm[
-        "video_timeline_system_instruction_old"
-    ] == expected
+    assert vlm_presets.system_instructions_vlm["video_timeline_system_instruction_old"] == expected
 
 
 def test_h3_reference_alt_assembled_context_matches_structured_picture_request():
-    instruction = vlm_presets.system_instructions_vlm[
-        "video_timeline_minimax_h3_reference_alt_system_instruction"
-    ]
+    instruction = vlm_presets.system_instructions_vlm["video_timeline_minimax_h3_reference_alt_system_instruction"]
     prefix = vlm_presets.system_query_additional_vlm["h3_ref2va_alt_prefix"]
     suffix = vlm_presets.system_query_additional_vlm["h3_ref2va_alt_suffix"]
-    request = (
-        "Subject in <Picture 1> should replace subject in segment images. "
-        "Target video duration is 12.309 seconds divided into 5 segments. "
-        "Reference each image with <Picture 2> at 00.000s, <Picture 3> at "
-        "03.066s, <Picture 4> at 06.131s, <Picture 5> at 09.197s and "
-        "<Picture 6> at 12.262s."
-    )
+    request = "Subject in <Picture 1> should replace subject in segment images. Target video duration is 12.309 seconds divided into 5 segments. Reference each image with <Picture 2> at 00.000s, <Picture 3> at 03.066s, <Picture 4> at 06.131s, <Picture 5> at 09.197s and <Picture 6> at 12.262s."
     assembled = instruction + prefix + request + suffix
 
     assert assembled.count(request) == 1
@@ -787,21 +520,12 @@ def test_h3_reference_alt_assembled_context_matches_structured_picture_request()
     assert "regular user request" in instruction
     assert "Preserve the exact segment count" in instruction
     assert "every supplied start" in instruction
-    assert ("matching the selected precision" in instruction or "supplied decimal precision" in instruction)
+    assert "matching the selected precision" in instruction or "supplied decimal precision" in instruction
     assert "visible source identity remains analysis-only" in instruction
     assert "continuously present from the first applicable frame through the last" in instruction
-    assert (
-        "Emit an actually supplied Video identifier only in retention_analysis" in instruction
-        or "Emit an actually supplied <Video N> identifier only in retention_analysis" in instruction
-    )
+    assert "Emit an actually supplied Video identifier only in retention_analysis" in instruction or "Emit an actually supplied <Video N> identifier only in retention_analysis" in instruction
     assert "Do not replace supplied starts with equal-duration divisions" in suffix
-    for competing in (
-        "replacement subject",
-        "displaced sample identity",
-        "on-screen swap",
-        "identity swap",
-        "transformation, or reversion",
-    ):
+    for competing in ("replacement subject", "displaced sample identity", "on-screen swap", "identity swap", "transformation, or reversion"):
         assert competing not in instruction + prefix + suffix
 
 
@@ -810,7 +534,7 @@ def test_h3_ref2va_experimental_query_enforces_picture_provenance_contract():
     prefix = presets["h3_ref2va_experimental_prefix"]
     suffix = presets["h3_ref2va_experimental_suffix"]
 
-    assert ("Use `<Picture N>` as source provenance" in prefix or "Use <Picture N> as source provenance" in prefix)
+    assert "Use `<Picture N>` as source provenance" in prefix or "Use <Picture N> as source provenance" in prefix
     assert "never as a timeline-segment anchor" in prefix
     assert "only in that subject or reference's first complete definition" in prefix
     assert "Do not repeat picture identifiers at each timeline interval" in suffix
@@ -830,10 +554,7 @@ def test_h3_query_experimental_variants_remain_independent_and_complete():
 
 
 def test_style_presets_receive_no_qwen_variants():
-    assert not any(
-        "style" in name.lower() and name.endswith("_qwen")
-        for name in vlm_presets.system_instructions_vlm
-    )
+    assert not any("style" in name.lower() and name.endswith("_qwen") for name in vlm_presets.system_instructions_vlm)
 
 
 def test_image_prompt_hardening_preserves_required_contracts():
@@ -842,31 +563,16 @@ def test_image_prompt_hardening_preserves_required_contracts():
         original, hardening = _split_hardening_block(instruction)
 
         assert all(instruction.count(heading) == 1 for heading in HARDENING_HEADINGS)
-        assert [hardening.index(heading) for heading in HARDENING_HEADINGS] == sorted(
-            hardening.index(heading) for heading in HARDENING_HEADINGS
-        )
+        assert [hardening.index(heading) for heading in HARDENING_HEADINGS] == sorted(hardening.index(heading) for heading in HARDENING_HEADINGS)
 
-        for retained_contract in (
-            "uncensored",
-            "system_query",
-            "Subject Count Lock",
-            "Reference Adherence is Paramount",
-            "image input",
-        ):
+        for retained_contract in ("uncensored", "system_query", "Subject Count Lock", "Reference Adherence is Paramount", "image input"):
             assert retained_contract.lower() in original.lower()
 
         family = name.split("_", 1)[0]
-        family_contract = {
-            "neutral": "natural language captions",
-            "action": "Action, Interaction, and Subject Characteristic Analysis",
-            "photo": "Photographic Image Captioning",
-            "toon": "Cartoon Art Prompt Refinement",
-        }[family]
+        family_contract = {"neutral": "natural language captions", "action": "Action, Interaction, and Subject Characteristic Analysis", "photo": "Photographic Image Captioning", "toon": "Cartoon Art Prompt Refinement"}[family]
         assert family_contract.lower() in original.lower()
         if name.endswith("_crude"):
             assert "crude" in original.lower()
-
-
 
 
 def test_image_prompt_hardening_is_literal_without_reward_hacking_anchors():
@@ -892,64 +598,24 @@ def test_image_prompt_hardening_is_literal_without_reward_hacking_anchors():
         assert "other" in quotation_lower or "otherwise" in quotation_lower
 
         language_lower = language.lower()
-        for required in (
-            "visually",
-            "hyphenated words",
-            "em dashes",
-            "en dashes",
-            "purple prose",
-            "superfluous",
-            "ambiguous",
-        ):
+        for required in ("visually", "hyphenated words", "em dashes", "en dashes", "purple prose", "superfluous", "ambiguous"):
             assert required in language_lower
         assert "direct" in language_lower or "literal" in language_lower
 
 
-STRUCTURED_VIDEO_PRESETS = (
-    "video_struct_system_instruction",
-    "video_8part_struct_system_instruction",
-    "video_timeline_system_instruction",
-    "video_timeline_minimax_h3_base_system_instruction",
-    "video_timeline_minimax_h3_ref2va_general",
-)
+STRUCTURED_VIDEO_PRESETS = ("video_struct_system_instruction", "video_8part_struct_system_instruction", "video_timeline_system_instruction", "video_timeline_minimax_h3_base_system_instruction", "video_timeline_minimax_h3_ref2va_general")
 
-H3_TIMELINE_PRESETS = (
-    "video_timeline_minimax_h3_base_system_instruction",
-    "video_timeline_minimax_h3_ref2va_general",
-    "video_timeline_minimax_h3_reference_alt_system_instruction",
-)
+H3_TIMELINE_PRESETS = ("video_timeline_minimax_h3_base_system_instruction", "video_timeline_minimax_h3_ref2va_general", "video_timeline_minimax_h3_reference_alt_system_instruction")
 
-H3_CAMERA_CONTINUITY_PRESETS = (
-    "video_timeline_minimax_h3_base_system_instruction",
-    "video_timeline_minimax_h3_t2va_system_instruction",
-    "video_timeline_minimax_h3_ref2va_general",
-)
+H3_CAMERA_CONTINUITY_PRESETS = ("video_timeline_minimax_h3_base_system_instruction", "video_timeline_minimax_h3_t2va_system_instruction", "video_timeline_minimax_h3_ref2va_general")
 
-TIMELINE_CHANNEL_BALANCE_PRESETS = (
-    "video_timeline_system_instruction",
-    "video_timeline_system_instruction_crude",
-    "video_timeline_minimax_h3_base_system_instruction",
-)
-
-
+TIMELINE_CHANNEL_BALANCE_PRESETS = ("video_timeline_system_instruction", "video_timeline_system_instruction_crude", "video_timeline_minimax_h3_base_system_instruction")
 
 
 def test_structured_video_presets_are_independent_literal_values():
     source = ast.parse((CUSTOM_NODE_ROOT / "vlm_presets.py").read_text(encoding="utf-8"))
-    preset_dict = next(
-        node.value
-        for node in source.body
-        if isinstance(node, ast.Assign)
-        and any(
-            isinstance(target, ast.Name) and target.id == "system_instructions_vlm"
-            for target in node.targets
-        )
-    )
-    literal_nodes = {
-        ast.literal_eval(key): value
-        for key, value in zip(preset_dict.keys, preset_dict.values)
-        if isinstance(key, ast.Constant)
-    }
+    preset_dict = next(node.value for node in source.body if isinstance(node, ast.Assign) and any(isinstance(target, ast.Name) and target.id == "system_instructions_vlm" for target in node.targets))
+    literal_nodes = {ast.literal_eval(key): value for key, value in zip(preset_dict.keys, preset_dict.values) if isinstance(key, ast.Constant)}
 
     for name in STRUCTURED_VIDEO_PRESETS:
         assert name in vlm_presets.system_instructions_vlm
@@ -958,33 +624,12 @@ def test_structured_video_presets_are_independent_literal_values():
 
 
 def test_experimental_video_presets_are_independent_literal_values():
-    source = ast.parse(
-        (CUSTOM_NODE_ROOT / "vlm_experimental_presets.py").read_text(
-            encoding="utf-8"
-        )
-    )
-    preset_dict = next(
-        node.value
-        for node in source.body
-        if isinstance(node, ast.Assign)
-        and any(
-            isinstance(target, ast.Name)
-            and target.id == "system_instructions_vlm_experimental"
-            for target in node.targets
-        )
-    )
-    literal_nodes = {
-        ast.literal_eval(key): value
-        for key, value in zip(preset_dict.keys, preset_dict.values)
-        if isinstance(key, ast.Constant)
-    }
+    source = ast.parse((CUSTOM_NODE_ROOT / "vlm_experimental_presets.py").read_text(encoding="utf-8"))
+    preset_dict = next(node.value for node in source.body if isinstance(node, ast.Assign) and any(isinstance(target, ast.Name) and target.id == "system_instructions_vlm_experimental" for target in node.targets))
+    literal_nodes = {ast.literal_eval(key): value for key, value in zip(preset_dict.keys, preset_dict.values) if isinstance(key, ast.Constant)}
 
-    assert set(literal_nodes) == set(
-        vlm_experimental_presets.system_instructions_vlm_experimental
-    )
+    assert set(literal_nodes) == set(vlm_experimental_presets.system_instructions_vlm_experimental)
     assert all(isinstance(value, ast.Constant) for value in literal_nodes.values())
-
-
 
 
 def test_structured_video_presets_share_audio_and_motion_contracts():
@@ -994,21 +639,12 @@ def test_structured_video_presets_share_audio_and_motion_contracts():
         assert "nonverbal creature noise" in instruction
         assert "belong under [SOUNDS], never [SPEECH]" in instruction
         lowered = instruction.lower()
-        assert (
-            "omit the entire [speech] line" in lowered
-            or "omit the complete [speech] line" in lowered
-        )
-        assert (
-            "Maintain concrete, descriptive visual-motion language throughout"
-            in instruction
-            or "Maintain concrete visual-motion language throughout" in instruction
-        )
+        assert "omit the entire [speech] line" in lowered or "omit the complete [speech] line" in lowered
+        assert "Maintain concrete, descriptive visual-motion language throughout" in instruction or "Maintain concrete visual-motion language throughout" in instruction
 
 
 def test_regular_structured_video_preset_retains_non_part_structure():
-    instruction = vlm_presets.system_instructions_vlm[
-        "video_struct_system_instruction"
-    ]
+    instruction = vlm_presets.system_instructions_vlm["video_struct_system_instruction"]
 
     assert "### Principle 4: Audio-Visual Component Structuring" in instruction
     assert "[VISUAL]: Describe the camera work" in instruction
@@ -1018,9 +654,7 @@ def test_regular_structured_video_preset_retains_non_part_structure():
 
 
 def test_eight_part_video_preset_keeps_channels_in_each_part():
-    instruction = vlm_presets.system_instructions_vlm[
-        "video_8part_struct_system_instruction"
-    ]
+    instruction = vlm_presets.system_instructions_vlm["video_8part_struct_system_instruction"]
 
     assert "eight or more distinct one-second segments" in instruction
     assert "Part 1:" in instruction
@@ -1029,9 +663,7 @@ def test_eight_part_video_preset_keeps_channels_in_each_part():
 
 
 def test_timeline_video_preset_uses_adaptive_contiguous_ranges():
-    instruction = vlm_presets.system_instructions_vlm[
-        "video_timeline_system_instruction"
-    ]
+    instruction = vlm_presets.system_instructions_vlm["video_timeline_system_instruction"]
 
     assert "first output text must be exactly `Timeline:`" in instruction
     assert "[00.00s-01.00s]:" in instruction
@@ -1073,17 +705,9 @@ def test_minimax_h3_timeline_presets_keep_adaptive_standalone_visual_contract():
         assert "one or more **image inputs as ordered visual evidence for prompt generation**" in instruction
         assert "Determine the prompt role of each image" in instruction
         assert "must not depend on the downstream video model receiving the images" in instruction
-        assert (
-            "Fully specify the subjects" in instruction
-            or "concrete written specifications" in instruction
-            or "current composition, framing, Subject appearance" in instruction
-        )
+        assert "Fully specify the subjects" in instruction or "concrete written specifications" in instruction or "current composition, framing, Subject appearance" in instruction
         lowered = instruction.lower()
-        assert (
-            "use no fixed number of sections" in lowered
-            or "do not impose a fixed section count" in lowered
-            or "use no fixed number of timestamp sections" in lowered
-        )
+        assert "use no fixed number of sections" in lowered or "do not impose a fixed section count" in lowered or "use no fixed number of timestamp sections" in lowered
         assert "Every range touches the next without a gap or overlap" in instruction
         assert "final range ends at the exact total duration" in instruction
         if name == "video_timeline_minimax_h3_reference_alt_system_instruction":
@@ -1100,14 +724,7 @@ def test_minimax_h3_timeline_presets_mark_actual_cuts_with_shot_references():
         instruction = vlm_presets.system_instructions_vlm[name]
 
         assert "**Shot Continuity:**" in instruction or "Place [Shot 1]" in instruction
-        assert (
-            "Introduce sequential `[Shot N]` markers inside [VISUAL] only when the "
-            "scene changes or perspective shifts instantly."
-            in instruction
-            or "Introduce sequential later [Shot N] markers only when the scene "
-            "actually cuts or transitions."
-            in instruction
-        )
+        assert "Introduce sequential `[Shot N]` markers inside [VISUAL] only when the scene changes or perspective shifts instantly." in instruction or "Introduce sequential later [Shot N] markers only when the scene actually cuts or transitions." in instruction
         assert "The timestamp range remains the authoritative timing structure." in instruction
 
 
@@ -1116,42 +733,16 @@ def test_minimax_h3_timeline_presets_require_segment_music_contract():
         instruction = vlm_presets.system_instructions_vlm[name]
 
         assert "[VISUAL], optional [SPEECH], [SOUNDS], and optional [MUSIC]" in instruction
+        assert "Omit [MUSIC] from segments with no music specific to them." in instruction or "Omit the complete [MUSIC] line when no segment-specific music occurs." in instruction
+        assert "When music is specific to a timestamp block, write [MUSIC] after [SOUNDS]." in instruction or "When music is specific to one timestamp block, write [MUSIC] after [SOUNDS]." in instruction
+        assert "State the type of music for that segment." in instruction or "State its audible type." in instruction
         assert (
-            "Omit [MUSIC] from segments with no music specific to them." in instruction
-            or "Omit the complete [MUSIC] line when no segment-specific music occurs."
-            in instruction
+            "Mention <Subject N> in [MUSIC] only when that actual subject is playing the music; otherwise state only the music type." in instruction
+            or "Mention <Subject N> in [MUSIC] only when that actual Subject is playing the music." in instruction
+            or "Mention <Subject N> in [MUSIC] only when that actual <Subject N> is playing the music." in instruction
         )
-        assert (
-            "When music is specific to a timestamp block, write [MUSIC] after [SOUNDS]."
-            in instruction
-            or "When music is specific to one timestamp block, write [MUSIC] after [SOUNDS]."
-            in instruction
-        )
-        assert (
-            "State the type of music for that segment." in instruction
-            or "State its audible type." in instruction
-        )
-        assert (
-            "Mention <Subject N> in [MUSIC] only when that actual subject is "
-            "playing the music; otherwise state only the music type."
-            in instruction
-            or "Mention <Subject N> in [MUSIC] only when that actual Subject is "
-            "playing the music."
-            in instruction
-            or "Mention <Subject N> in [MUSIC] only when that actual <Subject N> is "
-            "playing the music."
-            in instruction
-        )
-        assert (
-            "as the whole-video summary of music specified in the timeline."
-            in instruction
-            or "background music audible only to the audience" in instruction
-            or "background music, theme score, or suspense music" in instruction
-        )
-        assert (
-            "Do not introduce music absent from the timeline." in instruction
-            or "Do not introduce music absent from the Timeline." in instruction
-        )
+        assert "as the whole-video summary of music specified in the timeline." in instruction or "background music audible only to the audience" in instruction or "background music, theme score, or suspense music" in instruction
+        assert "Do not introduce music absent from the timeline." in instruction or "Do not introduce music absent from the Timeline." in instruction
 
 
 def test_stable_timeline_presets_require_zero_padded_two_decimal_seconds():
@@ -1163,31 +754,25 @@ def test_stable_timeline_presets_require_zero_padded_two_decimal_seconds():
         assert "total elapsed seconds" in instruction
         assert "at least two integer digits" in instruction or "Pad single-digit seconds with one leading zero" in instruction
         assert "exactly two decimal digits" in instruction or "for two decimals or" in instruction
-        assert ("zero-padded two-decimal" in instruction or "zero-padded total-seconds format" in instruction)
+        assert "zero-padded two-decimal" in instruction or "zero-padded total-seconds format" in instruction
         assert "fewest integer digits needed" not in instruction
         assert "[0s-" not in instruction
         assert "[start-end]:" not in instruction
 
 
 def test_experimental_timeline_presets_keep_minimal_width_contract():
-    for instruction in (
-        vlm_experimental_presets.system_instructions_vlm_experimental.values()
-    ):
+    for instruction in vlm_experimental_presets.system_instructions_vlm_experimental.values():
         assert "first range begins at `0.00s`" in instruction or "first range begins at `00.00s`" in instruction
         assert "[0.00s-0.00s]:" in instruction or "[00.00s-00.00s]:" in instruction
-        assert ("fewest integer digits needed" in instruction or "zero-padded total-seconds format" in instruction)
+        assert "fewest integer digits needed" in instruction or "zero-padded total-seconds format" in instruction
         assert "zero-padded two-decimal" not in instruction
 
 
 def test_minimax_h3_t2va_uses_general_standalone_timeline_contract():
     name = "video_timeline_minimax_h3_t2va_system_instruction"
     instruction = vlm_presets.system_instructions_vlm[name]
-    reference_instruction = vlm_presets.system_instructions_vlm[
-        "video_timeline_minimax_h3_ref2va_general"
-    ]
-    base_instruction = vlm_presets.system_instructions_vlm[
-        "video_timeline_minimax_h3_base_system_instruction"
-    ]
+    reference_instruction = vlm_presets.system_instructions_vlm["video_timeline_minimax_h3_ref2va_general"]
+    base_instruction = vlm_presets.system_instructions_vlm["video_timeline_minimax_h3_base_system_instruction"]
     prefix = vlm_presets.system_query_additional_vlm["h3_t2va_prefix"]
     suffix = vlm_presets.system_query_additional_vlm["h3_t2va_suffix"]
     raw = vlm_presets.system_query_raw_vlm["h3_t2va"]
@@ -1204,7 +789,7 @@ def test_minimax_h3_t2va_uses_general_standalone_timeline_contract():
     assert "receives none of these images" in instruction
     assert "VLM-Only Visual Evidence" in instruction
     assert "Standalone Prompt Boundary" in instruction
-    assert ("Never emit `<Picture N>`" in instruction or "Never emit <Picture N>" in instruction)
+    assert "Never emit `<Picture N>`" in instruction or "Never emit <Picture N>" in instruction
     assert instruction.count("<Picture N>") >= 1
     assert "Complete First-Use Definitions" in instruction
     assert "**Requested Target Visual Style:**" in instruction
@@ -1240,39 +825,19 @@ def test_minimax_h3_t2va_uses_general_standalone_timeline_contract():
     assert "e.g." not in lowered_instruction
     assert "i.e." not in lowered_instruction
 
-    fields = (
-        "subject_definitions:",
-        "summary:",
-        "detailed_description:",
-        "overall_soundscape:",
-        "non_diegetic_music:",
-    )
+    fields = ("subject_definitions:", "summary:", "detailed_description:", "overall_soundscape:", "non_diegetic_music:")
     positions = [instruction.index(field) for field in fields]
     assert positions == sorted(positions)
     assert "exactly five top-level fields" in instruction
     assert "Place `Timeline:` immediately beneath `detailed_description:`" in instruction
-    assert (
-        "Place `summary:` immediately after `subject_definitions`" in instruction
-        or "Write `summary:` immediately after the complete" in instruction
-    )
+    assert "Place `summary:` immediately after `subject_definitions`" in instruction or "Write `summary:` immediately after the complete" in instruction
     assert "Do not enumerate, sequence, condense, restate, paraphrase" in instruction
     assert "duplicate timeline progression in `summary:`" in instruction
 
     assert "[00.00s-00.00s]:" in instruction
     assert "The first range begins at `00.00s`" in instruction
     assert "Pad single-digit seconds with one leading zero" in instruction
-    for forbidden in (
-        "MM:SS.mmm",
-        "00:00.000",
-        "ComfyUI constructs",
-        "Existing Media References",
-        "Explicit Picture Timestamp Mapping",
-        "retention_analysis:",
-        "integrated_multimodal_description:",
-        "fully_preserved",
-        "<Video N>",
-        "<Audio N>",
-    ):
+    for forbidden in ("MM:SS.mmm", "00:00.000", "ComfyUI constructs", "Existing Media References", "Explicit Picture Timestamp Mapping", "retention_analysis:", "integrated_multimodal_description:", "fully_preserved", "<Video N>", "<Audio N>"):
         assert forbidden not in instruction
 
     assert "Use every ordered image supplied with this request" in prefix
@@ -1281,51 +846,23 @@ def test_minimax_h3_t2va_uses_general_standalone_timeline_contract():
     assert "none of the supplied VLM images" in suffix
     assert "BEGIN VIDEO REQUEST:" not in raw
     assert "END VIDEO REQUEST." not in raw
-    for value in (
-        instruction,
-        prefix,
-        suffix,
-        raw,
-    ):
+    for value in (instruction, prefix, suffix, raw):
         assert value.count("\n") == value.count("\r\n")
 
     assert "retention_analysis:" in reference_instruction
     assert "integrated_multimodal_description:" in base_instruction
 
-    source = ast.parse(
-        (CUSTOM_NODE_ROOT / "vlm_presets.py").read_text(encoding="utf-8")
-    )
-    preset_dict = next(
-        node.value
-        for node in source.body
-        if isinstance(node, ast.Assign)
-        and any(
-            isinstance(target, ast.Name)
-            and target.id == "system_instructions_vlm"
-            for target in node.targets
-        )
-    )
-    literal_nodes = {
-        ast.literal_eval(key): value
-        for key, value in zip(preset_dict.keys, preset_dict.values)
-        if isinstance(key, ast.Constant)
-    }
+    source = ast.parse((CUSTOM_NODE_ROOT / "vlm_presets.py").read_text(encoding="utf-8"))
+    preset_dict = next(node.value for node in source.body if isinstance(node, ast.Assign) and any(isinstance(target, ast.Name) and target.id == "system_instructions_vlm" for target in node.targets))
+    literal_nodes = {ast.literal_eval(key): value for key, value in zip(preset_dict.keys, preset_dict.values) if isinstance(key, ast.Constant)}
     assert isinstance(literal_nodes[name], ast.Constant)
 
 
 def test_minimax_h3_base_timeline_field_order():
-    instruction = vlm_presets.system_instructions_vlm[
-        "video_timeline_minimax_h3_base_system_instruction"
-    ]
-    fields = (
-        "integrated_multimodal_description:",
-        "overall_soundscape:",
-        "non_diegetic_music:",
-    )
+    instruction = vlm_presets.system_instructions_vlm["video_timeline_minimax_h3_base_system_instruction"]
+    fields = ("integrated_multimodal_description:", "overall_soundscape:", "non_diegetic_music:")
 
-    assert [instruction.index(field) for field in fields] == sorted(
-        instruction.index(field) for field in fields
-    )
+    assert [instruction.index(field) for field in fields] == sorted(instruction.index(field) for field in fields)
     assert "place `Timeline:` immediately beneath it" in instruction
     assert "Analyze the VLM images in their supplied order" in instruction
     assert "Do not require the user to predeclare these roles" not in instruction
@@ -1334,66 +871,20 @@ def test_minimax_h3_base_timeline_field_order():
 def test_minimax_h3_full_reference_common_contracts():
     readable = runpy.run_path(str(CUSTOM_NODE_ROOT / "vlm_presets_vars.py"))
     options = vlm_nodes.UC_VLMSysInstrPresets.define_schema().inputs[0].options
-    advanced_options = (
-        vlm_nodes.UC_VLMSysInstrAdvPresets.define_schema().inputs[0].options
-    )
-    fields = (
-        "subject_definitions:",
-        "summary:",
-        "retention_analysis:",
-        "detailed_description:",
-        "overall_soundscape:",
-        "non_diegetic_music:",
-    )
-    task_types = (
-        "keyframe completion",
-        "reference generation",
-        "video editing",
-        "video continuation",
-        "audio reuse",
-        "audio reference",
-    )
-    visible_markers = (
-        "fully_preserved",
-        "partially_preserved",
-        "attribute_transfer",
-        "weak_reference",
-    )
+    advanced_options = vlm_nodes.UC_VLMSysInstrAdvPresets.define_schema().inputs[0].options
+    fields = ("subject_definitions:", "summary:", "retention_analysis:", "detailed_description:", "overall_soundscape:", "non_diegetic_music:")
+    task_types = ("keyframe completion", "reference generation", "video editing", "video continuation", "audio reuse", "audio reference")
+    visible_markers = ("fully_preserved", "partially_preserved", "attribute_transfer", "weak_reference")
     audio_markers = ("fully_copy", "partially_copy", "reference", "weak_reference")
-    camera_terms = (
-        "Zoom In / Zoom Out",
-        "Push In / Pull Out",
-        "Pan Left / Pan Right",
-        "Truck Left / Truck Right",
-        "Tilt Up / Tilt Down",
-        "Pedestal Up / Pedestal Down",
-        "Arc Shot",
-        "Tracking Shot",
-        "Static Shot",
-        "Shake Slightly / Shake Strongly",
-        "POV",
-        "Roll Clockwise / Roll Counterclockwise",
-    )
-    required = (
-        "<Subject N>",
-        "<Picture N>",
-        "<Video N>",
-        "<Audio N>",
-        "says in an off-screen voiceover",
-        "<scenetrans>",
-        "<cutoff>",
-        "one to four sentences",
-        "one to three English sentences",
-    )
+    camera_terms = ("Zoom In / Zoom Out", "Push In / Pull Out", "Pan Left / Pan Right", "Truck Left / Truck Right", "Tilt Up / Tilt Down", "Pedestal Up / Pedestal Down", "Arc Shot", "Tracking Shot", "Static Shot", "Shake Slightly / Shake Strongly", "POV", "Roll Clockwise / Roll Counterclockwise")
+    required = ("<Subject N>", "<Picture N>", "<Video N>", "<Audio N>", "says in an off-screen voiceover", "<scenetrans>", "<cutoff>", "one to four sentences", "one to three English sentences")
 
     for runtime_key, readable_name in H3_FULL_REFERENCE_PRESETS:
         instruction = vlm_presets.system_instructions_vlm[runtime_key]
         assert runtime_key in options
         assert runtime_key in advanced_options
         assert instruction == readable[readable_name]
-        assert [instruction.index(field) for field in fields] == sorted(
-            instruction.index(field) for field in fields
-        )
+        assert [instruction.index(field) for field in fields] == sorted(instruction.index(field) for field in fields)
         for phrase in task_types + visible_markers + audio_markers + camera_terms + required:
             assert phrase in instruction
         assert "no text outside" in instruction or "extra output" in instruction
@@ -1412,10 +903,7 @@ def test_minimax_h3_full_reference_keeps_shot_terms_inside_timeline_context():
         ("#### summary", "#### retention_analysis"),
         ("#### retention_analysis", "#### detailed_description and Timeline"),
         ("#### overall_soundscape", "#### non_diegetic_music"),
-        (
-            "#### non_diegetic_music",
-            "#### Instruction Authority and Final Constraints",
-        ),
+        ("#### non_diegetic_music", "#### Instruction Authority and Final Constraints"),
     )
 
     for runtime_key, _readable_name in H3_FULL_REFERENCE_PRESETS:
@@ -1424,66 +912,31 @@ def test_minimax_h3_full_reference_keeps_shot_terms_inside_timeline_context():
             section = instruction[instruction.index(start) : instruction.index(end)]
             assert not re.search(r"\bShots?\b", section)
 
-        retention = instruction[
-            instruction.index("#### retention_analysis") : instruction.index(
-                "#### detailed_description and Timeline"
-            )
-        ]
+        retention = instruction[instruction.index("#### retention_analysis") : instruction.index("#### detailed_description and Timeline")]
         assert "<Subject N>: visible_marker -" in retention
         assert "(appears in applicable Shots)" not in retention
         assert "shot-planning role" not in instruction
         assert "Put [Shot 1] right after [VISUAL]:" in instruction
-        assert (
-            "Use [Shot N] only when the scene changes or perspective shifts instantly."
-            in instruction
-            or "Put the next [Shot N] right after [VISUAL]: in any later segment where an actual camera cut or scene change happens."
-            in instruction
-        )
-        assert (
-            "Otherwise omit [Shot N] from a new segment and camera movement prompting alone should dictate how the view shifts gradually."
-            in instruction
-            or "Keep the timestamp range as the timing." in instruction
-            or "Keep the timestamp ranges as the timing." in instruction
-        )
-        assert (
-            "advance the shot number sequentially without skipping or repeating." in instruction
-            or "in any later segment where an actual camera cut or scene change happens." in instruction
-        )
+        assert "Use [Shot N] only when the scene changes or perspective shifts instantly." in instruction or "Put the next [Shot N] right after [VISUAL]: in any later segment where an actual camera cut or scene change happens." in instruction
+        assert "Otherwise omit [Shot N] from a new segment and camera movement prompting alone should dictate how the view shifts gradually." in instruction or "Keep the timestamp range as the timing." in instruction or "Keep the timestamp ranges as the timing." in instruction
+        assert "advance the shot number sequentially without skipping or repeating." in instruction or "in any later segment where an actual camera cut or scene change happens." in instruction
 
-    for runtime_key in (
-        "video_timeline_minimax_h3_ref2va_general",
-        "video_timeline_minimax_h3_reference_system_instruction_new",
-    ):
+    for runtime_key in ("video_timeline_minimax_h3_ref2va_general", "video_timeline_minimax_h3_reference_system_instruction_new"):
         inst = vlm_presets.system_instructions_vlm[runtime_key]
-        assert (
-            "<Picture N>: concrete frame-anchor or timeline-planning role" in inst
-            or "| `<Picture N>:` | concrete frame-anchor or timeline-planning role |" in inst
-            or "| <Picture N>: | concrete frame-anchor or timeline-planning role |" in inst
-        )
+        assert "<Picture N>: concrete frame-anchor or timeline-planning role" in inst or "| `<Picture N>:` | concrete frame-anchor or timeline-planning role |" in inst or "| <Picture N>: | concrete frame-anchor or timeline-planning role |" in inst
 
 
 def test_minimax_h3_full_reference_assigns_video_motion_transfer_in_retention():
     for runtime_key, _readable_name in H3_FULL_REFERENCE_PRESETS:
         instruction = vlm_presets.system_instructions_vlm[runtime_key]
-        retention = instruction[
-            instruction.index("#### retention_analysis") : instruction.index(
-                "#### detailed_description and Timeline"
-            )
-        ]
+        retention = instruction[instruction.index("#### retention_analysis") : instruction.index("#### detailed_description and Timeline")]
 
         assert "<Video N>" in retention or "<Video 1>" in retention
         assert "camera movement, choreography, timing, pacing, spatial progression" in retention
         assert "attribute_transfer" in retention
         assert "<Subject N>" in retention
         assert "or resulting scene" not in retention
-        assert (
-            "Use partially_preserved only when some source Video content itself "
-            "remains visible."
-            in retention
-            or "Use partially_preserved only when some source <Video N> content itself "
-            "remains visible."
-            in retention
-        )
+        assert "Use partially_preserved only when some source Video content itself remains visible." in retention or "Use partially_preserved only when some source <Video N> content itself remains visible." in retention
         assert "Never create a Video entry" not in retention
         assert "Do not emit timestamp-sample Picture identifiers, Video identifiers" not in instruction
 
@@ -1494,10 +947,7 @@ def test_minimax_h3_full_reference_assigns_video_motion_transfer_in_retention():
         raw = raw_presets[name]
         for value in (suffix, raw):
             assert "<Video N>: attribute_transfer" in value
-            assert (
-                "names the receiving `<Subject N>`" in value
-                or "names the receiving <Subject N>" in value
-            )
+            assert "names the receiving `<Subject N>`" in value or "names the receiving <Subject N>" in value
             assert "or resulting scene" not in value
             assert (
                 "Use `partially_preserved` only when some source Video content itself remains visible." in value
@@ -1509,35 +959,14 @@ def test_minimax_h3_full_reference_assigns_video_motion_transfer_in_retention():
 
 
 def test_minimax_h3_full_reference_protected_prefixes_are_unchanged():
-    marker = (
-        "### Principle 4: MiniMax H3 Reference-Aware Adaptive Timeline and "
-        "Audio-Visual Structuring"
-    )
+    marker = "### Principle 4: MiniMax H3 Reference-Aware Adaptive Timeline and Audio-Visual Structuring"
     protected = {
-        "video_timeline_minimax_h3_ref2va_general": (
-            6560,
-            "34838a0a0cc0f5e520652f8a2df26d264e11d188364e2b9b06c7fbf5fc0747a0",
-        ),
-        "video_timeline_minimax_h3_reference_alt_system_instruction": (
-            6560,
-            "34838a0a0cc0f5e520652f8a2df26d264e11d188364e2b9b06c7fbf5fc0747a0",
-        ),
-        "video_timeline_minimax_h3_mixed_system_instruction": (
-            6769,
-            "3b0dfd8966484e3e36ab7b6e43b1916f114e1b51e649979e41ace9c1079adcba",
-        ),
-        "video_timeline_minimax_h3_reference_system_instruction_new": (
-            6560,
-            "34838a0a0cc0f5e520652f8a2df26d264e11d188364e2b9b06c7fbf5fc0747a0",
-        ),
-        "video_timeline_minimax_h3_reference_alt_system_instruction_new": (
-            6560,
-            "34838a0a0cc0f5e520652f8a2df26d264e11d188364e2b9b06c7fbf5fc0747a0",
-        ),
-        "video_timeline_minimax_h3_mixed_system_instruction_new": (
-            6816,
-            "d95aed84d9d4cb13af343dddfaa4a24f6786e36ef8e5e1d389b4ffd39b2bdf2a",
-        ),
+        "video_timeline_minimax_h3_ref2va_general": (6560, "34838a0a0cc0f5e520652f8a2df26d264e11d188364e2b9b06c7fbf5fc0747a0"),
+        "video_timeline_minimax_h3_reference_alt_system_instruction": (6560, "34838a0a0cc0f5e520652f8a2df26d264e11d188364e2b9b06c7fbf5fc0747a0"),
+        "video_timeline_minimax_h3_mixed_system_instruction": (6769, "3b0dfd8966484e3e36ab7b6e43b1916f114e1b51e649979e41ace9c1079adcba"),
+        "video_timeline_minimax_h3_reference_system_instruction_new": (6560, "34838a0a0cc0f5e520652f8a2df26d264e11d188364e2b9b06c7fbf5fc0747a0"),
+        "video_timeline_minimax_h3_reference_alt_system_instruction_new": (6560, "34838a0a0cc0f5e520652f8a2df26d264e11d188364e2b9b06c7fbf5fc0747a0"),
+        "video_timeline_minimax_h3_mixed_system_instruction_new": (6816, "d95aed84d9d4cb13af343dddfaa4a24f6786e36ef8e5e1d389b4ffd39b2bdf2a"),
     }
 
     for runtime_key, (expected_length, expected_hash) in protected.items():
@@ -1557,57 +986,30 @@ def test_minimax_h3_full_reference_variant_contracts():
         "video_timeline_minimax_h3_reference_alt_system_instruction": (
             "Preserve the exact segment count, every supplied start",
             "visible source identity remains analysis-only",
-            (
-                "Emit an actually supplied Video identifier only in retention_analysis",
-                "Emit an actually supplied <Video N> identifier only in retention_analysis",
-            ),
+            ("Emit an actually supplied Video identifier only in retention_analysis", "Emit an actually supplied <Video N> identifier only in retention_analysis"),
             "continuously present from the first applicable frame through the last",
         ),
         "video_timeline_minimax_h3_mixed_system_instruction": (
             "regular user request to establish the mixed-media partition",
             "chronological samples of one <Video 1> sequence",
-            (
-                "Picture reference numbered from <Picture 1> within that later subset",
-                "<Picture N> reference numbered from <Picture 1> within that later subset",
-            ),
+            ("Picture reference numbered from <Picture 1> within that later subset", "<Picture N> reference numbered from <Picture 1> within that later subset"),
             "Never write <Video N> inside a timestamp block",
         ),
         "video_timeline_minimax_h3_reference_system_instruction_new": (
             "exactly that number of leading Pictures",
-            (
-                "Treat every later Picture as a reference image",
-                "Treat every later <Picture N> as a reference image",
-            ),
-            (
-                "Do not create a Video namespace for leading timeline Pictures",
-                "Do not create a <Video N> namespace for leading timeline Pictures",
-            ),
-            (
-                "Never assume that another Picture requests replacement",
-                "Never assume that another <Picture N> requests replacement",
-            ),
+            ("Treat every later Picture as a reference image", "Treat every later <Picture N> as a reference image"),
+            ("Do not create a Video namespace for leading timeline Pictures", "Do not create a <Video N> namespace for leading timeline Pictures"),
+            ("Never assume that another Picture requests replacement", "Never assume that another <Picture N> requests replacement"),
         ),
         "video_timeline_minimax_h3_reference_alt_system_instruction_new": (
-            (
-                "ordered Shot starts",
-                "ordered timeline Shots",
-            ),
-            (
-                "Treat every later Picture as a reference image",
-                "Treat every later <Picture N> as a reference image",
-            ),
+            ("ordered Shot starts", "ordered timeline Shots"),
+            ("Treat every later Picture as a reference image", "Treat every later <Picture N> as a reference image"),
             "no timeline-source identifiers in Timeline",
             "Never assume replacement merely because later Pictures exist",
         ),
         "video_timeline_minimax_h3_mixed_system_instruction_new": (
-            (
-                "one continuous Picture namespace",
-                "one continuous <Picture N> namespace",
-            ),
-            (
-                "Never create a Video namespace from Pictures",
-                "Never create a <Video N> namespace from Pictures",
-            ),
+            ("one continuous Picture namespace", "one continuous <Picture N> namespace"),
+            ("Never create a Video namespace from Pictures", "Never create a <Video N> namespace from Pictures"),
             "leading timeline Pictures",
             "Never activate video editing or video continuation from timeline Pictures",
         ),
@@ -1624,19 +1026,11 @@ def test_minimax_h3_full_reference_variant_contracts():
 
 def test_minimax_h3_full_reference_assembled_context_contracts():
     system_query = "SYSTEM QUERY SENTINEL: preserve established communication rules."
-    user_query = (
-        "USER QUERY SENTINEL: duration 12.309 seconds; preserve starts 00.000s, "
-        "03.066s, 06.131s, 09.197s, and 12.262s; use supplied media roles."
-    )
+    user_query = "USER QUERY SENTINEL: duration 12.309 seconds; preserve starts 00.000s, 03.066s, 06.131s, 09.197s, and 12.262s; use supplied media roles."
 
     for runtime_key, _readable_name in H3_FULL_REFERENCE_PRESETS:
         instruction = vlm_presets.system_instructions_vlm[runtime_key]
-        assembled = vlm_nodes.UC_VLMSysInstrAdvPresets.execute(
-            runtime_key,
-            False,
-            system_query,
-            user_query,
-        ).args[0]
+        assembled = vlm_nodes.UC_VLMSysInstrAdvPresets.execute(runtime_key, False, system_query, user_query).args[0]
         assert assembled.startswith(instruction)
         assert assembled.count(system_query) == 1
         assert assembled.count(user_query) == 1
@@ -1652,39 +1046,27 @@ def test_minimax_h3_full_reference_assembled_context_contracts():
 def test_minimax_h3_reference_debug_preserves_control_and_fixes_label_contract():
     runtime_key = "video_timeline_minimax_h3_reference_system_instruction_debug"
     readable_name = "VIDEO_TIMELINE_MINIMAX_H3_REFERENCE_SYSTEM_INSTRUCTION_DEBUG"
-    control = vlm_presets.system_instructions_vlm[
-        "video_timeline_minimax_h3_ref2va_general"
-    ]
+    control = vlm_presets.system_instructions_vlm["video_timeline_minimax_h3_ref2va_general"]
     debug = vlm_presets.system_instructions_vlm[runtime_key]
     readable = runpy.run_path(str(CUSTOM_NODE_ROOT / "vlm_presets_vars.py"))
     basic_options = vlm_nodes.UC_VLMSysInstrPresets.define_schema().inputs[0].options
-    advanced_options = (
-        vlm_nodes.UC_VLMSysInstrAdvPresets.define_schema().inputs[0].options
-    )
+    advanced_options = vlm_nodes.UC_VLMSysInstrAdvPresets.define_schema().inputs[0].options
 
     assert debug == readable[readable_name]
     assert runtime_key in basic_options
     assert runtime_key in advanced_options
     assert debug != control
 
-    control_subjects = control[
-        control.index("#### subject_definitions") : control.index("#### summary")
-    ]
-    debug_subjects = debug[
-        debug.index("#### subject_definitions") : debug.index("#### summary")
-    ]
-    debug_timeline = debug[
-        debug.index("#### detailed_description and Timeline") : debug.index(
-            "#### Shots and Camera"
-        )
-    ]
+    control_subjects = control[control.index("#### subject_definitions") : control.index("#### summary")]
+    debug_subjects = debug[debug.index("#### subject_definitions") : debug.index("#### summary")]
+    debug_timeline = debug[debug.index("#### detailed_description and Timeline") : debug.index("#### Shots and Camera")]
 
-    assert ("| `<Subject N>:` |" in control_subjects or "| <Subject N>: |" in control_subjects)
-    assert ("every mentioned Subject action must include" in control_subjects or "every mentioned <Subject N> action must include" in control_subjects)
+    assert "| `<Subject N>:` |" in control_subjects or "| <Subject N>: |" in control_subjects
+    assert "every mentioned Subject action must include" in control_subjects or "every mentioned <Subject N> action must include" in control_subjects
     for tag in ("Subject", "Picture", "Video", "Audio"):
-        assert (f"| `<{tag} N> is ...` |" in debug_subjects or f"| <{tag} N> is ... |" in debug_subjects)
-        assert (f"| `<{tag} N>:` |" not in debug_subjects and f"| <{tag} N>: |" not in debug_subjects)
-    assert ("every mentioned Subject action must include" not in debug_subjects and "every mentioned <Subject N> action must include" not in debug_subjects)
+        assert f"| `<{tag} N> is ...` |" in debug_subjects or f"| <{tag} N> is ... |" in debug_subjects
+        assert f"| `<{tag} N>:` |" not in debug_subjects and f"| <{tag} N>: |" not in debug_subjects
+    assert "every mentioned Subject action must include" not in debug_subjects and "every mentioned <Subject N> action must include" not in debug_subjects
     assert "In generated output, emit it as plain text" in debug_subjects
     assert "Separate the tag from following prose with whitespace" in debug_subjects
     assert "literal alias at first introduction" in debug_timeline
@@ -1693,12 +1075,7 @@ def test_minimax_h3_reference_debug_preserves_control_and_fixes_label_contract()
 
     system_query = "SYSTEM QUERY DEBUG SENTINEL"
     user_query = "USER QUERY DEBUG SENTINEL: create a 6.00s video."
-    assembled = vlm_nodes.UC_VLMSysInstrAdvPresets.execute(
-        runtime_key,
-        False,
-        system_query,
-        user_query,
-    ).args[0]
+    assembled = vlm_nodes.UC_VLMSysInstrAdvPresets.execute(runtime_key, False, system_query, user_query).args[0]
     assert assembled.startswith(debug)
     assert assembled.count(system_query) == 1
     assert assembled.count(user_query) == 1
@@ -1708,38 +1085,22 @@ def test_minimax_h3_reference_debug_preserves_control_and_fixes_label_contract()
 def test_minimax_h3_reference_newdebug_preserves_literal_template_contract():
     runtime_key = "video_timeline_minimax_h3_reference_system_instruction_newdebug"
     readable_name = "VIDEO_TIMELINE_MINIMAX_H3_REFERENCE_SYSTEM_INSTRUCTION_NEWDEBUG"
-    debug = vlm_presets.system_instructions_vlm[
-        "video_timeline_minimax_h3_reference_system_instruction_debug"
-    ]
+    debug = vlm_presets.system_instructions_vlm["video_timeline_minimax_h3_reference_system_instruction_debug"]
     newdebug = vlm_presets.system_instructions_vlm[runtime_key]
     readable = runpy.run_path(str(CUSTOM_NODE_ROOT / "vlm_presets_vars.py"))
     basic_options = vlm_nodes.UC_VLMSysInstrPresets.define_schema().inputs[0].options
-    advanced_options = (
-        vlm_nodes.UC_VLMSysInstrAdvPresets.define_schema().inputs[0].options
-    )
+    advanced_options = vlm_nodes.UC_VLMSysInstrAdvPresets.define_schema().inputs[0].options
 
     assert newdebug == readable[readable_name]
     assert runtime_key in basic_options
     assert runtime_key in advanced_options
     assert newdebug != debug
-    for required in (
-        "everything within curly brace `{}` contains elements to replace",
-        "Completely leave out lyrics for theme music.",
-        "Do NOT invent sounds.",
-        "[SOUNDS] is not for music or instruments.",
-        "[VISUAL]: [Shot 18]",
-        "<Audio 1> serves as the full {description of the music}",
-    ):
+    for required in ("everything within curly brace `{}` contains elements to replace", "Completely leave out lyrics for theme music.", "Do NOT invent sounds.", "[SOUNDS] is not for music or instruments.", "[VISUAL]: [Shot 18]", "<Audio 1> serves as the full {description of the music}"):
         assert required in newdebug
 
     system_query = "SYSTEM QUERY NEWDEBUG SENTINEL"
     user_query = "USER QUERY NEWDEBUG SENTINEL: create a 6.00s video."
-    assembled = vlm_nodes.UC_VLMSysInstrAdvPresets.execute(
-        runtime_key,
-        False,
-        system_query,
-        user_query,
-    ).args[0]
+    assembled = vlm_nodes.UC_VLMSysInstrAdvPresets.execute(runtime_key, False, system_query, user_query).args[0]
     assert assembled.startswith(newdebug)
     assert assembled.count(system_query) == 1
     assert assembled.count(user_query) == 1
@@ -1747,35 +1108,15 @@ def test_minimax_h3_reference_newdebug_preserves_literal_template_contract():
 
 
 def test_experimental_h3_reference_keeps_regression_contract():
-    instruction = vlm_experimental_presets.system_instructions_vlm_experimental[
-        "video_timeline_minimax_h3_reference_system_instruction"
-    ]
-    fields = (
-        "subject_definitions:",
-        "retention_analysis:",
-        "detailed_description:",
-        "summary:",
-        "overall_soundscape:",
-        "non_diegetic_music:",
-    )
+    instruction = vlm_experimental_presets.system_instructions_vlm_experimental["video_timeline_minimax_h3_reference_system_instruction"]
+    fields = ("subject_definitions:", "retention_analysis:", "detailed_description:", "summary:", "overall_soundscape:", "non_diegetic_music:")
 
-    assert [instruction.index(field) for field in fields] == sorted(
-        instruction.index(field) for field in fields
-    )
+    assert [instruction.index(field) for field in fields] == sorted(instruction.index(field) for field in fields)
     assert "Place `summary:` immediately after the complete timeline" in instruction
     assert "as an internal picture-to-time map" in instruction
-    assert (
-        "Do not write `<Picture N>` anywhere inside" in instruction
-        or "Do not write <Picture N> anywhere inside" in instruction
-    )
-    assert (
-        "never cite `<Picture N>` in a timestamp block" in instruction
-        or "never cite <Picture N> in a timestamp block" in instruction
-    )
-    assert (
-        "cite ComfyUI's existing `<Picture N>` identifiers only as subject provenance" in instruction
-        or "cite ComfyUI's existing <Picture N> identifiers only as subject provenance" in instruction
-    )
+    assert "Do not write `<Picture N>` anywhere inside" in instruction or "Do not write <Picture N> anywhere inside" in instruction
+    assert "never cite `<Picture N>` in a timestamp block" in instruction or "never cite <Picture N> in a timestamp block" in instruction
+    assert "cite ComfyUI's existing `<Picture N>` identifiers only as subject provenance" in instruction or "cite ComfyUI's existing <Picture N> identifiers only as subject provenance" in instruction
     assert "**Atomic Subject Labels:**" in instruction
     assert "Never append possessive markers" in instruction
     assert "without modifying the alias" in instruction
@@ -1791,10 +1132,7 @@ def test_minimax_h3_timeline_presets_avoid_example_led_content_anchors():
     for name in H3_TIMELINE_PRESETS:
         assert forbidden.search(vlm_presets.system_instructions_vlm[name]) is None
 
-    assert not any(
-        re.search(r"\be621\b|\bdanbooru\b", instruction, re.IGNORECASE)
-        for instruction in vlm_presets.system_instructions_vlm.values()
-    )
+    assert not any(re.search(r"\be621\b|\bdanbooru\b", instruction, re.IGNORECASE) for instruction in vlm_presets.system_instructions_vlm.values())
 
 
 def test_minimax_h3_dedicated_presets_schema_and_authorities():
@@ -1812,17 +1150,8 @@ def test_minimax_h3_dedicated_presets_schema_and_authorities():
 
 def test_minimax_h3_dedicated_presets_standalone_ast_literals():
     source = ast.parse((CUSTOM_NODE_ROOT / "vlm_presets.py").read_text(encoding="utf-8"))
-    dict_node = next(
-        node.value
-        for node in source.body
-        if isinstance(node, ast.Assign)
-        and any(isinstance(target, ast.Name) and target.id == "system_instructions_vlm" for target in node.targets)
-    )
-    keys_to_values = {
-        key.value: val
-        for key, val in zip(dict_node.keys, dict_node.values)
-        if isinstance(key, ast.Constant) and isinstance(key.value, str)
-    }
+    dict_node = next(node.value for node in source.body if isinstance(node, ast.Assign) and any(isinstance(target, ast.Name) and target.id == "system_instructions_vlm" for target in node.targets))
+    keys_to_values = {key.value: val for key, val in zip(dict_node.keys, dict_node.values) if isinstance(key, ast.Constant) and isinstance(key.value, str)}
 
     for runtime_key, _ in H3_DEDICATED_SCENARIO_PRESETS:
         assert runtime_key in keys_to_values
@@ -1837,28 +1166,16 @@ def test_minimax_h3_dedicated_presets_trailing_whitespace_integrity():
             continue
         instruction = vlm_presets.system_instructions_vlm[runtime_key]
         if "t2va" in runtime_key and "any2va" not in runtime_key:
-            fields = (
-                "integrated_multimodal_description:  \r\n",
-                "overall_soundscape:  \r\n",
-                "non_diegetic_music:  \r\n",
-            )
+            fields = ("integrated_multimodal_description:  \r\n", "overall_soundscape:  \r\n", "non_diegetic_music:  \r\n")
         else:
-            fields = (
-                "subject_definitions:  \r\n",
-                "summary:  \r\n",
-                "detailed_description:  \r\n",
-                "overall_soundscape:  \r\n",
-                "non_diegetic_music:  \r\n",
-            )
+            fields = ("subject_definitions:  \r\n", "summary:  \r\n", "detailed_description:  \r\n", "overall_soundscape:  \r\n", "non_diegetic_music:  \r\n")
         for field in fields:
             assert field in instruction, f"{field!r} missing two trailing spaces in {runtime_key}"
 
 
 def test_minimax_h3_dedicated_presets_tag_binding_and_mechanics():
     forbidden_pronouns = re.compile(r"Never use pronouns \('he', 'she', 'him', 'her', 'his', 'their', 'They', 'Them', 'Their', 'He', 'She'\)")
-    tag_mention = (
-        "In every Timeline segment, every mentioned <Subject N> action must include that Subject's literal <Subject N> alias at the action mention."
-    )
+    tag_mention = "In every Timeline segment, every mentioned <Subject N> action must include that Subject's literal <Subject N> alias at the action mention."
     tag_strict = "Every action, motion, giver, receiver, target, and touched body part must explicitly name the literal <Subject N> tag (write '<Subject 1> takes the ball from <Subject 2>', not 'from her')."
     banned_umbrella = "Never use umbrella placeholders like 'physical interaction', 'interacting with', or 'intimate scene'."
     contact_mechanics = "For bodily contact or sexual acts, explicitly describe the exact physical poses, surfaces touching (mouth on penis, hands on body), motion trajectories (kneeling, stroking, thrusting), and any fluids present (semen, saliva, sweat)."
@@ -1889,18 +1206,12 @@ def test_minimax_h3_fl2va_contract():
 
 
 def test_minimax_h3_scene_image_any2va_contract():
-    for collection in (
-        vlm_presets.system_instructions_vlm,
-        vlm_motion_presets.motion_system_instructions_vlm,
-    ):
+    for collection in (vlm_presets.system_instructions_vlm, vlm_motion_presets.motion_system_instructions_vlm):
         instruction = collection["video_timeline_minimax_h3_scene_image_any2va_system_instruction"]
         assert "MiniMax H3 Scene Image to Video Adaptive Timeline" in instruction
         assert "The single supplied image acts as the visual seed" in instruction
         assert "extrapolate a continuous, escalating progression of motion" in instruction
-        assert (
-            "do not emit `<Picture 1>` or any media identifier inside the summary or timeline" in instruction
-            or "do not emit <Picture 1> or any media identifier inside the summary or timeline" in instruction
-        )
+        assert "do not emit `<Picture 1>` or any media identifier inside the summary or timeline" in instruction or "do not emit <Picture 1> or any media identifier inside the summary or timeline" in instruction
         assert "do not create a <Video N> namespace from the image" in instruction
         assert "Conditional User-Instructed Reference Rule:" in instruction
         assert "Only when the user instruction explicitly specifies" in instruction
@@ -1909,16 +1220,10 @@ def test_minimax_h3_scene_image_any2va_contract():
         assert "Segment Visual and Motion Density Requirement:" in instruction
         assert "Detailed 3-5 sentence" in instruction
         assert "short single sentence" not in instruction
-        assert (
-            "when no `<Video N>` reference is explicitly specified by the user instruction" in instruction
-            or "when no <Video N> reference is explicitly specified by the user instruction" in instruction
-        )
+        assert "when no `<Video N>` reference is explicitly specified by the user instruction" in instruction or "when no <Video N> reference is explicitly specified by the user instruction" in instruction
         assert "never write `of the video`" in instruction
         assert "First and foremost, when an <Audio N> item supplies the soundtrack, background music, or musical beat for the video" in instruction
-        assert (
-            "`non_diegetic_music:` must begin with `<Audio N>`" in instruction
-            or "`non_diegetic_music:` must begin with <Audio N>" in instruction
-        )
+        assert "`non_diegetic_music:` must begin with `<Audio N>`" in instruction or "`non_diegetic_music:` must begin with <Audio N>" in instruction
         assert "Never use the word 'both' or 'Both' in any context inside [VISUAL]" in instruction
         assert "In-Place Character Replacement Rule (No Replacement Instructions):" in instruction
         assert "never write a prompt that instructs replacement, swapping, editing, or transfer" in instruction
@@ -1927,26 +1232,21 @@ def test_minimax_h3_scene_image_any2va_contract():
         assert "summary:" in instruction
         assert "retention_analysis:" in instruction
         assert "detailed_description:" in instruction
+        assert "Default Template (Visual Scene Image Seed Only — No Downstream Media Tags Requested):" in instruction
+        assert "Conditional Downstream Reference Variants (Autonomously Constructed from User Semantic Intent):" in instruction
+        assert "do not cite <Picture N>, <Video N>, or <Audio N> tags in `summary:`" in instruction
+        assert "when user instruction specifies a copied or referenced soundtrack/music <Audio N>" not in instruction
         assert re.search(r"\{[^{}]*\{[^{}]*\}[^{}]*\}", instruction) is None
 
 
 def test_minimax_h3_scene_image_t2va_contract():
-    for collection in (
-        vlm_presets.system_instructions_vlm,
-        vlm_motion_presets.motion_system_instructions_vlm,
-    ):
+    for collection in (vlm_presets.system_instructions_vlm, vlm_motion_presets.motion_system_instructions_vlm):
         instruction = collection["video_timeline_minimax_h3_scene_image_t2va_system_instruction"]
         assert "MiniMax H3 Scene Image to Video Adaptive Timeline" in instruction
         assert "The single supplied image acts as the visual seed" in instruction
         assert "extrapolate a continuous, escalating progression of motion" in instruction
-        assert (
-            "Do not emit `<Picture 1>` or any media identifier inside the timeline" in instruction
-            or "Do not emit <Picture 1> or any media identifier inside the timeline" in instruction
-        )
-        assert (
-            "Do not create a Video namespace from the image" in instruction
-            or "Do not create a <Video N> namespace from the image" in instruction
-        )
+        assert "Do not emit `<Picture 1>` or any media identifier inside the timeline" in instruction or "Do not emit <Picture 1> or any media identifier inside the timeline" in instruction
+        assert "Do not create a Video namespace from the image" in instruction or "Do not create a <Video N> namespace from the image" in instruction
         assert "In-Place Character Replacement Rule (No Replacement Instructions):" in instruction
         assert "never write a prompt that instructs replacement, swapping, editing, or transfer" in instruction
         assert "completely replace the character in the full description across all instances" in instruction
@@ -1962,10 +1262,7 @@ def test_minimax_h3_scene_image_t2va_contract():
 
 
 def test_minimax_h3_storyboard_any2va_contract():
-    for collection in (
-        vlm_presets.system_instructions_vlm,
-        vlm_motion_presets.motion_system_instructions_vlm,
-    ):
+    for collection in (vlm_presets.system_instructions_vlm, vlm_motion_presets.motion_system_instructions_vlm):
         instruction = collection["video_timeline_minimax_h3_storyboard_any2va_system_instruction"]
         assert "MiniMax H3 Storyboard to Video" in instruction
         assert "comic strip" in instruction
@@ -1986,16 +1283,10 @@ def test_minimax_h3_storyboard_any2va_contract():
         assert "Segment Visual and Motion Density Requirement:" in instruction
         assert "Detailed 3-5 sentence" in instruction
         assert "short single sentence" not in instruction
-        assert (
-            "when no `<Video N>` reference is explicitly specified by the user instruction" in instruction
-            or "when no <Video N> reference is explicitly specified by the user instruction" in instruction
-        )
+        assert "when no `<Video N>` reference is explicitly specified by the user instruction" in instruction or "when no <Video N> reference is explicitly specified by the user instruction" in instruction
         assert "never write `of the video`" in instruction
         assert "First and foremost, when an <Audio N> item supplies the soundtrack, background music, or musical beat for the video" in instruction
-        assert (
-            "`non_diegetic_music:` must begin with `<Audio N>`" in instruction
-            or "`non_diegetic_music:` must begin with <Audio N>" in instruction
-        )
+        assert "`non_diegetic_music:` must begin with `<Audio N>`" in instruction or "`non_diegetic_music:` must begin with <Audio N>" in instruction
         assert "Never use the word 'both' or 'Both' in any context inside [VISUAL]" in instruction
         assert "In-Place Character Replacement Rule (No Replacement Instructions):" in instruction
         assert "never write a prompt that instructs replacement, swapping, editing, or transfer" in instruction
@@ -2009,6 +1300,7 @@ def test_minimax_h3_storyboard_any2va_contract():
         assert "Variant A — Full Soundtrack / Audio Copy Intent" in instruction
         assert "Variant B — Vocal Timbre / Voice Reference Intent" in instruction
         assert "Variant C — Subject Visual Reference Intent" in instruction
+        assert "do not cite <Picture N>, <Video N>, or <Audio N> tags in `summary:`" in instruction
         assert "when user instruction specifies a copied or referenced soundtrack/music <Audio N>" not in instruction
         assert "<Audio 1>: fully_copy - source audio track is copied entirely" in instruction
         assert "<Audio 1>: reference - vocal timbre and delivery guide speech of <Subject {N}> (S{N}) without copying audio signal" in instruction
@@ -2016,10 +1308,7 @@ def test_minimax_h3_storyboard_any2va_contract():
 
 
 def test_minimax_h3_storyboard_t2va_contract():
-    for collection in (
-        vlm_presets.system_instructions_vlm,
-        vlm_motion_presets.motion_system_instructions_vlm,
-    ):
+    for collection in (vlm_presets.system_instructions_vlm, vlm_motion_presets.motion_system_instructions_vlm):
         instruction = collection["video_timeline_minimax_h3_storyboard_t2va_system_instruction"]
         assert "MiniMax H3 Storyboard to Video" in instruction
         assert "comic strip" in instruction
@@ -2062,7 +1351,7 @@ def test_minimax_h3_ref2va_attribute_transfer_variants_contracts():
 
     no_audio = vlm_presets.system_instructions_vlm["video_timeline_minimax_h3_ref2va_attr_transfer_no_audio"]
     assert "<Audio 1>:" not in no_audio
-    assert ("Do not create `<Audio N>` labels" in no_audio or "Do not create <Audio N> labels" in no_audio)
+    assert "Do not create `<Audio N>` labels" in no_audio or "Do not create <Audio N> labels" in no_audio
     assert "[video editing + reference generation]" in no_audio
     assert "non_diegetic_music:  \r\nN/A" in no_audio
 
@@ -2073,12 +1362,7 @@ def test_minimax_h3_dedicated_presets_assembled_context():
 
     for runtime_key, _ in H3_DEDICATED_SCENARIO_PRESETS:
         instruction = vlm_presets.system_instructions_vlm[runtime_key]
-        assembled = vlm_nodes.UC_VLMSysInstrAdvPresets.execute(
-            runtime_key,
-            False,
-            system_query,
-            user_query,
-        ).args[0]
+        assembled = vlm_nodes.UC_VLMSysInstrAdvPresets.execute(runtime_key, False, system_query, user_query).args[0]
         assert assembled.startswith(instruction)
         assert assembled.count(system_query) == 1
         assert assembled.count(user_query) == 1
@@ -2087,19 +1371,8 @@ def test_minimax_h3_dedicated_presets_assembled_context():
 
 def test_h3_dedicated_query_presets_contracts():
     add_presets = vlm_nodes.UC_VLMSysQueryAddPresets.get_presets()
-    raw_schema_options = (
-        vlm_nodes.UC_VLMSysQueryRawPresets.define_schema().inputs[0].options
-    )
-    dedicated_queries = (
-        "h3_ref2va_general",
-        "h3_ref2va_attr_transfer_audio_timbre",
-        "h3_ref2va_attr_transfer_audio_copy",
-        "h3_ref2va_attr_transfer_no_audio",
-        "h3_scene_image_any2va",
-        "h3_storyboard_any2va",
-        "h3_scene_image_t2va",
-        "h3_storyboard_t2va",
-    )
+    raw_schema_options = vlm_nodes.UC_VLMSysQueryRawPresets.define_schema().inputs[0].options
+    dedicated_queries = ("h3_ref2va_general", "h3_ref2va_attr_transfer_audio_timbre", "h3_ref2va_attr_transfer_audio_copy", "h3_ref2va_attr_transfer_no_audio", "h3_scene_image_any2va", "h3_storyboard_any2va", "h3_scene_image_t2va", "h3_storyboard_t2va")
 
     for name in dedicated_queries:
         assert name in add_presets
@@ -2119,10 +1392,7 @@ def test_h3_dedicated_query_presets_contracts():
 
     timbre_pref = vlm_presets.system_query_additional_vlm["h3_ref2va_attr_transfer_audio_timbre_prefix"]
     timbre_suff = vlm_presets.system_query_additional_vlm["h3_ref2va_attr_transfer_audio_timbre_suffix"]
-    assert (
-        "vocal-timbre and vocal-delivery reference for `<Subject 1> (S1)`" in timbre_pref
-        or "vocal-timbre and vocal-delivery reference for <Subject 1> (S1)" in timbre_pref
-    )
+    assert "vocal-timbre and vocal-delivery reference for `<Subject 1> (S1)`" in timbre_pref or "vocal-timbre and vocal-delivery reference for <Subject 1> (S1)" in timbre_pref
     assert "cannot replace, omit, or override the mandatory attribute transfer roles" in timbre_pref
     assert "[video editing + reference generation + audio reference]" in timbre_suff
     assert "<Audio 1>: reference - vocal timbre and delivery guide speech" in timbre_suff
@@ -2130,10 +1400,7 @@ def test_h3_dedicated_query_presets_contracts():
 
     copy_pref = vlm_presets.system_query_additional_vlm["h3_ref2va_attr_transfer_audio_copy_prefix"]
     copy_suff = vlm_presets.system_query_additional_vlm["h3_ref2va_attr_transfer_audio_copy_suffix"]
-    assert (
-        "full synchronized soundtrack copied from `<Video 1>`" in copy_pref
-        or "full synchronized soundtrack copied from <Video 1>" in copy_pref
-    )
+    assert "full synchronized soundtrack copied from `<Video 1>`" in copy_pref or "full synchronized soundtrack copied from <Video 1>" in copy_pref
     assert "[video editing + reference generation + audio reuse]" in copy_suff
     assert "<Audio 1>: fully_copy" in copy_suff
 
@@ -2191,21 +1458,11 @@ def test_h3_dedicated_query_presets_contracts():
 
 
 def test_minimax_h3_attr_transfer_multi_subject_contracts():
-    keys = (
-        "video_timeline_minimax_h3_ref2va_attr_transfer_audio_timbre",
-        "video_timeline_minimax_h3_ref2va_attr_transfer_audio_copy",
-        "video_timeline_minimax_h3_ref2va_attr_transfer_no_audio",
-    )
+    keys = ("video_timeline_minimax_h3_ref2va_attr_transfer_audio_timbre", "video_timeline_minimax_h3_ref2va_attr_transfer_audio_copy", "video_timeline_minimax_h3_ref2va_attr_transfer_no_audio")
     for key in keys:
-        for collection in (
-            vlm_presets.system_instructions_vlm,
-            vlm_motion_presets.motion_system_instructions_vlm,
-        ):
+        for collection in (vlm_presets.system_instructions_vlm, vlm_motion_presets.motion_system_instructions_vlm):
             instruction = collection[key]
-            assert (
-                "Original subjects from `<Video 1>` designated for replacement must NEVER be defined under `subject_definitions:`" in instruction
-                or "Original subjects from <Video 1> designated for replacement must NEVER be defined under `subject_definitions:`" in instruction
-            )
+            assert "Original subjects from `<Video 1>` designated for replacement must NEVER be defined under `subject_definitions:`" in instruction or "Original subjects from <Video 1> designated for replacement must NEVER be defined under `subject_definitions:`" in instruction
             assert (
                 "Every other non-replaced subject present in `<Video 1>` must be defined as its own `<Subject {N}>` under `subject_definitions:` using its visible traits from `<Video 1>`." in instruction
                 or "Every other non-replaced subject present in <Video 1> must be defined as its own <Subject {N}> under `subject_definitions:` using its visible traits from <Video 1>." in instruction
@@ -2222,18 +1479,9 @@ def test_minimax_h3_attr_transfer_multi_subject_contracts():
                 "Attribute every [SPEECH] line strictly to the <Subject N> (Sx) who speaks it; if other subjects in `<Video 1>` have dialogue, assign their dialogue to their own <Subject N> (Sx) tag and never set it to be spoken by the reference-replaced subject." in instruction
                 or "Attribute every [SPEECH] line strictly to the <Subject N> (Sx) who speaks it; if other subjects in <Video 1> have dialogue, assign their dialogue to their own <Subject N> (Sx) tag and never set it to be spoken by the reference-replaced subject." in instruction
             )
-            assert (
-                "`<Subject {N}>` is a {visual description of the subject that will be used in the video}, referenced from `<Picture {N}>`." in instruction
-                or "<Subject {N}> is a {visual description of the subject that will be used in the video}, referenced from <Picture {N}>." in instruction
-            )
-            assert (
-                "where on-screen subject(s) are replaced by defined `<Subject {N}>` entities from `<Picture {N}>`" in instruction
-                or "where on-screen subject(s) are replaced by defined <Subject {N}> entities from <Picture {N}>" in instruction
-            )
-            assert (
-                "with source subjects replaced by defined `<Subject {N}>` entities" in instruction
-                or "with source subjects replaced by defined <Subject {N}> entities" in instruction
-            )
+            assert "`<Subject {N}>` is a {visual description of the subject that will be used in the video}, referenced from `<Picture {N}>`." in instruction or "<Subject {N}> is a {visual description of the subject that will be used in the video}, referenced from <Picture {N}>." in instruction
+            assert "where on-screen subject(s) are replaced by defined `<Subject {N}>` entities from `<Picture {N}>`" in instruction or "where on-screen subject(s) are replaced by defined <Subject {N}> entities from <Picture {N}>" in instruction
+            assert "with source subjects replaced by defined `<Subject {N}>` entities" in instruction or "with source subjects replaced by defined <Subject {N}> entities" in instruction
             assert (
                 "Strict Visual Appearance Continuity: In every single shot and timestamp block, all visual details (face, body, materials, textures, geometry, colors) for each defined `<Subject N>` must strictly and exclusively depict that `<Subject N>` using the visual traits established by matching `<Picture N>`"
                 in instruction
@@ -2241,16 +1489,11 @@ def test_minimax_h3_attr_transfer_multi_subject_contracts():
                 in instruction
             )
             assert (
-                "Original subjects from `<Video 1>` designated for replacement are NEVER defined, named, described, or assigned `<Subject N>` aliases under `subject_definitions:`"
-                in instruction
-                or "Original subjects from <Video 1> designated for replacement are NEVER defined, named, described, or assigned <Subject N> aliases under `subject_definitions:`"
-                in instruction
+                "Original subjects from `<Video 1>` designated for replacement are NEVER defined, named, described, or assigned `<Subject N>` aliases under `subject_definitions:`" in instruction
+                or "Original subjects from <Video 1> designated for replacement are NEVER defined, named, described, or assigned <Subject N> aliases under `subject_definitions:`" in instruction
             )
 
-    for collection in (
-        vlm_presets.system_instructions_vlm,
-        vlm_motion_presets.motion_system_instructions_vlm,
-    ):
+    for collection in (vlm_presets.system_instructions_vlm, vlm_motion_presets.motion_system_instructions_vlm):
         attr_transfer = collection["video_timeline_minimax_h3_ref2va_attribute_transfer"]
         assert (
             "Every other non-replaced subject present in `<Video 1>` must be defined as its own `<Subject {N}>` under `subject_definitions:` using its visible traits from `<Video 1>`." in attr_transfer
@@ -2262,42 +1505,22 @@ def test_minimax_h3_attr_transfer_multi_subject_contracts():
         assert "define every other non-replaced subject present in <Video N> as its own <Subject N> using its visible traits from <Video N>." in ref2va_general
         assert "Attribute every [SPEECH] line strictly to the <Subject N> (Sx) who speaks it; if other subjects in the video have dialogue, assign their dialogue to their own <Subject N> (Sx) tag and never set it to be spoken by the reference-replaced subject." in ref2va_general
 
-    for query_key in (
-        "h3_ref2va_attr_transfer_audio_timbre",
-        "h3_ref2va_attr_transfer_audio_copy",
-        "h3_ref2va_attr_transfer_no_audio",
-    ):
+    for query_key in ("h3_ref2va_attr_transfer_audio_timbre", "h3_ref2va_attr_transfer_audio_copy", "h3_ref2va_attr_transfer_no_audio"):
         pref = vlm_presets.system_query_additional_vlm[f"{query_key}_prefix"]
         suff = vlm_presets.system_query_additional_vlm[f"{query_key}_suffix"]
         raw = vlm_presets.system_query_raw_vlm[query_key]
-        assert (
-            "Any other non-replaced subjects in `<Video 1>` must be defined as separate `<Subject N>` entities" in pref
-            or "Any other non-replaced subjects in <Video 1> must be defined as separate <Subject N> entities" in pref
-        )
-        assert (
-            "define any other non-replaced subjects in `<Video 1>` as their own `<Subject N>` entities" in suff
-            or "define any other non-replaced subjects in <Video 1> as their own <Subject N> entities" in suff
-        )
+        assert "Any other non-replaced subjects in `<Video 1>` must be defined as separate `<Subject N>` entities" in pref or "Any other non-replaced subjects in <Video 1> must be defined as separate <Subject N> entities" in pref
+        assert "define any other non-replaced subjects in `<Video 1>` as their own `<Subject N>` entities" in suff or "define any other non-replaced subjects in <Video 1> as their own <Subject N> entities" in suff
         assert "never set" in suff and ("spoken by `<Subject 1>`" in suff or "spoken by <Subject 1>" in suff)
-        assert (
-            "define any other non-replaced subjects in `<Video 1>` as their own `<Subject N>` entities" in raw
-            or "define any other non-replaced subjects in <Video 1> as their own <Subject N> entities" in raw
-        )
+        assert "define any other non-replaced subjects in `<Video 1>` as their own `<Subject N>` entities" in raw or "define any other non-replaced subjects in <Video 1> as their own <Subject N> entities" in raw
         assert "never set" in raw and ("spoken by `<Subject 1>`" in raw or "spoken by <Subject 1>" in raw)
-
 
 
 def test_moss_image_json_preset_contract():
     basic_schema = vlm_nodes.UC_VLMSysInstrPresets.define_schema()
     adv_schema = vlm_nodes.UC_VLMSysInstrAdvPresets.define_schema()
-    assert [out.display_name for out in basic_schema.outputs] == [
-        "system_instruction",
-        "response_schema",
-    ]
-    assert [out.display_name for out in adv_schema.outputs] == [
-        "system_instruction",
-        "response_schema",
-    ]
+    assert [out.display_name for out in basic_schema.outputs] == ["system_instruction", "response_schema"]
+    assert [out.display_name for out in adv_schema.outputs] == ["system_instruction", "response_schema"]
     options = basic_schema.inputs[0].options
     for key in (
         "moss_image_json_instruction",
@@ -2325,22 +1548,12 @@ def test_moss_image_json_preset_contract():
         sys_text, resp_schema = vlm_nodes.UC_VLMSysInstrPresets.execute(key).args
         assert sys_text == instruction
         assert isinstance(resp_schema, dict)
-        assert resp_schema["required"] == [
-            "summary",
-            "items",
-            "bbox_coord_space",
-            "bbox_format",
-        ]
-        adv_text, adv_resp_schema = vlm_nodes.UC_VLMSysInstrAdvPresets.execute(
-            key, False, "", ""
-        ).args
+        assert resp_schema["required"] == ["summary", "items", "bbox_coord_space", "bbox_format"]
+        adv_text, adv_resp_schema = vlm_nodes.UC_VLMSysInstrAdvPresets.execute(key, False, "", "").args
         assert adv_text == instruction
         assert adv_resp_schema == resp_schema
 
-    for key, family_anchor in (
-        ("moss_image_json_instruction_neutral", "Style Deconstruction and Conceptual Vocabulary"),
-        ("moss_image_json_instruction_action", "Action, Interaction, and Subject Characteristic Analysis"),
-    ):
+    for key, family_anchor in (("moss_image_json_instruction_neutral", "Style Deconstruction and Conceptual Vocabulary"), ("moss_image_json_instruction_action", "Action, Interaction, and Subject Characteristic Analysis")):
         instruction = vlm_presets.system_instructions_vlm[key]
         original, hardening = _split_hardening_block(instruction)
         perspective, remainder = hardening.split(HARDENING_HEADINGS[1], 1)
@@ -2362,23 +1575,14 @@ def test_moss_image_json_preset_contract():
         assert "30 to 60 words" not in schema_str
         assert "body-part sub-boxes" not in schema_str
 
-    for ig_key in (
-        "ideogram_4_json_instruction",
-        "ideogram_4_json_instruction_short",
-        "ideogram_4_json_instruction_style",
-        "ideogram_4_json_instruction_color",
-    ):
+    for ig_key in ("ideogram_4_json_instruction", "ideogram_4_json_instruction_short", "ideogram_4_json_instruction_style", "ideogram_4_json_instruction_color"):
         _, ig_schema = vlm_nodes.UC_VLMSysInstrPresets.execute(ig_key).args
         assert isinstance(ig_schema, dict)
         assert "compositional_deconstruction" in ig_schema["properties"]
 
-    _, plain_schema = vlm_nodes.UC_VLMSysInstrPresets.execute(
-        "neutral_system_instruction"
-    ).args
+    _, plain_schema = vlm_nodes.UC_VLMSysInstrPresets.execute("neutral_system_instruction").args
     assert plain_schema is None
     assert '"palette"' not in vlm_presets.system_instructions_vlm["moss_image_json_instruction_short"]
     assert '"palette":["#000000","#FFFFFF"]' in vlm_presets.system_instructions_vlm["moss_image_json_instruction_color"]
     assert "moss_image" in vlm_nodes.UC_VLMSysQueryAddPresets.define_schema().inputs[0].options
     assert "moss_image" in vlm_nodes.UC_VLMSysQueryRawPresets.define_schema().inputs[0].options
-
-
