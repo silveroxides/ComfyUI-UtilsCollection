@@ -1219,6 +1219,11 @@ def test_minimax_h3_scene_image_any2va_contract():
         assert "#### retention_analysis (Conditional on User Instruction)" in instruction
         assert "Segment Visual and Motion Density Requirement:" in instruction
         assert "Detailed 3-5 sentence" in instruction
+        assert "strict minimum 70 words, target 75 to 120 words" in instruction
+        assert "Strict Cut vs. Continuous Camera Rule:" in instruction
+        assert "[Shot 2] <Subject {N}>" not in instruction
+        assert "Subject & Narrator Vocals vs. Non-Diegetic Background Music Rule:" in instruction
+        assert "NEVER emit `[SPEECH]` for lyrics or vocals that belong strictly to non-diegetic background music" in instruction
         assert "short single sentence" not in instruction
         assert "when no `<Video N>` reference is explicitly specified by the user instruction" in instruction or "when no <Video N> reference is explicitly specified by the user instruction" in instruction
         assert "never write `of the video`" in instruction
@@ -1282,6 +1287,11 @@ def test_minimax_h3_storyboard_any2va_contract():
         assert "#### retention_analysis (Conditional on User Instruction)" in instruction
         assert "Segment Visual and Motion Density Requirement:" in instruction
         assert "Detailed 3-5 sentence" in instruction
+        assert "strict minimum 70 words, target 75 to 120 words" in instruction
+        assert "Strict Cut vs. Continuous Camera Rule:" in instruction
+        assert "[Shot 2] <Subject {N}>" not in instruction
+        assert "Subject & Narrator Vocals vs. Non-Diegetic Background Music Rule:" in instruction
+        assert "NEVER emit `[SPEECH]` for lyrics or vocals that belong strictly to non-diegetic background music" in instruction
         assert "short single sentence" not in instruction
         assert "when no `<Video N>` reference is explicitly specified by the user instruction" in instruction or "when no <Video N> reference is explicitly specified by the user instruction" in instruction
         assert "never write `of the video`" in instruction
@@ -1417,6 +1427,9 @@ def test_h3_dedicated_query_presets_contracts():
     assert "never write a prompt that instructs replacement" in scene_any_pref
     assert "completely replace the character in the full description at all instances" in scene_any_pref
     assert "[reference generation]" in scene_any_suff
+    assert "strict minimum 70 words, target 75 to 120 words" in scene_any_suff
+    assert "use ONLY [Shot 1] at 00.00s and omit [Shot N] from all later segments" in scene_any_suff
+    assert "NEVER emit `[SPEECH]` for non-diegetic background song lyrics" in scene_any_suff
     assert "Omit by default; include `retention_analysis:`" in scene_any_suff
     assert "only when the user request explicitly specifies downstream reference media" in scene_any_suff
     assert "completely replace the character in-place across all instances" in scene_any_suff
@@ -1433,6 +1446,8 @@ def test_h3_dedicated_query_presets_contracts():
     story_any_pref = vlm_presets.system_query_additional_vlm["h3_storyboard_any2va_prefix"]
     story_any_suff = vlm_presets.system_query_additional_vlm["h3_storyboard_any2va_suffix"]
     assert "Strict Graphic Strip Rule" in story_any_pref
+    assert "continuous cinematic timeline across time" in story_any_pref
+    assert "never put non-diegetic background song lyrics not sung by any subject into `[SPEECH]`" in story_any_pref
     assert "a stitched-together row of images outlining the timeline progression" in story_any_pref
     assert "multiple separate images showing the progression of the timeline" in story_any_pref
     assert "a video showing a detailed progression" in story_any_pref
@@ -1440,6 +1455,9 @@ def test_h3_dedicated_query_presets_contracts():
     assert "never write a prompt that instructs replacement" in story_any_pref
     assert "completely replace the character in the full description at all instances" in story_any_pref
     assert "[reference generation]" in story_any_suff
+    assert "strict minimum 70 words, target 75 to 120 words" in story_any_suff
+    assert "use ONLY [Shot 1] at 00.00s and omit [Shot N] from all later segments" in story_any_suff
+    assert "NEVER emit `[SPEECH]` for non-diegetic background song lyrics" in story_any_suff
     assert "Omit by default; include `retention_analysis:`" in story_any_suff
     assert "only when the user request explicitly specifies downstream reference media" in story_any_suff
     assert "completely replace the character in-place across all instances" in story_any_suff
