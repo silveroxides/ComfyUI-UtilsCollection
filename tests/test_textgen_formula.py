@@ -763,6 +763,41 @@ def test_qwen3vl_video_caps_frames_supports_multi_video_and_rejects_audio(monkey
     assert (text, thinking) == ("", "cut off reasoning")
 
 
+def test_text_generate_exposes_top_level_seed_with_control_after_generate():
+    inputs = {value.id: value for value in textgen_nodes.UC_TextGenerate.define_schema().inputs}
+    seed_input = inputs["seed"]
+    assert seed_input.io_type == "INT"
+    assert seed_input.default == 0
+    assert seed_input.min == 0
+    assert seed_input.max == 0xFFFFFFFFFFFFFFFF
+    assert seed_input.control_after_generate is True
+    assert seed_input.tooltip
+
+    sampling_inputs = [value.id for option in inputs["sampling_mode"].options for value in option.inputs]
+    assert "seed" not in sampling_inputs
+
+
+def test_text_generate_seed_prefers_top_level_zero_over_sampling_fallback():
+    clip = _GenerateClip()
+    clip.decode = lambda *args, **kwargs: "ok"
+    result = textgen_nodes.UC_TextGenerate.execute(clip, "describe", "", 0, 12, {"sampling_mode": "on", "seed": 99, "empty_response_retries": 0}, image_inputs={}, seed=0)
+    assert result.args == ("ok", 0, "")
+    assert clip.generate_calls[0][1]["seed"] == 0
+
+
+def test_text_generate_fingerprint_inputs_is_deterministic_for_seed_zero_and_greedy_mode():
+    fp_zero_a = textgen_nodes.UC_TextGenerate.fingerprint_inputs(prompt="p", system_prompt="s", sampling_mode={"sampling_mode": "on", "temperature": 0.7}, seed=0, clip=None, image_inputs=None, video=None, videos=None, audios=None)
+    fp_zero_b = textgen_nodes.UC_TextGenerate.fingerprint_inputs(prompt="p", system_prompt="s", sampling_mode={"sampling_mode": "on", "temperature": 0.7}, seed=0, clip=None, image_inputs=None)
+    fp_one = textgen_nodes.UC_TextGenerate.fingerprint_inputs(prompt="p", system_prompt="s", sampling_mode={"sampling_mode": "on", "temperature": 0.7}, seed=1)
+    assert isinstance(fp_zero_a, str) and len(fp_zero_a) == 64
+    assert fp_zero_a == fp_zero_b
+    assert fp_zero_a != fp_one
+
+    fp_off_0 = textgen_nodes.UC_TextGenerate.fingerprint_inputs(prompt="p", sampling_mode={"sampling_mode": "off"}, seed=0)
+    fp_off_9 = textgen_nodes.UC_TextGenerate.fingerprint_inputs(prompt="p", sampling_mode={"sampling_mode": "off"}, seed=9)
+    assert fp_off_0 == fp_off_9
+
+
 def test_project_source_has_no_builtin_eval_calls():
     offenders = []
     tracked = subprocess.run(["git", "ls-files", "--", "*.py"], cwd=CUSTOM_NODE_ROOT, check=True, capture_output=True, text=True).stdout.splitlines()

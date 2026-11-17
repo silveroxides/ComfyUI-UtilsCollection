@@ -7,7 +7,7 @@ from comfy.text_encoders.qwen_vl import qwen2vl_mrope_position_ids
 from comfy_api.latest import io
 
 from ..helpers.encoder_helpers import evaluate_tensor_expression, fuse_deepstack_layers, fuse_visual_token_sources, prepare_vlm_image
-from ..helpers.textgen_helpers import _qwen_execution_context, conform_and_validate_response_schema, generate_qwen3vl_video, prepare_qwen3vl_video_frames, qwen3vl_video_prompt, schema_guided_generation_context
+from ..helpers.textgen_helpers import _qwen_execution_context, conform_and_validate_response_schema, fingerprint_textgen_inputs, generate_qwen3vl_video, prepare_qwen3vl_video_frames, qwen3vl_video_prompt, schema_guided_generation_context
 
 VisualFusionConfig = io.Custom("VISUAL_FUSION_CONFIG")
 ResponseSchema = io.Custom("GEMINI_RESPONSE_SCHEMA")
@@ -267,7 +267,6 @@ class UC_TextGenerate(io.ComfyNode):
                     io.Float.Input("top_p", default=0.95, min=0.0, max=1.0, step=0.01, tooltip="Restricts choices to likely options. Higher values allow more variety."),
                     io.Float.Input("min_p", default=0.05, min=0.0, max=1.0, step=0.01, tooltip="Ignores unlikely options. 0 turns it off."),
                     io.Float.Input("repetition_penalty", default=1.05, min=0.0, max=5.0, step=0.01, tooltip="Discourages repeated text. 1 turns it off."),
-                    io.Int.Input("seed", default=0, min=0, max=0xFFFFFFFFFFFFFFFF),
                     io.Float.Input("presence_penalty", optional=True, default=0.0, min=0.0, max=5.0, step=0.01, tooltip="Discourages words already used in the response. 0 turns it off."),
                     io.Int.Input("empty_response_retries", default=4, min=0, max=32, advanced=True, tooltip="Retry blank generations with consecutive seeds and return the successful seed."),
                 ],
@@ -297,6 +296,7 @@ class UC_TextGenerate(io.ComfyNode):
                 VisualFusionConfig.Input("visual_fusion_config", display_name="Fusion Config", optional=True, tooltip="Optional settings for combining images before generation."),
                 ResponseSchema.Input("response_schema", display_name="Response Schema", optional=True, tooltip="Optional JSON Schema (such as from VLM System Instruction Presets or Configure Gemini Response Schema) to enforce structured JSON output."),
                 io.DynamicCombo.Input("sampling_mode", options=sampling_options, display_name="Sampling Mode", tooltip="On varies results using the seed. Off gives repeatable results."),
+                io.Int.Input("seed", default=0, min=0, max=0xFFFFFFFFFFFFFFFF, control_after_generate=True, tooltip="Random seed used when sampling mode is on."),
                 io.Image.Input("video", optional=True, tooltip="Chronological frame batch from Get Video Components."),
                 io.Float.Input("video_fps", default=24.0, min=0.01, max=1000.0, step=0.01, tooltip="Source frame rate from Get Video Components."),
                 io.Float.Input("sample_fps", default=2.0, min=0.01, max=1000.0, step=0.01, tooltip="Frames per second presented to Qwen3-VL or Qwen3.5."),
@@ -312,8 +312,48 @@ class UC_TextGenerate(io.ComfyNode):
         )
 
     @classmethod
+    def fingerprint_inputs(cls, prompt="", system_prompt="", vlm_resolution=384, vlm_video_resolution=384, max_length=512, formula="", thinking=False, mtp="auto", escape_parentheses=False, sampling_mode=None, seed=None, video_fps=24.0, sample_fps=2.0, visual_fusion_config=None, response_schema=None, **kwargs):
+        return fingerprint_textgen_inputs(
+            prompt=prompt,
+            system_prompt=system_prompt,
+            vlm_resolution=vlm_resolution,
+            vlm_video_resolution=vlm_video_resolution,
+            max_length=max_length,
+            formula=formula,
+            thinking=thinking,
+            mtp=mtp,
+            escape_parentheses=escape_parentheses,
+            sampling_mode=sampling_mode,
+            seed=seed,
+            video_fps=video_fps,
+            sample_fps=sample_fps,
+            visual_fusion_config=visual_fusion_config,
+            response_schema=response_schema,
+        )
+
+    @classmethod
     def execute(
-        cls, clip, prompt, system_prompt, vlm_resolution, max_length, sampling_mode, formula="", thinking=False, mtp="auto", escape_parentheses=False, image_inputs=None, visual_fusion_config=None, response_schema=None, video=None, video_fps=24.0, sample_fps=2.0, vlm_video_resolution=384, videos=None, audios=None
+        cls,
+        clip,
+        prompt,
+        system_prompt,
+        vlm_resolution,
+        max_length,
+        sampling_mode,
+        formula="",
+        thinking=False,
+        mtp="auto",
+        escape_parentheses=False,
+        image_inputs=None,
+        visual_fusion_config=None,
+        response_schema=None,
+        video=None,
+        video_fps=24.0,
+        sample_fps=2.0,
+        vlm_video_resolution=384,
+        videos=None,
+        audios=None,
+        seed=None,
     ) -> io.NodeOutput:
         if clip is None:
             raise RuntimeError("ERROR: CLIP/TextEncoder input is invalid: None")
@@ -529,20 +569,20 @@ class UC_TextGenerate(io.ComfyNode):
         top_k = sampling_mode.get("top_k", 50)
         top_p = sampling_mode.get("top_p", 1.0)
         min_p = sampling_mode.get("min_p", 0.0)
-        seed = sampling_mode.get("seed", None)
+        resolved_seed = seed if seed is not None else sampling_mode.get("seed", None)
         repetition_penalty = sampling_mode.get("repetition_penalty", 1.0)
         presence_penalty = sampling_mode.get("presence_penalty", 0.0)
         empty_response_retries = sampling_mode.get("empty_response_retries", 0)
 
         # 8. Generation & Decoding
-        generation_args = dict(do_sample=do_sample, max_length=max_length, temperature=temperature, top_k=top_k, top_p=top_p, min_p=min_p, repetition_penalty=repetition_penalty, presence_penalty=presence_penalty, seed=seed, mtp=mtp_val)
-        attempts = empty_response_retries + 1 if do_sample and seed is not None else 1
-        used_seed = int(seed) if seed is not None else 0
+        generation_args = dict(do_sample=do_sample, max_length=max_length, temperature=temperature, top_k=top_k, top_p=top_p, min_p=min_p, repetition_penalty=repetition_penalty, presence_penalty=presence_penalty, seed=resolved_seed, mtp=mtp_val)
+        attempts = empty_response_retries + 1 if do_sample and resolved_seed is not None else 1
+        used_seed = int(resolved_seed) if resolved_seed is not None else 0
         generated_text = ""
         thinking_text = ""
         for attempt in range(attempts):
-            if seed is not None:
-                used_seed = (int(seed) + attempt) & 0xFFFFFFFFFFFFFFFF
+            if resolved_seed is not None:
+                used_seed = (int(resolved_seed) + attempt) & 0xFFFFFFFFFFFFFFFF
                 generation_args["seed"] = used_seed
 
             with schema_guided_generation_context(clip, response_schema if schema_active else None, prefilled_open=prefill_open):

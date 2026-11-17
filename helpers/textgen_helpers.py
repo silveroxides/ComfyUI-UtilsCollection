@@ -1,3 +1,4 @@
+import hashlib
 import json
 import logging
 import math
@@ -561,3 +562,42 @@ def schema_guided_generation_context(clip: Any, response_schema: dict[str, Any] 
         yield
     finally:
         transformer.sample_token = orig_sample_token
+
+
+def fingerprint_textgen_inputs(prompt="", system_prompt="", vlm_resolution=384, vlm_video_resolution=384, max_length=512, formula="", thinking=False, mtp="auto", escape_parentheses=False, sampling_mode=None, seed=None, video_fps=24.0, sample_fps=2.0, visual_fusion_config=None, response_schema=None) -> str:
+    sampling = sampling_mode if isinstance(sampling_mode, dict) else {}
+    mode = sampling.get("sampling_mode", "off")
+    if mode == "on":
+        resolved_seed = seed if seed is not None else sampling.get("seed", 0)
+        normalized_sampling = {
+            "sampling_mode": "on",
+            "temperature": sampling.get("temperature", 0.7),
+            "top_k": sampling.get("top_k", 64),
+            "top_p": sampling.get("top_p", 0.95),
+            "min_p": sampling.get("min_p", 0.05),
+            "repetition_penalty": sampling.get("repetition_penalty", 1.05),
+            "presence_penalty": sampling.get("presence_penalty", 0.0),
+            "empty_response_retries": sampling.get("empty_response_retries", 4),
+            "seed": int(resolved_seed) if resolved_seed is not None else 0,
+        }
+    else:
+        normalized_sampling = {"sampling_mode": mode}
+
+    payload = {
+        "prompt": prompt,
+        "system_prompt": system_prompt,
+        "vlm_resolution": vlm_resolution,
+        "vlm_video_resolution": vlm_video_resolution,
+        "max_length": max_length,
+        "formula": formula,
+        "thinking": bool(thinking),
+        "mtp": mtp,
+        "escape_parentheses": bool(escape_parentheses),
+        "sampling": normalized_sampling,
+        "video_fps": video_fps,
+        "sample_fps": sample_fps,
+        "visual_fusion_config": visual_fusion_config if isinstance(visual_fusion_config, dict) else None,
+        "response_schema": response_schema if isinstance(response_schema, dict) else None,
+    }
+    encoded = json.dumps(payload, sort_keys=True, ensure_ascii=False, separators=(",", ":"), default=repr).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()

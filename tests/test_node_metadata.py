@@ -5,7 +5,6 @@ import pathlib
 import re
 import sys
 
-
 TARGETED_DESCRIPTION_IDS = {
     "UC_VLMSysInstrPresetsExperimental",
     "UC_VLMSysInstrLegacyPresets",
@@ -47,48 +46,19 @@ TARGETED_DESCRIPTION_IDS = {
     "UC_SigmoidOffsetScheduler",
 }
 
-
 ACTION_REQUIRED_TOOLTIP_INPUTS = {
-    "UC_AdvancedConsensusConfiguration": {
-        "blend_method", "consensus_type", "alignment_threshold",
-        "similarity_threshold", "power_alpha", "diversity_beta",
-        "rescale_norm", "global_scale", "dynamic_similarity_contrast",
-        "soft_comfort_bandpass", "position_weight", "preserve_common_prefix",
-    },
-    "UC_ModifyMask": {
-        "expand", "incremental_expandrate", "tapered_corners", "flip_input",
-        "blur_radius", "lerp_alpha", "decay_factor", "fill_holes",
-        "lower_clamp", "upper_clamp",
-    },
-    "UC_ImageBlendByMask": {
-        "destination", "source", "mode", "blend_percentage", "resize_source", "mask",
-    },
-    "UC_ImagePad": {
-        "left", "right", "top", "bottom", "extra_padding", "mask",
-        "target_width", "target_height",
-    },
+    "UC_AdvancedConsensusConfiguration": {"blend_method", "consensus_type", "alignment_threshold", "similarity_threshold", "power_alpha", "diversity_beta", "rescale_norm", "global_scale", "dynamic_similarity_contrast", "soft_comfort_bandpass", "position_weight", "preserve_common_prefix"},
+    "UC_ModifyMask": {"expand", "incremental_expandrate", "tapered_corners", "flip_input", "blur_radius", "lerp_alpha", "decay_factor", "fill_holes", "lower_clamp", "upper_clamp"},
+    "UC_ImageBlendByMask": {"destination", "source", "mode", "blend_percentage", "resize_source", "mask"},
+    "UC_ImagePad": {"left", "right", "top", "bottom", "extra_padding", "mask", "target_width", "target_height"},
     "UC_CropByMask": {"padding"},
-    "UC_ImageCropMerge": {
-        "cropped_image", "original_image", "crop_x", "crop_y", "crop_width",
-        "crop_height", "resize_method", "mask",
-    },
-    "UC_ImageAndMaskResize": {
-        "target", "resize_method", "crop", "mask_blur_radius", "width", "height",
-    },
+    "UC_ImageCropMerge": {"cropped_image", "original_image", "crop_x", "crop_y", "crop_width", "crop_height", "resize_method", "mask"},
+    "UC_ImageAndMaskResize": {"target", "resize_method", "crop", "mask_blur_radius", "width", "height"},
     "UC_ResizeMask": {"keep_proportions", "upscale_method", "crop"},
-    "UC_StagedLayeredBackgroundCompositeOptions": {
-        "border_cleanup_width", "artifact_cleanup_radius", "gap_fill_radius",
-        "feather_radius", "image_resize_method", "mask_resize_method",
-    },
-    "UC_StagedMediaPipeFaceOptions": {
-        "detection_threshold", "maximum_faces", "bbox_expansion", "mask_expansion",
-        "face_feather_radius", "initial_face_scale",
-    },
-    "UC_ImageMatchProperties": {
-        "original_image", "generated_image", "overall_weight", "color_weight",
-        "lighting_weight",
-    },
-    "UC_TextGenerate": {"max_length", "sampling_mode", "image_inputs"},
+    "UC_StagedLayeredBackgroundCompositeOptions": {"border_cleanup_width", "artifact_cleanup_radius", "gap_fill_radius", "feather_radius", "image_resize_method", "mask_resize_method"},
+    "UC_StagedMediaPipeFaceOptions": {"detection_threshold", "maximum_faces", "bbox_expansion", "mask_expansion", "face_feather_radius", "initial_face_scale"},
+    "UC_ImageMatchProperties": {"original_image", "generated_image", "overall_weight", "color_weight", "lighting_weight"},
+    "UC_TextGenerate": {"max_length", "sampling_mode", "seed", "image_inputs"},
     "UC_PowerShiftScheduler": {"power", "midpoint_shift"},
     "UC_RadianceShiftScheduler": {"power", "midpoint_shift"},
     "UC_StagedLayerCrops": {"layer_masks"},
@@ -98,17 +68,12 @@ ACTION_REQUIRED_TOOLTIP_INPUTS = {
     "UC_TextEncodeGemmaSystemEditAdvanced": {"image_inputs"},
 }
 
-
 CUSTOM_NODE_ROOT = pathlib.Path(__file__).parents[1]
 PACKAGE_NAME = "utils_collection_metadata_test"
 
 
 def _load_extension_package():
-    spec = importlib.util.spec_from_file_location(
-        PACKAGE_NAME,
-        CUSTOM_NODE_ROOT / "__init__.py",
-        submodule_search_locations=[str(CUSTOM_NODE_ROOT)],
-    )
+    spec = importlib.util.spec_from_file_location(PACKAGE_NAME, CUSTOM_NODE_ROOT / "__init__.py", submodule_search_locations=[str(CUSTOM_NODE_ROOT)])
     package = importlib.util.module_from_spec(spec)
     sys.modules.setdefault(PACKAGE_NAME, package)
     spec.loader.exec_module(package)
@@ -159,20 +124,12 @@ def test_executable_guides_reference_registered_node_ids():
     schemas = {node_class.define_schema().node_id: node_class for node_class in node_classes}
     references = set()
 
-    for guide_id in {
-        "UC_EncoderNodesGuide",
-        "UC_CompositeNodesGuide",
-        "UC_HighResolutionTilingGuide",
-    }:
+    for guide_id in {"UC_EncoderNodesGuide", "UC_CompositeNodesGuide", "UC_HighResolutionTilingGuide"}:
         guide = schemas[guide_id]
         topic = next(value for value in guide.define_schema().inputs if value.id == "topic")
         for option in topic.options:
             markdown = guide.execute(option).args[0]
-            references.update(
-                node_id
-                for node_id in re.findall(r"\bUC_[A-Za-z0-9_]+\b", markdown)
-                if any(character.islower() for character in node_id.removeprefix("UC_"))
-            )
+            references.update(node_id for node_id in re.findall(r"\bUC_[A-Za-z0-9_]+\b", markdown) if any(character.islower() for character in node_id.removeprefix("UC_")))
 
     assert references
     assert references <= schemas.keys()
@@ -186,11 +143,7 @@ def test_shipped_workflows_reference_registered_node_ids():
 
     for workflow_path in (CUSTOM_NODE_ROOT / "workflows").glob("*.json"):
         workflow = json.loads(workflow_path.read_text(encoding="utf-8"))
-        references.update(
-            node["type"]
-            for node in workflow["nodes"]
-            if node.get("type", "").startswith("UC_")
-        )
+        references.update(node["type"] for node in workflow["nodes"] if node.get("type", "").startswith("UC_"))
 
     assert references
     assert references <= registered
@@ -237,18 +190,12 @@ def test_action_required_controls_have_targeted_tooltips():
         assert input_ids <= inputs.keys()
         assert all(inputs[input_id].tooltip for input_id in input_ids)
 
-    sampling_mode = next(
-        value for value in schemas["UC_TextGenerate"].inputs
-        if value.id == "sampling_mode"
-    )
+    sampling_mode = next(value for value in schemas["UC_TextGenerate"].inputs if value.id == "sampling_mode")
     sampling_inputs = [value for option in sampling_mode.options for value in option.inputs]
     assert sampling_inputs
-    assert all(value.tooltip for value in sampling_inputs if value.id != "seed")
+    assert all(value.tooltip for value in sampling_inputs)
 
-    attention_mode = next(
-        value for value in schemas["UC_UnifiedAttentionPatcher"].inputs
-        if value.id == "attention_mode"
-    )
+    attention_mode = next(value for value in schemas["UC_UnifiedAttentionPatcher"].inputs if value.id == "attention_mode")
     attention_inputs = [value for option in attention_mode.options for value in option.inputs]
     assert attention_inputs
     assert all(value.tooltip for value in attention_inputs)
