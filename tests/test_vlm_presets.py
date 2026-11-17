@@ -1249,7 +1249,7 @@ def test_minimax_h3_scene_image_any2va_contract():
         assert "do not cite <Picture N>, <Video N>, or <Audio N> tags in `summary:`" in instruction
         assert "when user instruction specifies a copied or referenced soundtrack/music <Audio N>" not in instruction
         assert "Only when a video is provided AND the user request explicitly mentions `<Video 1>`" in instruction
-        assert "never use vague semantic video references (`source video`, `guide video`, `original video`, `reference video`, `pre-existing video`" in instruction
+        assert "never use vague or meta references (`the guide`, `in the guide`, `from the guide`, `shown in the guide`, `mimicking`, `source video`, `guide video`, `original video`, `reference video`, `pre-existing video`" in instruction
         assert "complete self-contained visual anchors" in instruction
         assert re.search(r"\{[^{}]*\{[^{}]*\}[^{}]*\}", instruction) is None
 
@@ -1325,7 +1325,7 @@ def test_minimax_h3_storyboard_any2va_contract():
         assert "<Audio 1>: fully_copy - source audio track is copied entirely" in instruction
         assert "<Audio 1>: reference - vocal timbre and delivery guide speech of <Subject {N}> (S{N}) without copying audio signal" in instruction
         assert "Only when a video is provided AND the user request explicitly mentions `<Video 1>`" in instruction
-        assert "never use vague semantic video references (`source video`, `guide video`, `original video`, `reference video`, `pre-existing video`" in instruction
+        assert "never use vague or meta references (`the guide`, `in the guide`, `from the guide`, `shown in the guide`, `mimicking`, `source video`, `guide video`, `original video`, `reference video`, `pre-existing video`" in instruction
         assert "complete self-contained anchors" in instruction
         assert re.search(r"\{[^{}]*\{[^{}]*\}[^{}]*\}", instruction) is None
 
