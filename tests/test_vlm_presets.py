@@ -1216,6 +1216,13 @@ def test_minimax_h3_scene_image_any2va_contract():
         assert "Conditional User-Instructed Reference Rule:" in instruction
         assert "Only when the user instruction explicitly specifies" in instruction
         assert "referenced from <Picture N>" in instruction
+        assert "Variant D — First-Frame Anchor / Dual First-Frame + Multi-Picture Reference Intent" in instruction
+        assert "<Picture 1> is the fixed first frame anchor at 00.00s." in instruction
+        assert "referenced from <Picture 1> and <Picture 2>." in instruction
+        assert "[keyframe completion + reference generation]" in instruction
+        assert "beginning directly from <Picture 1> at 00.00s" in instruction
+        assert "Distinguish **keyframe reference**" in instruction
+        assert "non-keyframe scene reference without a fixed boundary" in instruction
         assert "#### retention_analysis (Conditional on User Instruction)" in instruction
         assert "Segment Visual and Motion Density Requirement:" in instruction
         assert "Detailed 3-5 sentence" in instruction
@@ -1422,7 +1429,12 @@ def test_h3_dedicated_query_presets_contracts():
 
     scene_any_pref = vlm_presets.system_query_additional_vlm["h3_scene_image_any2va_prefix"]
     scene_any_suff = vlm_presets.system_query_additional_vlm["h3_scene_image_any2va_suffix"]
-    assert "strictly as an opening scene seed" in scene_any_pref
+    assert "By default (when a single unannotated scene image is supplied), use the supplied image strictly as an opening scene seed" in scene_any_pref
+    assert "treat each <Picture N> strictly according to those user-assigned roles" in scene_any_pref
+    assert "distinguishing a concrete keyframe anchor" in scene_any_pref
+    assert "starting directly from `<Picture 1>` when `<Picture 1>` is assigned as a concrete first-frame anchor" in scene_any_suff
+    assert "[keyframe completion + reference generation]" in scene_any_suff
+    assert "non-keyframe scene references do not trigger `keyframe completion`" in scene_any_suff
     assert "if and only if the user request explicitly specifies" in scene_any_pref
     assert "never write a prompt that instructs replacement" in scene_any_pref
     assert "completely replace the character in the full description at all instances" in scene_any_pref
