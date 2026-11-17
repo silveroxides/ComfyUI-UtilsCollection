@@ -1030,8 +1030,8 @@ def _continuation_audio_waveform(audio: dict) -> tuple[torch.Tensor, int]:
 
 
 def save_minimax_h3_clip_continuation_media(frames: torch.Tensor | None, tail_frames: int, filename_prefix: str, clip_index: int, audio: dict | None = None, padded_frames: int = 0, latent: dict | None = None) -> str:
-    if isinstance(tail_frames, bool) or not isinstance(tail_frames, numbers.Integral) or tail_frames not in {5, 22, 39, 56}:
-        raise ValueError("MiniMax H3 Clip Continuation tail frames must be 5, 22, 39, or 56.")
+    if isinstance(tail_frames, bool) or not isinstance(tail_frames, numbers.Integral) or tail_frames not in {5, 22, 39, 56, 73, 90}:
+        raise ValueError("MiniMax H3 Clip Continuation tail frames must be 5, 22, 39, 56, 73, or 90.")
     pad = int(padded_frames) if padded_frames is not None else 0
     if pad < 0:
         raise ValueError("Padded frames must be non-negative.")
@@ -1400,7 +1400,7 @@ def h3_video_tail_from_latent(latent: Any, n: int) -> tuple[list[torch.Tensor], 
     total = int(video.shape[2])
     steps = h3_steps_for_frames(int(n))
     if steps is None:
-        raise ValueError(f"A {n}-frame window is not a whole number of latent steps. Use 5, 22, 39, or 56.")
+        raise ValueError(f"A {n}-frame window is not a whole number of latent steps. Use 5, 22, 39, 56, 73, or 90.")
     if steps > total:
         raise ValueError(f"Asked for {steps} latent steps, but context_latent only has {total}.")
     start = total - steps
@@ -1471,8 +1471,9 @@ def apply_minimax_h3_clip_continuation(
         if "tail_frames" in continuation_media and tail_frames is None:
             tail_frames = int(continuation_media["tail_frames"])
 
+    audio_off = audio_tail_frames is not None and int(audio_tail_frames) < 0
     use_video = media_type in ("video+audio", "video only") and (continuation_latent is not None or continuation_frames is not None)
-    use_audio = media_type in ("video+audio", "audio only") and (continuation_latent is not None or continuation_audio is not None)
+    use_audio = (not audio_off) and media_type in ("video+audio", "audio only") and (continuation_latent is not None or continuation_audio is not None)
     if not use_video and not use_audio:
         return conditioning, 0
 
@@ -1541,7 +1542,9 @@ def apply_minimax_h3_clip_continuation(
 
     audio_kf = None
     if use_audio:
-        a_frames = int(audio_tail_frames) if audio_tail_frames else (span if span > 0 else int(tail_frames))
+        effective_span = float(span if span > 0 else min(int(tail_frames), frame_count - 1))
+        audio_tail_val = int(audio_tail_frames) if audio_tail_frames is not None else 0
+        a_frames = audio_tail_val if audio_tail_val > 0 else int(effective_span)
         if continuation_latent is not None and len(h3_streams_from_latent(continuation_latent)) >= 2:
             audio_latent, ref_audio_t, overhang = h3_audio_tail_from_latent(continuation_latent, a_frames)
         else:
@@ -1549,9 +1552,12 @@ def apply_minimax_h3_clip_continuation(
                 raise ValueError("MiniMax H3 Clip Continuation audio requires an audio_vae input (or continuation_latent).")
             audio_latent, ref_audio_t = h3_encode_tail_audio(audio_vae, continuation_audio, a_frames / float(H3_CONTINUATION_FPS), cache=cache)
             overhang = 0.0
-        effective_span = float(span if span > 0 else min(int(tail_frames), frame_count - 1))
-        end_frame = effective_span + overhang / H3_FRAME_RESCALE
-        end_coord = round(H3_FRAME_RESCALE * end_frame)
+        if a_frames == int(effective_span):
+            end_coord = round(H3_FRAME_RESCALE * effective_span)
+        else:
+            end_coord = round(H3_FRAME_RESCALE * effective_span + overhang)
+        if a_frames >= int(effective_span):
+            end_coord = min(end_coord, ref_audio_t)
         end_frame = end_coord / H3_FRAME_RESCALE
         audio_kf = {"resolved_frame_index": end_frame - ref_audio_t / H3_FRAME_RESCALE, "audio_latent": audio_latent}
 

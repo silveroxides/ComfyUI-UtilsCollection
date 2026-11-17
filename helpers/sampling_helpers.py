@@ -729,53 +729,69 @@ def _unwrap_scalar_or_indexed(val: Any, index: int) -> Any:
     return val
 
 
-def sample_minimax_h3_clip_continuation_chain(noise: Any, guider: Any, sampler: Any, sigmas: Any, latent: Any, tail_frames: int | str | Sequence[int | str] = "22", audio_tail_frames: int | Sequence[int] = 24) -> tuple[list[dict[str, Any]], list[int], list[int], dict[str, Any], dict[str, Any]]:
+def _parse_optional_int(val: Any, default: int) -> int:
+    return default if val is None else int(val)
+
+
+def _validate_segment_list_length(items: list[Any], num_segments: int, name: str) -> None:
+    if len(items) not in (1, num_segments):
+        raise ValueError(f"UC_MiniMaxH3ClipContinuationSampler received {len(items)} {name} item(s), expected 1 or {num_segments} to match segment count.")
+
+
+def sample_minimax_h3_clip_continuation_chain(noise: Any, guider: Any, sampler: Any, sigmas: Any, latent: Any, tail_frames: int | str | Sequence[int | str] = "22", audio_tail_frames: int | Sequence[int] = 0) -> tuple[list[dict[str, Any]], list[int], list[int], dict[str, Any], dict[str, Any]]:
     """Sample a list of MiniMax H3 segment guiders and latents in one run, chaining each segment's sampled AV latent tail into the next."""
-    from .model_helpers import apply_minimax_h3_clip_continuation, h3_steps_for_frames
+    from .model_helpers import apply_minimax_h3_clip_continuation, h3_pixel_frames_for_latent_steps, h3_steps_for_frames
 
     noise_val = _unwrap_first_scalar(noise)
     sampler_val = _unwrap_first_scalar(sampler)
     sigmas_val = _unwrap_first_scalar(sigmas)
     guider_list = _unwrap_guider_list(guider)
-    default_tail_f = int(_unwrap_first_scalar(tail_frames) or 22)
-    default_aud_tail_f = int(_unwrap_first_scalar(audio_tail_frames) if audio_tail_frames is not None else 24)
+    raw_default_tail = _unwrap_first_scalar(tail_frames)
+    default_tail_f = _parse_optional_int(raw_default_tail, 22)
+    raw_default_aud = _unwrap_first_scalar(audio_tail_frames)
+    default_aud_tail_f = _parse_optional_int(raw_default_aud, 0)
 
     if not guider_list:
         raise ValueError("UC_MiniMaxH3ClipContinuationSampler requires a 'guider' input (from CFGGuider or BasicGuider).")
 
     cond_list = [_extract_positive_cond_from_guider(g) for g in guider_list]
-    cond_list = [c for c in cond_list if c]
-    latent_list = _unwrap_latent_list(latent)
-    if not cond_list:
+    if any(not c for c in cond_list):
         raise ValueError("UC_MiniMaxH3ClipContinuationSampler guider has no positive conditioning.")
+    latent_list = _unwrap_latent_list(latent)
     if not latent_list:
         raise ValueError("UC_MiniMaxH3ClipContinuationSampler requires at least one latent_image input.")
 
     num_segments = max(len(cond_list), len(guider_list), len(latent_list))
+    _validate_segment_list_length(guider_list, num_segments, "guider")
+    _validate_segment_list_length(cond_list, num_segments, "conditioning")
+    _validate_segment_list_length(latent_list, num_segments, "latent_image")
     sampled_latents: list[dict[str, Any]] = []
     trim_leading_list: list[int] = []
     trim_trailing_list: list[int] = []
 
     for i in range(num_segments):
-        base_guider = guider_list[min(i, len(guider_list) - 1)]
-        seg_cond = cond_list[min(i, len(cond_list) - 1)]
-        raw_lat = latent_list[min(i, len(latent_list) - 1)]
+        base_guider = guider_list[0] if len(guider_list) == 1 else guider_list[i]
+        seg_cond = cond_list[0] if len(cond_list) == 1 else cond_list[i]
+        raw_lat = latent_list[0] if len(latent_list) == 1 else latent_list[i]
         sub_v, sub_a = h3_unpack_av(raw_lat, f"segment_{i}_latent")
         seg_latent = h3_pack_av(raw_lat, sub_v.clone(), None if sub_a is None else sub_a.clone())
 
         cond_meta = seg_cond[0][1] if seg_cond and len(seg_cond[0]) > 1 and isinstance(seg_cond[0][1], dict) else {}
-        indexed_tail_f = int(_unwrap_scalar_or_indexed(tail_frames, i) or default_tail_f)
-        indexed_aud_tail_f = int(_unwrap_scalar_or_indexed(audio_tail_frames, i) if audio_tail_frames is not None else default_aud_tail_f)
+        indexed_tail_f = _parse_optional_int(_unwrap_scalar_or_indexed(tail_frames, i), default_tail_f)
+        indexed_aud_tail_f = _parse_optional_int(_unwrap_scalar_or_indexed(audio_tail_frames, i), default_aud_tail_f)
 
         lat_ov = raw_lat.get("uc_overlap_frames", cond_meta.get("uc_overlap_frames"))
-        seg_tail_frames = int(lat_ov) if lat_ov is not None and int(lat_ov) > 0 else indexed_tail_f
+        seg_tail_frames = int(lat_ov) if lat_ov is not None else indexed_tail_f
         lat_pad = raw_lat.get("uc_padded_frames", cond_meta.get("uc_padded_frames", 0))
-        seg_padded_frames = int(lat_pad or 0)
+        seg_padded_frames = int(lat_pad if lat_pad is not None else 0)
 
         if i == 0:
             existing_trim = int(cond_meta.get("minimax_trim_frames", 0))
             active_cond = seg_cond
             trim_i = existing_trim
+        elif seg_tail_frames <= 0:
+            active_cond = seg_cond
+            trim_i = 0
         else:
             prev_sampled = sampled_latents[i - 1]
             active_cond, trim_i = apply_minimax_h3_clip_continuation(seg_cond, seg_latent, tail_frames=seg_tail_frames, audio_tail_frames=indexed_aud_tail_f, continuation_latent=prev_sampled)
@@ -792,18 +808,30 @@ def sample_minimax_h3_clip_continuation_chain(noise: Any, guider: Any, sampler: 
     # Assemble combined full-length AV latent by removing the pinned overlap head from segments 1..N-1
     comb_v_parts: list[torch.Tensor] = []
     comb_a_parts: list[torch.Tensor] = []
+    cum_frames = 0
+    curr_cum_a = 0
     for i, (seg_out, trim_f) in enumerate(zip(sampled_latents, trim_leading_list)):
         sv, sa = h3_unpack_av(seg_out, f"sampled_segment_{i}")
+        seg_total_f = h3_pixel_frames_for_latent_steps(int(sv.shape[2]))
         if i == 0 or trim_f <= 0:
             comb_v_parts.append(sv)
+            cum_frames += seg_total_f
             if sa is not None:
                 comb_a_parts.append(sa)
+                curr_cum_a += int(sa.shape[-1])
         else:
-            ov_v = h3_steps_for_frames(trim_f) or 0
-            ov_a = int(round(float(trim_f) / float(H3_FPS) * float(H3_AUDIO_FPS)))
+            ov_v = h3_steps_for_frames(trim_f)
+            if ov_v is None:
+                raise ValueError(f"Segment {i} trim_leading_frames ({trim_f}) is not on the MiniMax H3 latent step grid.")
             comb_v_parts.append(sv[:, :, ov_v:] if ov_v < sv.shape[2] else sv[:, :, :0])
+            kept_f = max(0, seg_total_f - int(trim_f))
+            cum_frames += kept_f
             if sa is not None:
+                target_cum_a = round(float(cum_frames) / float(H3_FPS) * float(H3_AUDIO_FPS))
+                want_a = max(0, min(int(sa.shape[-1]), target_cum_a - curr_cum_a))
+                ov_a = int(sa.shape[-1]) - want_a
                 comb_a_parts.append(sa[..., ov_a:] if ov_a < sa.shape[-1] else sa[..., :0])
+                curr_cum_a += want_a
 
     combined_v = torch.cat(comb_v_parts, dim=2) if len(comb_v_parts) > 1 else comb_v_parts[0].clone()
     combined_a = (torch.cat(comb_a_parts, dim=-1) if len(comb_a_parts) > 1 else comb_a_parts[0].clone()) if comb_a_parts else None

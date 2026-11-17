@@ -1,56 +1,44 @@
 import ast
-from collections.abc import Mapping
-from contextlib import contextmanager
 import hashlib
+import logging
+import math
+import numbers
 import operator
 import os
-import math
 import re
-import torch
-import torchaudio
-import logging
-import numbers
 import threading
-from einops import rearrange
+from collections.abc import Mapping
+from contextlib import contextmanager
 from enum import Enum
 from fractions import Fraction
 from pathlib import Path
-import torch.nn.functional as F
-from PIL import Image, ImageOps, ImageSequence
-import numpy as np
 
-import folder_paths
-import node_helpers
 import comfy
 import comfy.model_management
 import comfy.nested_tensor
 import comfy.utils
-from .helper_functions import atomic_uel_writer, resize_nchw
-from .image_helpers import VIDEO_FRAME_TIMESTAMP_FORMATS, format_video_timestamp, parse_video_timestamps
-from .minimax_h3_guide_helpers import (
-    LAYOUT_KEY, build_layout, splice_conditioning,
-)
-from .minimax_h3_cache_helpers import H3EncoderCache, spatial_cache_settings, temporal_cache_settings
-from .minimax_h3_temporal_helpers import (
-    encode_temporal_conditioning, fuse_temporal_block, minimax_h3_temporal_frame_pairs,
-    minimax_h3_continuation_frame_pairs,
-)
-
+import folder_paths
+import node_helpers
+import numpy as np
+import torch
+import torch.nn.functional as F
+import torchaudio
 from comfy.ldm.flux.math import apply_rope
 from comfy.ldm.modules.attention import optimized_attention
-from comfy.sd1_clip import token_weights, escape_important, unescape_important
+from comfy.sd1_clip import escape_important, token_weights, unescape_important
 from comfy.text_encoders.minimax import token_tags_from_embeds_info
+from einops import rearrange
+from PIL import Image, ImageOps, ImageSequence
 
+from .helper_functions import atomic_uel_writer, resize_nchw
+from .image_helpers import VIDEO_FRAME_TIMESTAMP_FORMATS, format_video_timestamp, parse_video_timestamps
+from .minimax_h3_cache_helpers import H3EncoderCache, temporal_cache_settings
+from .minimax_h3_guide_helpers import LAYOUT_KEY, build_layout, splice_conditioning
+from .minimax_h3_temporal_helpers import encode_temporal_conditioning, fuse_temporal_block, minimax_h3_continuation_frame_pairs, minimax_h3_temporal_frame_pairs
 
 _VISUAL_ENCODER_PATH_LOCK = threading.RLock()
 MINIMAX_H3_MEDIA_STRUCTURE = "<<picture>>: <<visual>>"
-MINIMAX_H3_VIDEO_LATENT_MODES = (
-    "full video",
-    "pooled",
-    "refined",
-    "off",
-    "even keyframes",
-)
+MINIMAX_H3_VIDEO_LATENT_MODES = ("full video", "pooled", "refined", "off", "even keyframes")
 _MINIMAX_H3_MEDIA_KEYWORDS = {"time", "picture", "visual", "shot"}
 _MINIMAX_H3_REQUIRED_MEDIA_KEYWORDS = {"picture", "visual"}
 
@@ -244,69 +232,36 @@ def visual_text_encoder_key(clip) -> str | None:
 
 def is_klein_vl_text_encoder(clip) -> bool:
     tokenizer_type = type(getattr(clip, "tokenizer", None))
-    return (
-        tokenizer_type.__module__ == "comfy.text_encoders.flux"
-        and tokenizer_type.__name__ in {"KleinVLTokenizer", "KleinVLTokenizer8B"}
-    )
+    return tokenizer_type.__module__ == "comfy.text_encoders.flux" and tokenizer_type.__name__ in {"KleinVLTokenizer", "KleinVLTokenizer8B"}
 
 
 def is_flux3_text_encoder(clip) -> bool:
     tokenizer = getattr(clip, "tokenizer", None)
     stage = getattr(clip, "cond_stage_model", None)
-    return any(
-        cls.__module__ == "comfy.text_encoders.flux"
-        and cls.__name__ in {"Flux3Tokenizer", "Flux3TEModel", "Flux3Qwen3VLModel"}
-        for owner in (tokenizer, stage, getattr(stage, "clip_model", None))
-        if owner is not None
-        for cls in type(owner).__mro__
-    )
+    return any(cls.__module__ == "comfy.text_encoders.flux" and cls.__name__ in {"Flux3Tokenizer", "Flux3TEModel", "Flux3Qwen3VLModel"} for owner in (tokenizer, stage, getattr(stage, "clip_model", None)) if owner is not None for cls in type(owner).__mro__)
 
 
 def format_flux3_prompt(prompt, system_prompt=""):
     if system_prompt:
-        return (
-            f"<|im_start|>system\n{system_prompt}<|im_end|>\n"
-            f"<|im_start|>user\n{prompt}<|im_end|>\n"
-            "<|im_start|>assistant\n"
-        )
-    return (
-        f"<|im_start|>user\n{prompt}<|im_end|>\n"
-        "<|im_start|>assistant\n"
-    )
+        return f"<|im_start|>system\n{system_prompt}<|im_end|>\n<|im_start|>user\n{prompt}<|im_end|>\n<|im_start|>assistant\n"
+    return f"<|im_start|>user\n{prompt}<|im_end|>\n<|im_start|>assistant\n"
 
 
 def is_moss_image_text_encoder(clip) -> bool:
     tokenizer = getattr(clip, "tokenizer", None)
     stage = getattr(clip, "cond_stage_model", None)
-    return any(
-        cls.__module__ == "comfy.text_encoders.moss_image"
-        and cls.__name__ in {"MOSSImageTokenizer", "MOSSImageTEModel"}
-        for owner in (tokenizer, stage, getattr(stage, "clip_model", None))
-        if owner is not None
-        for cls in type(owner).__mro__
-    )
+    return any(cls.__module__ == "comfy.text_encoders.moss_image" and cls.__name__ in {"MOSSImageTokenizer", "MOSSImageTEModel"} for owner in (tokenizer, stage, getattr(stage, "clip_model", None)) if owner is not None for cls in type(owner).__mro__)
 
 
 def format_moss_image_prompt(prompt, system_prompt=""):
     user_prompt = prompt.strip()
     if system_prompt:
-        return (
-            f"<|im_start|>system\n{system_prompt}<|im_end|>\n"
-            f"<|im_start|>user\n{user_prompt}<|im_end|>\n"
-            "<|im_start|>assistant\n<think>\n"
-        )
-    return (
-        f"<|im_start|>user\n{user_prompt}<|im_end|>\n"
-        "<|im_start|>assistant\n<think>\n"
-    )
+        return f"<|im_start|>system\n{system_prompt}<|im_end|>\n<|im_start|>user\n{user_prompt}<|im_end|>\n<|im_start|>assistant\n<think>\n"
+    return f"<|im_start|>user\n{user_prompt}<|im_end|>\n<|im_start|>assistant\n<think>\n"
 
 
 def is_qwen_image21_text_encoder(clip) -> bool:
-    return any(
-        cls.__module__ == "comfy.text_encoders.qwen_image21"
-        and cls.__name__ == "QwenImage21Tokenizer"
-        for cls in type(getattr(clip, "tokenizer", None)).__mro__
-    )
+    return any(cls.__module__ == "comfy.text_encoders.qwen_image21" and cls.__name__ == "QwenImage21Tokenizer" for cls in type(getattr(clip, "tokenizer", None)).__mro__)
 
 
 def prepare_qwen_image21_image(image: torch.Tensor, resolution: int | None = 1024) -> tuple[torch.Tensor, torch.Tensor]:
@@ -334,11 +289,7 @@ def prepare_qwen_image21_image(image: torch.Tensor, resolution: int | None = 102
 
 def format_qwen_image21_prompt(prompt, system_prompt):
     system = system_prompt or "Comprehend and analyze the provided prompt."
-    return (
-        f"<|im_start|>system\n{system}<|im_end|>\n"
-        f"<|im_start|>user\n{prompt}<|im_end|>\n"
-        "<|im_start|>assistant\n"
-    )
+    return f"<|im_start|>system\n{system}<|im_end|>\n<|im_start|>user\n{prompt}<|im_end|>\n<|im_start|>assistant\n"
 
 
 def visual_embedding_key(clip, tokens: dict) -> str:
@@ -360,9 +311,7 @@ def _token_entries(tokens, key_name: str) -> list:
             raise ValueError
         return list(batches[0])
     except (KeyError, TypeError, ValueError) as exc:
-        raise ValueError(
-            f"Expected one {key_name} token sequence from the connected encoder."
-        ) from exc
+        raise ValueError(f"Expected one {key_name} token sequence from the connected encoder.") from exc
 
 
 def _minimax_h3_text_entries(clip, text: str) -> list:
@@ -372,15 +321,11 @@ def _minimax_h3_text_entries(clip, text: str) -> list:
 
 
 def _minimax_h3_visual_token_entries(clip, image) -> list:
-    full = _token_entries(
-        clip.tokenize("", images=[image]), "qwen3vl_32b"
-    )
+    full = _token_entries(clip.tokenize("", images=[image]), "qwen3vl_32b")
     picture_one = _minimax_h3_text_entries(clip, "<Picture 1>: ")
     if len(full) <= len(picture_one):
         raise ValueError("MiniMax H3 tokenizer returned an incomplete picture block.")
-    if [item[0] for item in full[: len(picture_one)]] != [
-        item[0] for item in picture_one
-    ]:
+    if [item[0] for item in full[: len(picture_one)]] != [item[0] for item in picture_one]:
         raise ValueError("MiniMax H3 tokenizer returned an unexpected picture prefix.")
     visual = full[len(picture_one) :]
     if sum(is_image_token(item) for item in visual) != 1:
@@ -391,28 +336,22 @@ def _minimax_h3_visual_token_entries(clip, image) -> list:
 def _minimax_h3_visual_token_blocks(clip, images) -> list[list]:
     if not images:
         return []
-    entries = _token_entries(
-        clip.tokenize("", images=list(images)), "qwen3vl_32b"
-    )
+    entries = _token_entries(clip.tokenize("", images=list(images)), "qwen3vl_32b")
     blocks = []
     for index, entry in enumerate(entries):
         if not is_image_token(entry):
             continue
         if index < 1 or index + 1 >= len(entries):
             raise ValueError("MiniMax H3 tokenizer returned an incomplete visual block.")
-        blocks.append(entries[index - 1:index + 2])
+        blocks.append(entries[index - 1 : index + 2])
     if len(blocks) != len(images):
-        raise ValueError(
-            f"MiniMax H3 tokenizer returned {len(blocks)} visual blocks for {len(images)} Pictures."
-        )
+        raise ValueError(f"MiniMax H3 tokenizer returned {len(blocks)} visual blocks for {len(images)} Pictures.")
     return blocks
 
 
 def _minimax_h3_visual_entries(clip, image, picture_number: int) -> list:
     """Build one numbered H3 picture block through Core's active tokenizer."""
-    return _minimax_h3_text_entries(
-        clip, f"<Picture {picture_number}>: "
-    ) + _minimax_h3_visual_token_entries(clip, image)
+    return _minimax_h3_text_entries(clip, f"<Picture {picture_number}>: ") + _minimax_h3_visual_token_entries(clip, image)
 
 
 def _validate_minimax_h3_media_structure(structure):
@@ -430,51 +369,24 @@ def _validate_minimax_h3_media_structure(structure):
     return structure
 
 
-def _minimax_h3_timestamped_video_entries(
-    clip, frames, timestamps, timestamp_format
-):
+def _minimax_h3_timestamped_video_entries(clip, frames, timestamps, timestamp_format):
     timestamps = list(timestamps)
     if frames.shape[0] != len(timestamps):
-        raise ValueError(
-            "MiniMax H3 video frame and timestamp counts must match."
-        )
+        raise ValueError("MiniMax H3 video frame and timestamp counts must match.")
     if frames.shape[0] % 2 == 1:
         frames = torch.cat([frames, frames[-1:]], dim=0)
         timestamps.append(timestamps[-1])
-    source_entries = _token_entries(
-        clip.tokenize(
-            "",
-            minimax_ref_items=[{
-                "type": "video",
-                "data": frames,
-                "timestamps": timestamps,
-            }],
-        ),
-        "qwen3vl_32b",
-    )
+    source_entries = _token_entries(clip.tokenize("", minimax_ref_items=[{"type": "video", "data": frames, "timestamps": timestamps}]), "qwen3vl_32b")
     visual_blocks = []
     for index, item in enumerate(source_entries):
         value = item[0]
-        if not (
-            isinstance(value, dict)
-            and value.get("type") == "image"
-            and value.get("minimax_video_block", False)
-        ):
+        if not (isinstance(value, dict) and value.get("type") == "image" and value.get("minimax_video_block", False)):
             continue
-        if (
-            index == 0
-            or index + 1 >= len(source_entries)
-            or source_entries[index - 1][0] != 151652
-            or source_entries[index + 1][0] != 151653
-        ):
-            raise ValueError(
-                "MiniMax H3 tokenizer returned an invalid temporal video block."
-            )
-        visual_blocks.append(source_entries[index - 1:index + 2])
+        if index == 0 or index + 1 >= len(source_entries) or source_entries[index - 1][0] != 151652 or source_entries[index + 1][0] != 151653:
+            raise ValueError("MiniMax H3 tokenizer returned an invalid temporal video block.")
+        visual_blocks.append(source_entries[index - 1 : index + 2])
     if len(visual_blocks) != frames.shape[0] // 2:
-        raise ValueError(
-            "MiniMax H3 tokenizer returned an unexpected temporal video block count."
-        )
+        raise ValueError("MiniMax H3 tokenizer returned an unexpected temporal video block count.")
     entries = _minimax_h3_text_entries(clip, "<Video 1>: ")
     for index, visual in enumerate(visual_blocks):
         timestamp = (timestamps[index * 2] + timestamps[index * 2 + 1]) / 2
@@ -484,38 +396,19 @@ def _minimax_h3_timestamped_video_entries(
     return entries
 
 
-def minimax_h3_continuation_anchor_prefix(
-    frame_index: int, picture_index: int,
-) -> str:
+def minimax_h3_continuation_anchor_prefix(frame_index: int, picture_index: int) -> str:
     centiseconds = round(Fraction(frame_index, 24) * 100)
     anchor_timestamp = f"{centiseconds // 100:02d}.{centiseconds % 100:02d}s"
-    return (
-        "For the target video, at "
-        f"{anchor_timestamp} into the target video, "
-        f"<Picture {picture_index}> is fully referenced. "
-    )
+    return f"For the target video, at {anchor_timestamp} into the target video, <Picture {picture_index}> is fully referenced. "
 
 
-def tokenize_minimax_h3_media_prompt(
-    clip, text, pictures, picture_timestamps, timestamp_format, picture_structure,
-    video_frames=None, video_timestamps=(),
-    audio=False, default_single_visual=False, default_video_frames=None,
-    default_video_timestamps=(), continuation_picture=None,
-    continuation_frame_index=None,
-):
+def tokenize_minimax_h3_media_prompt(clip, text, pictures, picture_timestamps, timestamp_format, picture_structure, video_frames=None, video_timestamps=(), audio=False, default_single_visual=False, default_video_frames=None, default_video_timestamps=(), continuation_picture=None, continuation_frame_index=None):
     configured_video_frames = () if video_frames is None else video_frames
-    effective_picture_timestamps = (
-        () if default_single_visual else picture_timestamps
-    )
+    effective_picture_timestamps = () if default_single_visual else picture_timestamps
     if len(effective_picture_timestamps) > len(pictures):
-        raise ValueError(
-            f"MiniMax H3 media config received {len(effective_picture_timestamps)} timestamps "
-            f"for {len(pictures)} available Pictures."
-        )
+        raise ValueError(f"MiniMax H3 media config received {len(effective_picture_timestamps)} timestamps for {len(pictures)} available Pictures.")
     if len(configured_video_frames) != len(video_timestamps):
-        raise ValueError(
-            "MiniMax H3 configured video frame and timestamp counts must match."
-        )
+        raise ValueError("MiniMax H3 configured video frame and timestamp counts must match.")
     entries = []
     visual_blocks = _minimax_h3_visual_token_blocks(clip, pictures)
     for index, visual in enumerate(visual_blocks, start=1):
@@ -524,9 +417,7 @@ def tokenize_minimax_h3_media_prompt(
             entries.extend(visual)
             continue
         timestamp = effective_picture_timestamps[index - 1]
-        expanded = picture_structure.replace(
-            "<<time>>", format_video_timestamp(timestamp, timestamp_format)
-        )
+        expanded = picture_structure.replace("<<time>>", format_video_timestamp(timestamp, timestamp_format))
         expanded = expanded.replace("<<picture>>", f"<Picture {index}>")
         expanded = expanded.replace("<<shot>>", f"[Shot {index}]")
         before, after = expanded.split("<<visual>>")
@@ -536,44 +427,23 @@ def tokenize_minimax_h3_media_prompt(
     if continuation_picture is not None:
         if continuation_frame_index is None:
             raise ValueError("MiniMax H3 continuation Picture requires a target frame index.")
-        continuation_blocks = _minimax_h3_visual_token_blocks(
-            clip, [continuation_picture]
-        )
+        continuation_blocks = _minimax_h3_visual_token_blocks(clip, [continuation_picture])
         continuation_picture_index = len(visual_blocks) + 1
-        entries.extend(
-            _minimax_h3_text_entries(
-                clip, f"<Picture {continuation_picture_index}>: "
-            )
-        )
+        entries.extend(_minimax_h3_text_entries(clip, f"<Picture {continuation_picture_index}>: "))
         entries.extend(continuation_blocks[0])
-        text = minimax_h3_continuation_anchor_prefix(
-            continuation_frame_index, continuation_picture_index
-        ) + text
+        text = minimax_h3_continuation_anchor_prefix(continuation_frame_index, continuation_picture_index) + text
     if configured_video_frames:
         frames = torch.cat(tuple(configured_video_frames), dim=0)
-        entries.extend(_minimax_h3_timestamped_video_entries(
-            clip, frames, video_timestamps, timestamp_format
-        ))
+        entries.extend(_minimax_h3_timestamped_video_entries(clip, frames, video_timestamps, timestamp_format))
     if default_video_frames is not None:
-        entries.extend(_minimax_h3_timestamped_video_entries(
-            clip,
-            default_video_frames,
-            default_video_timestamps,
-            timestamp_format,
-        ))
+        entries.extend(_minimax_h3_timestamped_video_entries(clip, default_video_frames, default_video_timestamps, timestamp_format))
     if audio:
         entries.extend(_minimax_h3_text_entries(clip, "<Audio 1>: "))
     entries.extend(_minimax_h3_text_entries(clip, text))
     return {"qwen3vl_32b": [entries]}
 
 
-def build_minimax_h3_media_config(
-    timestamps, timestamp_format="0.0s", structure=MINIMAX_H3_MEDIA_STRUCTURE,
-    video_fps=2, video_latent_mode="even keyframes",
-    video_latent_keyframes=4, temporal_density=1, temporal_fusion_method="consensus",
-    video_reference_resolution=256, video_latent_fps=2.0,
-    refine_steps=100,
-):
+def build_minimax_h3_media_config(timestamps, timestamp_format="0.0s", structure=MINIMAX_H3_MEDIA_STRUCTURE, video_fps=2, video_latent_mode="even keyframes", video_latent_keyframes=4, temporal_density=1, temporal_fusion_method="consensus", video_reference_resolution=256, video_latent_fps=2.0, refine_steps=100):
     if isinstance(timestamp_format, list):
         timestamp_format = timestamp_format[0] if timestamp_format else "0.0s"
     if isinstance(structure, list):
@@ -665,14 +535,7 @@ def normalize_visual_fusion_method(method, default="conds_fusion"):
     raise ValueError(f"Unsupported visual fusion method: {method}")
 
 
-_NON_SLICED_DICT_KEYS = frozenset({
-    "media_config",
-    "reference_media",
-    "continuation_media",
-    "audio",
-    "visual_fusion_config",
-    "text_blend_config",
-})
+_NON_SLICED_DICT_KEYS = frozenset({"media_config", "reference_media", "continuation_media", "audio", "visual_fusion_config", "text_blend_config"})
 
 
 def is_list_batch_call(args_dict: dict) -> bool:
@@ -758,62 +621,30 @@ def _validate_minimax_h3_media_config(media_config, output_frame_count):
         raise ValueError("MiniMax H3 media config timestamps must be parsed nonnegative exact seconds.")
     output_duration = Fraction(output_frame_count, 24)
     if any(timestamp > output_duration for timestamp in timestamps):
-        raise ValueError(
-            "MiniMax H3 Picture timestamps must not exceed output duration "
-            f"{float(output_duration):.3f}s."
-        )
+        raise ValueError(f"MiniMax H3 Picture timestamps must not exceed output duration {float(output_duration):.3f}s.")
     video_fps = media_config.get("video_fps")
-    if (
-        isinstance(video_fps, bool)
-        or not isinstance(video_fps, numbers.Integral)
-        or not 1 <= video_fps <= 24
-    ):
+    if isinstance(video_fps, bool) or not isinstance(video_fps, numbers.Integral) or not 1 <= video_fps <= 24:
         raise ValueError("MiniMax H3 media config requires video_fps from 1 to 24.")
     video_latent_mode = media_config.get("video_latent_mode", "even keyframes")
     if video_latent_mode not in MINIMAX_H3_VIDEO_LATENT_MODES:
         raise ValueError("MiniMax H3 media config has an unsupported video latent mode.")
     video_latent_keyframes = media_config.get("video_latent_keyframes", 4)
-    if (
-        isinstance(video_latent_keyframes, bool)
-        or not isinstance(video_latent_keyframes, numbers.Integral)
-        or not 2 <= video_latent_keyframes <= 213
-    ):
+    if isinstance(video_latent_keyframes, bool) or not isinstance(video_latent_keyframes, numbers.Integral) or not 2 <= video_latent_keyframes <= 213:
         raise ValueError("MiniMax H3 media config requires video_latent_keyframes from 2 to 213.")
     video_reference_resolution = media_config.get("video_reference_resolution", 256)
-    if (
-        isinstance(video_reference_resolution, bool)
-        or not isinstance(video_reference_resolution, numbers.Integral)
-        or video_reference_resolution < 32
-        or video_reference_resolution % 32
-    ):
+    if isinstance(video_reference_resolution, bool) or not isinstance(video_reference_resolution, numbers.Integral) or video_reference_resolution < 32 or video_reference_resolution % 32:
         raise ValueError("MiniMax H3 media config requires video_reference_resolution of at least 32, in multiples of 32.")
     video_latent_fps = media_config.get("video_latent_fps", 2.0)
-    if (
-        isinstance(video_latent_fps, bool)
-        or not isinstance(video_latent_fps, (int, float))
-        or not (0.0 < float(video_latent_fps) <= 24.0)
-    ):
+    if isinstance(video_latent_fps, bool) or not isinstance(video_latent_fps, (int, float)) or not (0.0 < float(video_latent_fps) <= 24.0):
         raise ValueError("MiniMax H3 media config requires video_latent_fps to be a positive number up to 24.0.")
     refine_steps = media_config.get("refine_steps", 100)
-    if (
-        isinstance(refine_steps, bool)
-        or not isinstance(refine_steps, numbers.Integral)
-        or refine_steps < 1
-    ):
+    if isinstance(refine_steps, bool) or not isinstance(refine_steps, numbers.Integral) or refine_steps < 1:
         raise ValueError("MiniMax H3 media config requires refine_steps to be an integer of at least 1.")
     timestamp_format = media_config.get("timestamp_format")
     if timestamp_format not in VIDEO_FRAME_TIMESTAMP_FORMATS:
         raise ValueError("MiniMax H3 media config has an unsupported timestamp format.")
     structure = _validate_minimax_h3_media_structure(media_config.get("structure"))
-    return (
-        timestamps,
-        timestamp_format,
-        structure,
-        bool(media_config.get("default_single_visual", False)),
-        int(video_fps),
-        video_latent_mode,
-        int(video_latent_keyframes),
-    )
+    return (timestamps, timestamp_format, structure, bool(media_config.get("default_single_visual", False)), int(video_fps), video_latent_mode, int(video_latent_keyframes))
 
 
 def _encode_minimax_h3_audio_reference(audio, audio_vae, cache=None):
@@ -856,15 +687,7 @@ def validate_minimax_h3_clip_continuation_media(media) -> torch.Tensor | None:
     frames = media.get("frames")
     if frames is None:
         return None
-    if (
-        not torch.is_tensor(frames)
-        or frames.ndim != 4
-        or frames.shape[0] < 5
-        or min(frames.shape[1:3]) < 1
-        or frames.shape[3] < 3
-        or not torch.is_floating_point(frames)
-        or not torch.isfinite(frames).all()
-    ):
+    if not torch.is_tensor(frames) or frames.ndim != 4 or frames.shape[0] < 5 or min(frames.shape[1:3]) < 1 or frames.shape[3] < 3 or not torch.is_floating_point(frames) or not torch.isfinite(frames).all():
         raise ValueError("MiniMax H3 Clip Continuation media must contain finite BHWC RGB frames.")
     return frames[..., :3]
 
@@ -875,9 +698,7 @@ def prepare_minimax_h3_clip_continuation_frames(media, maximum_frames: int) -> t
     if frames is None:
         return None
     if frames.shape[0] > maximum_frames:
-        raise ValueError(
-            "MiniMax H3 Clip Continuation tail frames cannot exceed the target frame count."
-        )
+        raise ValueError("MiniMax H3 Clip Continuation tail frames cannot exceed the target frame count.")
     return frames
 
 
@@ -885,24 +706,14 @@ def prepare_minimax_h3_continuation_fusion_video(continuation_frames, video_fram
     """Keep reference times; supply saved interior frames as temporal alternatives."""
     tail = continuation_frames
     if tail.shape[1:3] != video_frames.shape[1:3]:
-        tail = comfy.utils.common_upscale(
-            tail.movedim(-1, 1), video_frames.shape[2], video_frames.shape[1], "lanczos", "disabled"
-        ).movedim(1, -1)
+        tail = comfy.utils.common_upscale(tail.movedim(-1, 1), video_frames.shape[2], video_frames.shape[1], "lanczos", "disabled").movedim(1, -1)
     pool = torch.cat((video_frames, tail), dim=0)
-    indices, pairs = minimax_h3_continuation_frame_pairs(
-        video_frames.shape[0], tail.shape[0],
-        minimax_h3_video_sample_indices(video_frames.shape[0], video_fps),
-    )
+    indices, pairs = minimax_h3_continuation_frame_pairs(video_frames.shape[0], tail.shape[0], minimax_h3_video_sample_indices(video_frames.shape[0], video_fps))
     canonical = [index if index < video_frames.shape[0] else video_frames.shape[0] + index for index in indices]
     return pool[canonical], [Fraction(index, 24) for index in indices], pool, pairs
 
 
-def minimax_h3_qwen_video_samples(
-    continuation_frames: torch.Tensor | None,
-    video_frames: torch.Tensor | None,
-    video_fps: int,
-    merge_mode: str = "replace",
-) -> tuple[torch.Tensor | None, list[Fraction]]:
+def minimax_h3_qwen_video_samples(continuation_frames: torch.Tensor | None, video_frames: torch.Tensor | None, video_fps: int, merge_mode: str = "replace") -> tuple[torch.Tensor | None, list[Fraction]]:
     """Return one chronological Qwen Video stream with an interior continuation head."""
     samples, timestamps = [], []
     offset = Fraction(0)
@@ -914,21 +725,12 @@ def minimax_h3_qwen_video_samples(
         indices = minimax_h3_video_sample_indices(continuation_frames.shape[0], video_fps)
         if indices:
             samples.append(continuation_frames[indices])
-            timestamps.extend(
-                Fraction(index, 24)
-                for index in indices
-            )
+            timestamps.extend(Fraction(index, 24) for index in indices)
         offset = Fraction(continuation_frames.shape[0], 24)
     if video_frames is not None:
         if continuation_frames is not None and continuation_frames.shape[1:3] != video_frames.shape[1:3]:
-            raise ValueError(
-                "MiniMax H3 Clip Continuation and Video frames must have matching geometry."
-            )
-        video_start = (
-            continuation_frames.shape[0]
-            if continuation_frames is not None and merge_mode == "replace"
-            else 0
-        )
+            raise ValueError("MiniMax H3 Clip Continuation and Video frames must have matching geometry.")
+        video_start = continuation_frames.shape[0] if continuation_frames is not None and merge_mode == "replace" else 0
         remaining_video = video_frames[video_start:]
         indices = minimax_h3_video_sample_indices(remaining_video.shape[0], video_fps)
         if indices:
@@ -944,16 +746,12 @@ def tokenize_minimax_h3_prompt(clip, text: str, images) -> dict:
     segments = text.split(VISION_BLOCK)
     marker_count = len(segments) - 1
     if marker_count > len(images):
-        raise ValueError(
-            "MiniMax H3 prompt contains more visual slots than supplied images."
-        )
+        raise ValueError("MiniMax H3 prompt contains more visual slots than supplied images.")
     entries = []
     for index, segment in enumerate(segments):
         entries.extend(_minimax_h3_text_entries(clip, segment))
         if index < marker_count:
-            entries.extend(
-                _minimax_h3_visual_entries(clip, images[index], index + 1)
-            )
+            entries.extend(_minimax_h3_visual_entries(clip, images[index], index + 1))
     if not entries:
         entries = _token_entries(clip.tokenize(""), "qwen3vl_32b")
     return {"qwen3vl_32b": [entries]}
@@ -1026,86 +824,43 @@ def prepare_minimax_h3_frame(image: torch.Tensor, width: int, height: int, crop:
     return samples.movedim(1, -1)
 
 
-def minimax_h3_reference_size(
-    image_width: int,
-    image_height: int,
-    generation_width: int,
-    generation_height: int,
-    ref_image_size: str,
-) -> tuple[int, int]:
+def minimax_h3_reference_size(image_width: int, image_height: int, generation_width: int, generation_height: int, ref_image_size: str) -> tuple[int, int]:
     """Match Core MiniMax H3 image-reference sizing and canvas alignment."""
     image_width = int(image_width)
     image_height = int(image_height)
     if image_width < 1 or image_height < 1:
         raise ValueError("MiniMax H3 reference images must have non-zero dimensions.")
     if ref_image_size == "match":
-        scale = min(
-            1.0,
-            math.sqrt(
-                (int(generation_width) * int(generation_height))
-                / (image_width * image_height)
-            ),
-        )
+        scale = min(1.0, math.sqrt((int(generation_width) * int(generation_height)) / (image_width * image_height)))
     elif ref_image_size == "max":
         scale = min(1.0, 2048 / min(image_width, image_height))
     else:
-        raise ValueError(
-            f"Unsupported MiniMax H3 reference image size: {ref_image_size}"
-        )
+        raise ValueError(f"Unsupported MiniMax H3 reference image size: {ref_image_size}")
     target_width = max(32, round(image_width * scale / 32) * 32)
     target_height = max(32, round(image_height * scale / 32) * 32)
     return target_width, target_height
 
 
-def prepare_minimax_h3_reference_image(
-    image: torch.Tensor,
-    width: int,
-    height: int,
-    ref_image_size: str,
-) -> torch.Tensor:
+def prepare_minimax_h3_reference_image(image: torch.Tensor, width: int, height: int, ref_image_size: str) -> torch.Tensor:
     """Prepare the shared Qwen/VAE pixels for one H3 image reference."""
     if not torch.is_tensor(image) or image.ndim != 4 or image.shape[0] != 1:
         raise ValueError("Each MiniMax H3 visual source must contain exactly one image.")
-    target_width, target_height = minimax_h3_reference_size(
-        image.shape[2], image.shape[1], width, height, ref_image_size
-    )
-    return prepare_minimax_h3_frame(
-        image, target_width, target_height, "disabled"
-    )
+    target_width, target_height = minimax_h3_reference_size(image.shape[2], image.shape[1], width, height, ref_image_size)
+    return prepare_minimax_h3_frame(image, target_width, target_height, "disabled")
 
 
-def _minimax_h3_reference_video_frame_count(
-    video: torch.Tensor, maximum_frames: int
-) -> int:
-    if (
-        not torch.is_tensor(video)
-        or video.ndim != 4
-        or video.shape[0] < 1
-        or video.shape[1] < 1
-        or video.shape[2] < 1
-        or video.shape[3] < 3
-        or not torch.isfinite(video).all()
-    ):
-        raise ValueError(
-            "MiniMax H3 video must be a finite BHWC frame batch with at least three channels."
-        )
+def _minimax_h3_reference_video_frame_count(video: torch.Tensor, maximum_frames: int) -> int:
+    if not torch.is_tensor(video) or video.ndim != 4 or video.shape[0] < 1 or video.shape[1] < 1 or video.shape[2] < 1 or video.shape[3] < 3 or not torch.isfinite(video).all():
+        raise ValueError("MiniMax H3 video must be a finite BHWC frame batch with at least three channels.")
     frame_count = min(video.shape[0], int(maximum_frames))
     if frame_count < 5:
-        raise ValueError(
-            "MiniMax H3 reference video needs at least 5 frames (~0.2s at 24 fps)."
-        )
+        raise ValueError("MiniMax H3 reference video needs at least 5 frames (~0.2s at 24 fps).")
     while frame_count % 17 != 5:
         frame_count -= 1
     return frame_count
 
 
-def prepare_minimax_h3_reference_video(
-    video: torch.Tensor,
-    vae,
-    maximum_frames: int,
-    encode_reference: bool = True,
-    cache=None,
-) -> tuple[torch.Tensor, dict | None]:
+def prepare_minimax_h3_reference_video(video: torch.Tensor, vae, maximum_frames: int, encode_reference: bool = True, cache=None) -> tuple[torch.Tensor, dict | None]:
     """Prepare one 24-fps H3 reference video using Core's ref2va contract."""
     frame_count = _minimax_h3_reference_video_frame_count(video, maximum_frames)
     if encode_reference and vae is None:
@@ -1126,9 +881,7 @@ def prepare_minimax_h3_reference_video(
         target_width = max(32, round(source_width / 32) * 32)
         target_height = max(32, round(source_height / 32) * 32)
     samples = video[:frame_count, ..., :3].movedim(-1, 1)
-    samples = comfy.utils.common_upscale(
-        samples, target_width, target_height, "lanczos", "disabled"
-    )
+    samples = comfy.utils.common_upscale(samples, target_width, target_height, "lanczos", "disabled")
     frames = samples.movedim(1, -1)
     if not encode_reference:
         return frames, None
@@ -1143,7 +896,7 @@ def prepare_minimax_h3_reference_video(
             k1 = max(1, k // 2)
             split_idx = 5 + 17 * k1
             c1 = frames[:split_idx]
-            c2 = frames[split_idx - 5:]
+            c2 = frames[split_idx - 5 :]
             lat1 = vae.encode(c1) if cache is None else cache.encode_vae(vae, c1, media="video")
             lat2 = vae.encode(c2) if cache is None else cache.encode_vae(vae, c2, media="video")
             latent = torch.cat([lat1, lat2[:, :, 2:]], dim=2)
@@ -1151,20 +904,10 @@ def prepare_minimax_h3_reference_video(
             raise
     if not torch.is_tensor(latent) or latent.ndim < 5:
         raise ValueError("MiniMax H3 video VAE returned an invalid latent.")
-    return frames, {
-        "kind": "video",
-        "latent_t": latent.shape[2],
-        "latent_h": target_height // 16,
-        "latent_w": target_width // 16,
-        "ref_audio_t": 0,
-        "latent": latent,
-        "audio_latent": None,
-    }
+    return frames, {"kind": "video", "latent_t": latent.shape[2], "latent_h": target_height // 16, "latent_w": target_width // 16, "ref_audio_t": 0, "latent": latent, "audio_latent": None}
 
 
-def _minimax_h3_equivalent_square_pool_shape(
-    latent: torch.Tensor, equivalent_resolution: int, latent_frames: int | None
-) -> tuple[int, int, int]:
+def _minimax_h3_equivalent_square_pool_shape(latent: torch.Tensor, equivalent_resolution: int, latent_frames: int | None) -> tuple[int, int, int]:
     """Calculate target latent shape using equivalent-square area, aligning spatial axes to even numbers."""
     frames, height, width = latent.shape[2:]
     target_latent_side = float(equivalent_resolution) / 16.0
@@ -1175,23 +918,13 @@ def _minimax_h3_equivalent_square_pool_shape(
     return target_frames, target_height, target_width
 
 
-def prepare_minimax_h3_positioned_video_keyframes(
-    video: torch.Tensor,
-    vae,
-    maximum_frames: int,
-    width: int,
-    height: int,
-    keyframe_count: int,
-    cache=None,
-) -> list[dict]:
+def prepare_minimax_h3_positioned_video_keyframes(video: torch.Tensor, vae, maximum_frames: int, width: int, height: int, keyframe_count: int, cache=None) -> list[dict]:
     """Encode one complete H3 video and retain evenly positioned temporal chunks."""
     frame_count = _minimax_h3_reference_video_frame_count(video, maximum_frames)
     if vae is None:
         raise ValueError("MiniMax H3 even Video keyframes require the video VAE input.")
     samples = video[:frame_count, ..., :3].movedim(-1, 1)
-    samples = comfy.utils.common_upscale(
-        samples, int(width), int(height), "lanczos", "center"
-    )
+    samples = comfy.utils.common_upscale(samples, int(width), int(height), "lanczos", "center")
     pixels = samples.movedim(1, -1)
     latent = vae.encode(pixels) if cache is None else cache.encode_vae(vae, pixels, media="video")
     if not torch.is_tensor(latent) or latent.ndim < 5:
@@ -1199,49 +932,32 @@ def prepare_minimax_h3_positioned_video_keyframes(
     full_chunk_count = (frame_count - 5) // 17
     expected_latent_t = full_chunk_count * 5 + 2
     if latent.shape[2] != expected_latent_t:
-        raise ValueError(
-            "MiniMax H3 video VAE returned an unexpected temporal length: "
-            f"expected {expected_latent_t}, received {latent.shape[2]}."
-        )
+        raise ValueError(f"MiniMax H3 video VAE returned an unexpected temporal length: expected {expected_latent_t}, received {latent.shape[2]}.")
     expected_spatial = (int(height) // 16, int(width) // 16)
     if latent.shape[3:5] != expected_spatial:
-        raise ValueError(
-            "MiniMax H3 video VAE returned an unexpected spatial shape: "
-            f"expected {expected_spatial}, received {tuple(latent.shape[3:5])}."
-        )
+        raise ValueError(f"MiniMax H3 video VAE returned an unexpected spatial shape: expected {expected_spatial}, received {tuple(latent.shape[3:5])}.")
     available = full_chunk_count + 1
     selected = min(int(keyframe_count), available)
     if available == 1:
         chunk_indices = [0]
     else:
-        chunk_indices = [
-            (index * (available - 1) + (selected - 1) // 2) // (selected - 1)
-            for index in range(selected)
-        ]
+        chunk_indices = [(index * (available - 1) + (selected - 1) // 2) // (selected - 1) for index in range(selected)]
     if len(set(chunk_indices)) != len(chunk_indices):
         raise ValueError("MiniMax H3 even Video keyframe selection produced duplicate points.")
     keyframes = []
     for chunk_index in chunk_indices:
         latent_start = chunk_index * 5
         latent_stop = latent_start + (2 if chunk_index == full_chunk_count else 5)
-        keyframes.append({
-            "resolved_frame_index": chunk_index * 17,
-            "latent": latent[:, :, latent_start:latent_stop].clone(),
-        })
+        keyframes.append({"resolved_frame_index": chunk_index * 17, "latent": latent[:, :, latent_start:latent_stop].clone()})
     return keyframes
 
 
-def align_minimax_h3_continuation_keyframes(
-    keyframes: list[dict], tail_frames: int, merge_mode: str,
-) -> list[dict]:
+def align_minimax_h3_continuation_keyframes(keyframes: list[dict], tail_frames: int, merge_mode: str) -> list[dict]:
     """Use the same target positions as the continuation Qwen video stream."""
     if merge_mode == "replace":
         return [keyframe for keyframe in keyframes if keyframe["resolved_frame_index"] >= tail_frames]
     if merge_mode == "prepend":
-        return [
-            {**keyframe, "resolved_frame_index": keyframe["resolved_frame_index"] + tail_frames}
-            for keyframe in keyframes
-        ]
+        return [{**keyframe, "resolved_frame_index": keyframe["resolved_frame_index"] + tail_frames} for keyframe in keyframes]
     raise ValueError("MiniMax H3 continuation video merge mode must be replace or prepend.")
 
 
@@ -1268,11 +984,7 @@ def prepare_image_placeholder_prompt(prompt: str, image_count: int, fusion_activ
     if fusion_active:
         if any(tag in prompt for tag in ("<|image_pad|>", "<|image|>", "<|vision_start|>")):
             if matches:
-                logging.warning(
-                    "%s: native visual tokens already exist; stripped %d image_input placeholder(s).",
-                    context,
-                    len(matches),
-                )
+                logging.warning("%s: native visual tokens already exist; stripped %d image_input placeholder(s).", context, len(matches))
             return _IMAGE_PLACEHOLDER_PATTERN.sub("", prompt), ()
 
         chosen = next((match for match in matches if match.group(1).lower() == "fusion"), None)
@@ -1281,22 +993,14 @@ def prepare_image_placeholder_prompt(prompt: str, image_count: int, fusion_activ
 
         if chosen is None:
             if matches:
-                logging.warning(
-                    "%s: fusion accepts image_input_fusion or image_input_1; stripped %d unsupported placeholder(s).",
-                    context,
-                    len(matches),
-                )
+                logging.warning("%s: fusion accepts image_input_fusion or image_input_1; stripped %d unsupported placeholder(s).", context, len(matches))
             logging.warning("%s: no fusion placeholder found; prepended the fused visual slot.", context)
             return VISION_BLOCK + _IMAGE_PLACEHOLDER_PATTERN.sub("", prompt), ()
 
         if chosen.group(1).lower() == "1":
             logging.warning("%s: treating image_input_1 as image_input_fusion.", context)
         if len(matches) > 1:
-            logging.warning(
-                "%s: fusion uses one visual slot; stripped %d additional image_input placeholder(s).",
-                context,
-                len(matches) - 1,
-            )
+            logging.warning("%s: fusion uses one visual slot; stripped %d additional image_input placeholder(s).", context, len(matches) - 1)
 
         def replace_fusion(match):
             return VISION_BLOCK if match.start() == chosen.start() else ""
@@ -1320,12 +1024,9 @@ def prepare_image_placeholder_prompt(prompt: str, image_count: int, fusion_activ
 
     rewritten = _IMAGE_PLACEHOLDER_PATTERN.sub(validate_numbered, prompt)
     if removed:
-        logging.warning(
-            "%s: stripped unavailable or fusion-only placeholder(s): %s.",
-            context,
-            ", ".join(removed),
-        )
+        logging.warning("%s: stripped unavailable or fusion-only placeholder(s): %s.", context, ", ".join(removed))
     return rewritten, tuple(valid_numbers)
+
 
 def _token_value(token):
     return token[0] if isinstance(token, tuple) and token else token
@@ -1337,7 +1038,7 @@ def is_image_token(t):
     if isinstance(val, dict) and (val.get("type") == "image" or "data" in val):
         return True
 
-    if isinstance(val, numbers.Integral) and val in (151655, 248056, 262144): # Qwen & Gemma image pad IDs
+    if isinstance(val, numbers.Integral) and val in (151655, 248056, 262144):  # Qwen & Gemma image pad IDs
         return True
 
     return False
@@ -1364,7 +1065,7 @@ def _released_qwen3vl_prefix_end(token_list, expanded_length: int) -> int:
     if template_end < 0:
         raise ValueError("Could not locate the Qwen3-VL template prefix marker used by released Core.")
     if expanded_length > template_end + 3:
-        if ids[template_end + 1:template_end + 3] == [_QWEN_USER, _QWEN_NL]:
+        if ids[template_end + 1 : template_end + 3] == [_QWEN_USER, _QWEN_NL]:
             template_end += 3
     return template_end
 
@@ -1397,14 +1098,7 @@ def _qwen3vl_resized_dimensions(height: int, width: int, min_pixels=3136, max_pi
 VLM_RESOLUTION_MIN = 256
 VLM_RESOLUTION_MAX = 4096
 VLM_RESOLUTION_STEP = 32
-_LEGACY_VLM_RESOLUTION_PRESETS = {
-    "Fast (384)": 384,
-    "Balanced (512)": 512,
-    "Detailed (768)": 768,
-    "Large (1024)": 1024,
-    "X-Large (1280)": 1280,
-    "XX-Large (1536)": 1536,
-}
+_LEGACY_VLM_RESOLUTION_PRESETS = {"Fast (384)": 384, "Balanced (512)": 512, "Detailed (768)": 768, "Large (1024)": 1024, "X-Large (1280)": 1280, "XX-Large (1536)": 1536}
 
 
 def resolve_vlm_resolution(value) -> int | None:
@@ -1431,14 +1125,8 @@ def vlm_target_dimensions(height: int, width: int, resolution: int) -> tuple[int
     if height < 1 or width < 1:
         raise ValueError("VLM image dimensions must be positive.")
     scale = math.sqrt((resolution * resolution) / (height * width))
-    target_height = max(
-        VLM_RESOLUTION_STEP,
-        round(height * scale / VLM_RESOLUTION_STEP) * VLM_RESOLUTION_STEP,
-    )
-    target_width = max(
-        VLM_RESOLUTION_STEP,
-        round(width * scale / VLM_RESOLUTION_STEP) * VLM_RESOLUTION_STEP,
-    )
+    target_height = max(VLM_RESOLUTION_STEP, round(height * scale / VLM_RESOLUTION_STEP) * VLM_RESOLUTION_STEP)
+    target_width = max(VLM_RESOLUTION_STEP, round(width * scale / VLM_RESOLUTION_STEP) * VLM_RESOLUTION_STEP)
     return target_height, target_width
 
 
@@ -1452,25 +1140,16 @@ def prepare_vlm_image(image: torch.Tensor, resolution) -> torch.Tensor:
     height, width = image.shape[1:3]
     target_height, target_width = vlm_target_dimensions(height, width, target)
     samples = image.movedim(-1, 1)
-    return resize_nchw(
-        samples, target_width, target_height, "bicubic"
-    ).movedim(1, -1)
+    return resize_nchw(samples, target_width, target_height, "bicubic").movedim(1, -1)
 
 
-def prepare_minimax_h3_vlm_video_frames(
-    frames: torch.Tensor, resolution,
-) -> torch.Tensor:
+def prepare_minimax_h3_vlm_video_frames(frames: torch.Tensor, resolution) -> torch.Tensor:
     """Apply the Qwen3-VL resolution to a chronological BHWC frame batch."""
-    prepared = [
-        prepare_vlm_image(frames[index:index + 1], resolution)
-        for index in range(frames.shape[0])
-    ]
+    prepared = [prepare_vlm_image(frames[index : index + 1], resolution) for index in range(frames.shape[0])]
     return torch.cat(prepared, dim=0)
 
 
-def vlm_resolution_samples(
-    image: torch.Tensor, resolution, sample_count: int, sample_offset: int = 32
-) -> list[int | None]:
+def vlm_resolution_samples(image: torch.Tensor, resolution, sample_count: int, sample_offset: int = 32) -> list[int | None]:
     """Build distinct alternating VLM grids without crossing the supported lower bound."""
     count = int(sample_count)
     if count < 1 or count > 15 or count % 2 == 0:
@@ -1492,9 +1171,7 @@ def vlm_resolution_samples(
     def append_if_distinct(candidate):
         if candidate < VLM_RESOLUTION_MIN or candidate > VLM_RESOLUTION_MAX:
             return
-        target_height, target_width = vlm_target_dimensions(
-            height, width, candidate
-        )
+        target_height, target_width = vlm_target_dimensions(height, width, candidate)
         grid = _qwen3vl_resized_dimensions(target_height, target_width)
         if grid in grids:
             return
@@ -1503,10 +1180,7 @@ def vlm_resolution_samples(
 
     append_if_distinct(base)
     radius = 1
-    while len(samples) < count and (
-        base - radius * offset >= VLM_RESOLUTION_MIN
-        or base + radius * offset <= VLM_RESOLUTION_MAX
-    ):
+    while len(samples) < count and (base - radius * offset >= VLM_RESOLUTION_MIN or base + radius * offset <= VLM_RESOLUTION_MAX):
         append_if_distinct(base - radius * offset)
         if len(samples) < count:
             append_if_distinct(base + radius * offset)
@@ -1522,22 +1196,16 @@ def _qwen3vl_image_span(token) -> int | None:
     if not torch.is_tensor(image) or image.ndim != 4:
         return None
     height, width = image.shape[1:3]
-    resized_height, resized_width = _qwen3vl_resized_dimensions(
-        height, width, *value.get("h3_image_pixel_limits", (3136, 12845056))
-    )
+    resized_height, resized_width = _qwen3vl_resized_dimensions(height, width, *value.get("h3_image_pixel_limits", (3136, 12845056)))
     return (resized_height // 16) * (resized_width // 16) // 4
 
 
-def _conditioning_token_span(
-    token, allow_literal_image_token: bool = False
-) -> int | None:
+def _conditioning_token_span(token, allow_literal_image_token: bool = False) -> int | None:
     if is_image_token(token):
         image_span = _qwen3vl_image_span(token)
         if image_span is not None:
             return image_span
-        if allow_literal_image_token and isinstance(
-            _token_value(token), numbers.Integral
-        ):
+        if allow_literal_image_token and isinstance(_token_value(token), numbers.Integral):
             return 1
         return None
     value = _token_value(token)
@@ -1571,41 +1239,21 @@ def visual_fusion_grid(image, visual_length: int, legacy_flat: bool = False) -> 
     return grid
 
 
-def build_token_to_conditioning_map(
-    token_list, cond_tensor, embedding_key=None, qwen_image21=False
-) -> list[tuple[int, int]]:
+def build_token_to_conditioning_map(token_list, cond_tensor, embedding_key=None, qwen_image21=False) -> list[tuple[int, int]]:
     """Map raw tokenizer entries to conditioning spans, validating all inferred lengths."""
     cond_len = cond_tensor.shape[1]
-    payload_backed_klein = (
-        embedding_key in {"qwen3_4b", "qwen3_8b"}
-        and any(_qwen3vl_image_span(token) is not None for token in token_list)
-    )
-    exact_spans = [
-        _conditioning_token_span(
-            token, allow_literal_image_token=payload_backed_klein
-        )
-        for token in token_list
-    ]
+    payload_backed_klein = embedding_key in {"qwen3_4b", "qwen3_8b"} and any(_qwen3vl_image_span(token) is not None for token in token_list)
+    exact_spans = [_conditioning_token_span(token, allow_literal_image_token=payload_backed_klein) for token in token_list]
     if not all(span is not None for span in exact_spans):
         raise ValueError("Cannot derive token positions because an image token has no usable Qwen3-VL tensor payload.")
 
     total_length = sum(exact_spans)
-    klein_tail_padding = (
-        payload_backed_klein
-        and total_length < cond_len
-        and cond_len == 512
-    )
+    klein_tail_padding = payload_backed_klein and total_length < cond_len and cond_len == 512
     if qwen_image21:
         prefix_len = _qwen_image21_prefix_end(token_list)
-        text_only_len = sum(
-            exact_spans[i] for i in range(prefix_len, len(token_list))
-            if not is_image_token(token_list[i])
-        )
+        text_only_len = sum(exact_spans[i] for i in range(prefix_len, len(token_list)) if not is_image_token(token_list[i]))
         if cond_len == text_only_len:
-            token_spans = [
-                0 if is_image_token(token_list[i]) else exact_spans[i]
-                for i in range(prefix_len, len(token_list))
-            ]
+            token_spans = [0 if is_image_token(token_list[i]) else exact_spans[i] for i in range(prefix_len, len(token_list))]
             expected_length = text_only_len
         else:
             token_spans = exact_spans[prefix_len:]
@@ -1616,11 +1264,7 @@ def build_token_to_conditioning_map(
         try:
             prefix_len = _released_qwen3vl_prefix_end(token_list, total_length)
         except ValueError as error:
-            raise ValueError(
-                "Released Core's Qwen3-VL prefix rule cannot explain the returned conditioning length; "
-                "refusing to guess a visual range "
-                f"(conditioning_length={cond_len}, expanded_length={total_length})."
-            ) from error
+            raise ValueError(f"Released Core's Qwen3-VL prefix rule cannot explain the returned conditioning length; refusing to guess a visual range (conditioning_length={cond_len}, expanded_length={total_length}).") from error
     if any(is_image_token(token) for token in token_list[:prefix_len]):
         raise ValueError("Released Core's Qwen3-VL prefix slice crosses a visual token; mapping is unsafe.")
 
@@ -1628,18 +1272,10 @@ def build_token_to_conditioning_map(
         token_spans = exact_spans[prefix_len:]
         expected_length = sum(token_spans)
     if expected_length != cond_len and not klein_tail_padding:
-        image_details = [
-            (index, exact_spans[index])
-            for index, token in enumerate(token_list)
-            if is_image_token(token)
-        ]
-        nearby_ids = [_token_id(token) for token in token_list[max(0, prefix_len - 3):prefix_len + 4]]
+        image_details = [(index, exact_spans[index]) for index, token in enumerate(token_list) if is_image_token(token)]
+        nearby_ids = [_token_id(token) for token in token_list[max(0, prefix_len - 3) : prefix_len + 4]]
         raise ValueError(
-            "Released Core's Qwen3-VL prefix rule does not match the returned conditioning length; "
-            "refusing to guess a visual range "
-            f"(conditioning_length={cond_len}, expected_length={expected_length}, "
-            f"expanded_length={total_length}, prefix_end={prefix_len}, "
-            f"image_spans={image_details}, nearby_token_ids={nearby_ids})."
+            f"Released Core's Qwen3-VL prefix rule does not match the returned conditioning length; refusing to guess a visual range (conditioning_length={cond_len}, expected_length={expected_length}, expanded_length={total_length}, prefix_end={prefix_len}, image_spans={image_details}, nearby_token_ids={nearby_ids})."
         )
 
     mapping = []
@@ -1657,13 +1293,8 @@ def build_token_to_conditioning_map(
         raise ValueError(f"Token mapping ended at {current}, expected conditioning length {cond_len}.")
     return mapping
 
-_FORMULA_BINOPS = {
-    ast.Add: operator.add,
-    ast.Sub: operator.sub,
-    ast.Mult: operator.mul,
-    ast.Div: operator.truediv,
-    ast.Pow: operator.pow,
-}
+
+_FORMULA_BINOPS = {ast.Add: operator.add, ast.Sub: operator.sub, ast.Mult: operator.mul, ast.Div: operator.truediv, ast.Pow: operator.pow}
 _FORMULA_UNARYOPS = {ast.UAdd: operator.pos, ast.USub: operator.neg}
 
 
@@ -1687,12 +1318,7 @@ def _formula_max(a, b):
     return max(a, b)
 
 
-_FORMULA_FUNCTIONS = {
-    "abs": abs,
-    "min": _formula_min,
-    "max": _formula_max,
-    "clamp": torch.clamp,
-}
+_FORMULA_FUNCTIONS = {"abs": abs, "min": _formula_min, "max": _formula_max, "clamp": torch.clamp}
 
 
 def evaluate_tensor_expression(expression: str, variables: dict):
@@ -1739,14 +1365,11 @@ def evaluate_formula(expression: str, processed_images: dict) -> torch.Tensor:
     except Exception as e:
         raise RuntimeError(f"Error evaluating visual math expression '{expression}': {e}") from e
 
+
 def evaluate_conditioning_formula(expression: str, sequence_tensors: dict, pooled_tensors: dict, padding_method: str = "zero-pad") -> tuple:
     # Preprocess classic weighting syntax inside math expression to math scaling
     # e.g., (image_input_1:10) -> (image_input_1 * 10)
-    expression = re.sub(
-        r"\(\s*([a-zA-Z0-9_]+)\s*:\s*([0-9.-]+)\s*\)",
-        r"(\1 * \2)",
-        expression
-    )
+    expression = re.sub(r"\(\s*([a-zA-Z0-9_]+)\s*:\s*([0-9.-]+)\s*\)", r"(\1 * \2)", expression)
 
     # Determine max sequence length across all tensors
     max_len = max(tensor.shape[1] for tensor in sequence_tensors.values())
@@ -1757,9 +1380,9 @@ def evaluate_conditioning_formula(expression: str, sequence_tensors: dict, poole
         if tensor.shape[1] < max_len:
             if padding_method == "interpolate":
                 tensor_perm = tensor.permute(0, 2, 1)
-                tensor_interp = F.interpolate(tensor_perm, size=max_len, mode='linear', align_corners=False)
+                tensor_interp = F.interpolate(tensor_perm, size=max_len, mode="linear", align_corners=False)
                 tensor = tensor_interp.permute(0, 2, 1)
-            else: # zero-pad
+            else:  # zero-pad
                 pad_size = max_len - tensor.shape[1]
                 padding = torch.zeros((tensor.shape[0], pad_size, tensor.shape[2]), device=tensor.device, dtype=tensor.dtype)
                 tensor = torch.cat([tensor, padding], dim=1)
@@ -1781,6 +1404,7 @@ def evaluate_conditioning_formula(expression: str, sequence_tensors: dict, poole
     except Exception as e:
         raise RuntimeError(f"Error evaluating conditioning math expression '{expression}': {e}") from e
 
+
 def reconstruct_2d_grid(N: int) -> tuple:
     """
     Determines the closest 2D grid dimensions (H, W) for N tokens.
@@ -1792,6 +1416,7 @@ def reconstruct_2d_grid(N: int) -> tuple:
         if N % w == 0:
             return N // w, w
     return N, 1
+
 
 SPATIAL_FUSION_METHODS = {"spatial-checkerboard", "spatial-block-interleave", "spatial-dither-random"}
 VISUAL_FUSION_METHODS = SPATIAL_FUSION_METHODS | {"linear"}
@@ -1840,12 +1465,7 @@ def _cleanup_primary_pairs(mask: torch.Tensor) -> torch.Tensor:
     h, w = mask.shape
     primary = mask.eq(0)
     padded = F.pad(primary, (1, 1, 1, 1))
-    neighbors = torch.stack([
-        padded[row:row + h, column:column + w]
-        for row in range(3)
-        for column in range(3)
-        if (row, column) != (1, 1)
-    ])
+    neighbors = torch.stack([padded[row : row + h, column : column + w] for row in range(3) for column in range(3) if (row, column) != (1, 1)])
     isolated = (primary & ~neighbors.any(dim=0)).flatten().nonzero().flatten()
     holes = (~primary & neighbors.all(dim=0)).flatten().nonzero().flatten()
     pair_count = min(isolated.numel(), holes.numel())
@@ -1874,7 +1494,7 @@ def _validate_spatial_fusion_mask(N, num_sources, method, block_size, dither_rat
         raise ValueError("Dither ratio must be between 0.0 and 1.0.")
     if not 0.0 <= spatial_perturbation <= 1.0:
         raise ValueError("Spatial perturbation must be between 0.0 and 1.0.")
-    if not 0 <= seed <= 0xffffffffffffffff:
+    if not 0 <= seed <= 0xFFFFFFFFFFFFFFFF:
         raise ValueError("Visual fusion seed must be between 0 and 18446744073709551615.")
     if num_sources == 1:
         return None
@@ -1915,9 +1535,7 @@ def generate_spatial_fusion_mask(N: int, num_sources: int, method: str, block_si
             mask = torch.zeros(N, dtype=torch.long, device=device)
             for secondary_source in range(1, num_sources):
                 random = torch.rand(N, generator=generator, device=device)
-                mask = torch.where(
-                    random < dither_ratio, mask, secondary_source
-                )
+                mask = torch.where(random < dither_ratio, mask, secondary_source)
             mask = mask.reshape(h, w)
         else:
             random = torch.rand(N, generator=generator, device=device)
@@ -1954,50 +1572,21 @@ def _align_visual_sources(sources, grids, canonical_grid, compute_float):
     for source, grid in zip(sources, grids):
         value = source.to(dtype=torch.float32) if compute_float else source
         if grid != canonical_grid:
-            value = F.interpolate(
-                value.reshape(grid[0], grid[1], -1).permute(2, 0, 1)[None],
-                size=canonical_grid,
-                mode="nearest",
-            )[0].permute(1, 2, 0).reshape(canonical_length, -1)
+            value = F.interpolate(value.reshape(grid[0], grid[1], -1).permute(2, 0, 1)[None], size=canonical_grid, mode="nearest")[0].permute(1, 2, 0).reshape(canonical_length, -1)
         aligned.append(value)
     return torch.stack(aligned, dim=1)
 
 
-def _baseline_visual_weights(
-    visual_fusion_config, canonical_grid, source_count, mask_device, output_device, mask_cache
-):
+def _baseline_visual_weights(visual_fusion_config, canonical_grid, source_count, mask_device, output_device, mask_cache):
     method = visual_fusion_config.get("visual_fusion_method", "spatial-checkerboard")
     length = canonical_grid[0] * canonical_grid[1]
     if method == "linear":
-        return torch.full(
-            (length, source_count),
-            1.0 / source_count,
-            device=output_device,
-            dtype=torch.float32,
-        )
-    mask = _visual_fusion_mask(
-        visual_fusion_config,
-        canonical_grid,
-        source_count,
-        mask_device,
-        output_device,
-        mask_cache,
-    )
+        return torch.full((length, source_count), 1.0 / source_count, device=output_device, dtype=torch.float32)
+    mask = _visual_fusion_mask(visual_fusion_config, canonical_grid, source_count, mask_device, output_device, mask_cache)
     return F.one_hot(mask, num_classes=source_count).to(dtype=torch.float32)
 
 
-def fuse_visual_token_sources(
-    sources,
-    visual_fusion_config,
-    mask_device,
-    mask_cache=None,
-    expected_length=None,
-    source_grids=None,
-    *,
-    weights_override=None,
-    return_weights=False,
-    cache=None,
-):
+def fuse_visual_token_sources(sources, visual_fusion_config, mask_device, mask_cache=None, expected_length=None, source_grids=None, *, weights_override=None, return_weights=False, cache=None):
     if not sources:
         raise ValueError("Visual fusion requires at least one visual token source.")
 
@@ -2023,28 +1612,23 @@ def fuse_visual_token_sources(
 
     if weights_override is None and method != "linear":
         _validate_spatial_fusion_mask(
-            canonical_length, len(sources), method,
-            visual_fusion_config.get("visual_block_size", 2), visual_fusion_config.get("dither_ratio", .5),
-            visual_fusion_config.get("seed", 0), canonical_grid,
+            canonical_length,
+            len(sources),
+            method,
+            visual_fusion_config.get("visual_block_size", 2),
+            visual_fusion_config.get("dither_ratio", 0.5),
+            visual_fusion_config.get("seed", 0),
+            canonical_grid,
             visual_fusion_config.get("dither_secondary_pattern", "checkerboard"),
-            visual_fusion_config.get("spatial_perturbation", 0.),
+            visual_fusion_config.get("spatial_perturbation", 0.0),
         )
 
     output_dtype = sources[0].dtype
-    stacked = _align_visual_sources(
-        sources, grids, canonical_grid, method == "linear"
-    )
+    stacked = _align_visual_sources(sources, grids, canonical_grid, method == "linear")
     if mask_cache is None:
         mask_cache = {}
     if weights_override is None:
-        baseline = _baseline_visual_weights(
-            visual_fusion_config,
-            canonical_grid,
-            len(sources),
-            mask_device,
-            stacked.device,
-            mask_cache,
-        )
+        baseline = _baseline_visual_weights(visual_fusion_config, canonical_grid, len(sources), mask_device, stacked.device, mask_cache)
         weights = baseline
     else:
         weights = weights_override.to(device=stacked.device, dtype=torch.float32)
@@ -2090,10 +1674,7 @@ def _token_rows_for_process(tokens):
 
 def _encode_preprocessed_clip_model(clip_model, embeds, attention_mask, num_tokens, embeds_info, cache=None, visual_encoder_path="grid-deepstack", hooks=None):
     if cache is not None:
-        return cache.encode_preprocessed(
-            clip_model, embeds, attention_mask, num_tokens, embeds_info, visual_encoder_path, hooks,
-            lambda: _encode_preprocessed_clip_model(clip_model, embeds, attention_mask, num_tokens, embeds_info),
-        )
+        return cache.encode_preprocessed(clip_model, embeds, attention_mask, num_tokens, embeds_info, visual_encoder_path, hooks, lambda: _encode_preprocessed_clip_model(clip_model, embeds, attention_mask, num_tokens, embeds_info))
     attention_mask_model = attention_mask if clip_model.enable_attention_masks else None
     if isinstance(clip_model.layer, list):
         intermediate_output = clip_model.layer
@@ -2101,16 +1682,7 @@ def _encode_preprocessed_clip_model(clip_model, embeds, attention_mask, num_toke
         intermediate_output = "all"
     else:
         intermediate_output = clip_model.layer_idx
-    outputs = clip_model.transformer(
-        None,
-        attention_mask_model,
-        embeds=embeds,
-        num_tokens=num_tokens,
-        intermediate_output=intermediate_output,
-        final_layer_norm_intermediate=clip_model.layer_norm_hidden_state,
-        dtype=torch.float32,
-        embeds_info=embeds_info,
-    )
+    outputs = clip_model.transformer(None, attention_mask_model, embeds=embeds, num_tokens=num_tokens, intermediate_output=intermediate_output, final_layer_norm_intermediate=clip_model.layer_norm_hidden_state, dtype=torch.float32, embeds_info=embeds_info)
     conditioning = outputs[0].float() if clip_model.layer == "last" else outputs[1].float()
     if clip_model.zero_out_masked:
         conditioning *= attention_mask.unsqueeze(-1).float()
@@ -2178,9 +1750,7 @@ def _normalize_token_fused_conditioning(clip, tokens, conditioning, metadata, em
             template_end += 3
     conditioning = conditioning[:, :, template_end:]
     batch, layers, sequence, hidden = conditioning.shape
-    conditioning = conditioning.permute(0, 2, 1, 3).reshape(
-        batch, sequence, layers * hidden
-    )
+    conditioning = conditioning.permute(0, 2, 1, 3).reshape(batch, sequence, layers * hidden)
     attention_mask = metadata.get("attention_mask")
     if torch.is_tensor(attention_mask):
         attention_mask = attention_mask[:, template_end:]
@@ -2200,14 +1770,7 @@ def _extract_visual_grid(entry) -> tuple[object, tuple[int, int]]:
     return grid, (int(values[-2]) // 2, int(values[-1]) // 2)
 
 
-def _prepare_fused_visual_inputs(
-    clip_model,
-    token_sources,
-    visual_fusion_config,
-    device,
-    source_grids=None,
-    visual_indices=None,
-):
+def _prepare_fused_visual_inputs(clip_model, token_sources, visual_fusion_config, device, source_grids=None, visual_indices=None):
     processed = [clip_model.process_tokens(_token_rows_for_process(tokens), device) for tokens in token_sources]
     if any(len(value[3]) == 0 for value in processed):
         raise ValueError("TokenFusion source produced no multimodal metadata.")
@@ -2232,53 +1795,26 @@ def _prepare_fused_visual_inputs(
         source_size = entry["size"]
         if embeds.shape[-1] != canonical_embeds.shape[-1]:
             raise ValueError("TokenFusion sources produced incompatible embedding dimensions.")
-        sources.append(embeds[0, source_start:source_start + source_size].to(device))
+        sources.append(embeds[0, source_start : source_start + source_size].to(device))
 
     mask_cache = {}
-    fused = fuse_visual_token_sources(
-        sources,
-        visual_fusion_config,
-        device,
-        mask_cache,
-        size,
-        source_grids,
-    )
+    fused = fuse_visual_token_sources(sources, visual_fusion_config, device, mask_cache, size, source_grids)
     fused_embeds = canonical_embeds.clone()
-    fused_embeds[0, start:start + size] = fused
+    fused_embeds[0, start : start + size] = fused
     fused_info = [dict(entry) for entry in canonical_info]
-    canonical_position = next(
-        index for index, entry in enumerate(fused_info)
-        if entry.get("type") == "image" and entry.get("index") == start
-    )
+    canonical_position = next(index for index, entry in enumerate(fused_info) if entry.get("type") == "image" and entry.get("index") == start)
     fused_entry = dict(fused_info[canonical_position])
     canonical_extra = fused_entry.get("extra")
     if isinstance(canonical_extra, dict) or canonical_extra is None:
         fused_entry["extra"] = dict(canonical_extra or {})
-        deepstacks = {
-            index: (entry.get("extra") if isinstance(entry.get("extra"), dict) else {}).get("deepstack")
-            for index, entry in enumerate(image_entries)
-        }
+        deepstacks = {index: (entry.get("extra") if isinstance(entry.get("extra"), dict) else {}).get("deepstack") for index, entry in enumerate(image_entries)}
         if all(deepstacks.values()):
-            fused_entry["extra"]["deepstack"] = fuse_deepstack_layers(
-                deepstacks,
-                visual_fusion_config,
-                device,
-                mask_cache,
-                size,
-                source_grids,
-            )
+            fused_entry["extra"]["deepstack"] = fuse_deepstack_layers(deepstacks, visual_fusion_config, device, mask_cache, size, source_grids)
     fused_info[canonical_position] = fused_entry
     return fused_embeds, attention_mask, num_tokens, fused_info, fused
 
 
-def encode_token_fused_visual_sources(
-    clip,
-    token_sources,
-    visual_fusion_config,
-    source_grids=None,
-    visual_indices=None,
-    visual_encoder_path="grid-deepstack",
-):
+def encode_token_fused_visual_sources(clip, token_sources, visual_fusion_config, source_grids=None, visual_indices=None, visual_encoder_path="grid-deepstack"):
     """Fuse pre-transformer visual tokens, then run one language encode per CLIP schedule."""
     if not token_sources:
         raise ValueError("TokenFusion requires at least one token source.")
@@ -2291,22 +1827,11 @@ def encode_token_fused_visual_sources(
     clip_model = _active_clip_model(clip)
 
     def encode_once():
-        prepared = _prepare_fused_visual_inputs(
-            clip_model,
-            token_sources,
-            visual_fusion_config,
-            device,
-            source_grids,
-            visual_indices,
-        )
+        prepared = _prepare_fused_visual_inputs(clip_model, token_sources, visual_fusion_config, device, source_grids, visual_indices)
         embeds, attention_mask, num_tokens, embeds_info, fused = prepared
         with qwen3vl_visual_encoder_path(clip, visual_encoder_path):
-            conditioning, metadata = _encode_preprocessed_clip_model(
-                clip_model, embeds, attention_mask, num_tokens, embeds_info
-            )
-            conditioning, metadata = _normalize_token_fused_conditioning(
-                clip, token_sources[0], conditioning, metadata, embeds_info
-            )
+            conditioning, metadata = _encode_preprocessed_clip_model(clip_model, embeds, attention_mask, num_tokens, embeds_info)
+            conditioning, metadata = _normalize_token_fused_conditioning(clip, token_sources[0], conditioning, metadata, embeds_info)
         return conditioning, metadata, embeds, embeds_info, fused
 
     schedules = None
@@ -2337,31 +1862,14 @@ def encode_token_fused_visual_sources(
         embeds, embeds_info, fused = last_prepared
         image_entry = next(entry for entry in embeds_info if entry.get("type") == "image")
         start = image_entry["index"]
-        block = torch.cat([embeds[:, start - 1:start], fused[None], embeds[:, start + image_entry["size"]:start + image_entry["size"] + 1]], dim=1)
-        save_blended_visual_embeddings(
-            [block[batch].detach() for batch in range(block.shape[0])],
-            visual_fusion_config,
-            next(iter(token_sources[0])),
-        )
+        block = torch.cat([embeds[:, start - 1 : start], fused[None], embeds[:, start + image_entry["size"] : start + image_entry["size"] + 1]], dim=1)
+        save_blended_visual_embeddings([block[batch].detach() for batch in range(block.shape[0])], visual_fusion_config, next(iter(token_sources[0])))
     fused_tokens = last_prepared[2].shape[0] if last_prepared else 0
-    logging.info(
-        "TokenFusion visual-token fusion complete: fused %d visual sources into 1 block (%d visual tokens), then ran %d conditioning encode%s.",
-        len(token_sources),
-        fused_tokens,
-        len(output),
-        "s" if len(output) != 1 else "",
-    )
+    logging.info("TokenFusion visual-token fusion complete: fused %d visual sources into 1 block (%d visual tokens), then ran %d conditioning encode%s.", len(token_sources), fused_tokens, len(output), "s" if len(output) != 1 else "")
     return output
 
 
-def encode_token_fused_visual_slots(
-    clip,
-    canonical_tokens,
-    slot_sources,
-    visual_fusion_config,
-    visual_encoder_path="grid-deepstack",
-    cache=None,
-):
+def encode_token_fused_visual_slots(clip, canonical_tokens, slot_sources, visual_fusion_config, visual_encoder_path="grid-deepstack", cache=None):
     """Fuse one or more canonical visual slots before one transformer encode."""
     clip.cond_stage_model.reset_clip_options()
     if clip.layer_idx is not None:
@@ -2382,10 +1890,7 @@ def encode_token_fused_visual_slots(
             if not 0 <= visual_index < len(canonical_images):
                 raise ValueError("TokenFusion could not locate the canonical MiniMax picture slot.")
             canonical_entry = canonical_images[visual_index]
-            alternatives = [
-                clip_model.process_tokens(_token_rows_for_process(tokens), device)
-                for tokens in alternative_tokens
-            ]
+            alternatives = [clip_model.process_tokens(_token_rows_for_process(tokens), device) for tokens in alternative_tokens]
             selected = [canonical_entry]
             selected_embeds = [embeds]
             for value in alternatives:
@@ -2404,56 +1909,31 @@ def encode_token_fused_visual_slots(
                     raise ValueError("TokenFusion MiniMax source is missing visual grid metadata.")
                 grids.append((int(values[-2]) // 2, int(values[-1]) // 2))
                 start = entry["index"]
-                sources.append(source_embeds[0, start:start + entry["size"]].to(device))
+                sources.append(source_embeds[0, start : start + entry["size"]].to(device))
             start = canonical_entry["index"]
             size = canonical_entry["size"]
             mask_cache = {}
-            fused = fuse_visual_token_sources(
-                sources, visual_fusion_config, device, mask_cache, size, grids, cache=cache
-            )
-            fused_embeds[0, start:start + size] = fused
+            fused = fuse_visual_token_sources(sources, visual_fusion_config, device, mask_cache, size, grids, cache=cache)
+            fused_embeds[0, start : start + size] = fused
             replacement = dict(canonical_entry)
             canonical_extra = replacement.get("extra")
             if isinstance(canonical_extra, dict) or canonical_extra is None:
                 replacement["extra"] = dict(canonical_extra or {})
-                deepstacks = {
-                    index: (entry.get("extra") if isinstance(entry.get("extra"), dict) else {}).get("deepstack")
-                    for index, entry in enumerate(selected)
-                }
+                deepstacks = {index: (entry.get("extra") if isinstance(entry.get("extra"), dict) else {}).get("deepstack") for index, entry in enumerate(selected)}
                 if all(deepstacks.values()):
-                    replacement["extra"]["deepstack"] = fuse_deepstack_layers(
-                        deepstacks, visual_fusion_config, device, mask_cache, size, grids, cache=cache
-                    )
-            position = next(
-                index for index, entry in enumerate(fused_info)
-                if entry is canonical_entry
-            )
+                    replacement["extra"]["deepstack"] = fuse_deepstack_layers(deepstacks, visual_fusion_config, device, mask_cache, size, grids, cache=cache)
+            position = next(index for index, entry in enumerate(fused_info) if entry is canonical_entry)
             fused_info[position] = replacement
             canonical_images[visual_index] = replacement
             saved_blocks.append((start, size, fused))
         with qwen3vl_visual_encoder_path(clip, visual_encoder_path):
-            conditioning, metadata = _encode_preprocessed_clip_model(
-                clip_model, fused_embeds, attention_mask, num_tokens, fused_info,
-                **({"cache": cache, "visual_encoder_path": visual_encoder_path, "hooks": clip.patcher.forced_hooks} if cache is not None else {}),
-            )
-            conditioning, metadata = _normalize_token_fused_conditioning(
-                clip, canonical_tokens, conditioning, metadata, fused_info
-            )
+            conditioning, metadata = _encode_preprocessed_clip_model(clip_model, fused_embeds, attention_mask, num_tokens, fused_info, **({"cache": cache, "visual_encoder_path": visual_encoder_path, "hooks": clip.patcher.forced_hooks} if cache is not None else {}))
+            conditioning, metadata = _normalize_token_fused_conditioning(clip, canonical_tokens, conditioning, metadata, fused_info)
             if next(iter(canonical_tokens)) == "qwen3vl_32b":
                 if conditioning.ndim != 3:
-                    raise ValueError(
-                        "MiniMax H3 TokenFusion requires a three-dimensional conditioning tensor."
-                    )
-                metadata["minimax_token_tags"] = token_tags_from_embeds_info(
-                    conditioning.shape[1], fused_info
-                )
-                logging.info(
-                    "MiniMax H3 TokenFusion metadata rebuilt: conditioning=%s tags=%s embeds=%s pictures=%s",
-                    tuple(conditioning.shape),
-                    tuple(metadata["minimax_token_tags"].shape),
-                    tuple(fused_embeds.shape),
-                    [(entry["index"], entry["size"]) for entry in fused_info if entry.get("type") == "image"],
-                )
+                    raise ValueError("MiniMax H3 TokenFusion requires a three-dimensional conditioning tensor.")
+                metadata["minimax_token_tags"] = token_tags_from_embeds_info(conditioning.shape[1], fused_info)
+                logging.info("MiniMax H3 TokenFusion metadata rebuilt: conditioning=%s tags=%s embeds=%s pictures=%s", tuple(conditioning.shape), tuple(metadata["minimax_token_tags"].shape), tuple(fused_embeds.shape), [(entry["index"], entry["size"]) for entry in fused_info if entry.get("type") == "image"])
         return conditioning, metadata, fused_embeds, saved_blocks
 
     hooks = clip.patcher.forced_hooks
@@ -2485,34 +1965,15 @@ def encode_token_fused_visual_slots(
                 config = dict(config)
                 stem, suffix = os.path.splitext(config.get("save_path", "blended_visual_embeds"))
                 config["save_path"] = f"{stem}_{output_index + 1}{suffix}"
-            block = torch.cat([fused_embeds[:, start - 1:start], fused[None], fused_embeds[:, start + size:start + size + 1]], dim=1)
-            save_blended_visual_embeddings(
-                [block[batch].detach() for batch in range(block.shape[0])],
-                config,
-                next(iter(canonical_tokens)),
-            )
+            block = torch.cat([fused_embeds[:, start - 1 : start], fused[None], fused_embeds[:, start + size : start + size + 1]], dim=1)
+            save_blended_visual_embeddings([block[batch].detach() for batch in range(block.shape[0])], config, next(iter(canonical_tokens)))
     completed_blocks = last_payload[1] if last_payload else []
-    summary = ", ".join(
-        f"Picture {visual_index + 1}: {len(alternatives) + 1} sources -> {block[1]} tokens"
-        for (visual_index, alternatives), block in zip(slot_sources, completed_blocks)
-    )
-    logging.info(
-        "TokenFusion visual-token fusion complete: %s, then ran %d conditioning encode%s.",
-        summary or "no Picture slots",
-        len(output),
-        "s" if len(output) != 1 else "",
-    )
+    summary = ", ".join(f"Picture {visual_index + 1}: {len(alternatives) + 1} sources -> {block[1]} tokens" for (visual_index, alternatives), block in zip(slot_sources, completed_blocks))
+    logging.info("TokenFusion visual-token fusion complete: %s, then ran %d conditioning encode%s.", summary or "no Picture slots", len(output), "s" if len(output) != 1 else "")
     return output
 
 
-def encode_token_fused_text(
-    clip,
-    text,
-    images,
-    visual_fusion_config,
-    tokenize_source,
-    visual_encoder_path="grid-deepstack",
-):
+def encode_token_fused_text(clip, text, images, visual_fusion_config, tokenize_source, visual_encoder_path="grid-deepstack"):
     clean_text = text
     biases = []
     if "(" in text and ")" in text:
@@ -2529,12 +1990,7 @@ def encode_token_fused_text(
                     raise ValueError("Contextual prompt weights must be finite.")
                 biases.append((start, end, float(strength)))
     token_sources = [tokenize_source(clean_text, image) for image in images]
-    conditioning = encode_token_fused_visual_sources(
-        clip,
-        token_sources,
-        visual_fusion_config,
-        visual_encoder_path=visual_encoder_path,
-    )
+    conditioning = encode_token_fused_visual_sources(clip, token_sources, visual_fusion_config, visual_encoder_path=visual_encoder_path)
     if biases:
         token_list = token_sources[0][next(iter(token_sources[0]))][0]
         for tensor, _ in conditioning:
@@ -2549,23 +2005,9 @@ def encode_token_fused_text(
     return conditioning, token_sources
 
 
-def execute_token_fusion_visual_conditioning(
-    clip,
-    prompt,
-    images,
-    visual_fusion_config,
-    vlm_resolution,
-    system_prompt=None,
-    multiplier=1.0,
-    skip_template=True,
-):
+def execute_token_fusion_visual_conditioning(clip, prompt, images, visual_fusion_config, vlm_resolution, system_prompt=None, multiplier=1.0, skip_template=True):
     processed = [prepare_vlm_image(image, vlm_resolution) for image in images]
-    prepared_prompt, _ = prepare_image_placeholder_prompt(
-        prompt,
-        image_count=len(processed),
-        fusion_active=True,
-        context="TokenFusion",
-    )
+    prepared_prompt, _ = prepare_image_placeholder_prompt(prompt, image_count=len(processed), fusion_active=True, context="TokenFusion")
     if not any(tag in prepared_prompt for tag in ("<|image_pad|>", "<|image|>", "<|vision_start|>")):
         prepared_prompt = VISION_BLOCK + prepared_prompt
     minimax_h3 = is_minimax_h3_text_encoder(clip)
@@ -2580,12 +2022,7 @@ def execute_token_fusion_visual_conditioning(
     elif minimax_h3:
         full_prompt = format_minimax_h3_prompt(prepared_prompt, system_prompt)
     else:
-        full_prompt = (
-            "<|im_start|>user\n<|im_end|>\n"
-            f"<|im_start|>system\n{system_prompt}<|im_end|>\n"
-            f"<|im_start|>user\n{prepared_prompt}<|im_end|>\n"
-            "<|im_start|>assistant\n"
-        )
+        full_prompt = f"<|im_start|>user\n<|im_end|>\n<|im_start|>system\n{system_prompt}<|im_end|>\n<|im_start|>user\n{prepared_prompt}<|im_end|>\n<|im_start|>assistant\n"
 
     def tokenize_source(text, image):
         if minimax_h3:
@@ -2595,14 +2032,7 @@ def execute_token_fusion_visual_conditioning(
             kwargs["keep_vision"] = True
         return clip.tokenize(text, images=[image], **kwargs)
 
-    conditioning, token_sources = encode_token_fused_text(
-        clip,
-        full_prompt,
-        processed,
-        visual_fusion_config,
-        tokenize_source,
-        visual_fusion_config.get("visual_encoder_path", "grid-deepstack"),
-    )
+    conditioning, token_sources = encode_token_fused_text(clip, full_prompt, processed, visual_fusion_config, tokenize_source, visual_fusion_config.get("visual_encoder_path", "grid-deepstack"))
     if multiplier != 1.0:
         for tensor, metadata in conditioning:
             tensor *= multiplier
@@ -2616,11 +2046,7 @@ def execute_token_fusion_visual_conditioning(
 # Visual embedding exports contain one complete prompt-reloadable visual block:
 # the native vision-start input vector, expanded visual input vectors, and the
 # native vision-end input vector. They never contain template or prompt text.
-def save_blended_visual_embeddings(
-    blended_vis_all_batches: list,
-    visual_fusion_config: dict,
-    embedding_key: str = "qwen3vl_8b"
-) -> None:
+def save_blended_visual_embeddings(blended_vis_all_batches: list, visual_fusion_config: dict, embedding_key: str = "qwen3vl_8b") -> None:
     """
     Saves complete visual prompt blocks as standalone Core embeddings.
 
@@ -2679,15 +2105,9 @@ def _visual_token_embedding_blocks(clip, tokens, device: str, cache=None) -> lis
     tokens_only = [[token[0] for token in batch] for batch in token_batches]
     embeds, _, _, embeds_info = clip_model.process_tokens(tokens_only, device)
     visual_entries = [entry for entry in embeds_info if entry["type"] == "image"]
-    image_positions = [
-        index
-        for index, token in enumerate(tokens_only[0])
-        if isinstance(token, dict) and token.get("type") == "image"
-    ]
+    image_positions = [index for index, token in enumerate(tokens_only[0]) if isinstance(token, dict) and token.get("type") == "image"]
     if len(image_positions) != len(visual_entries):
-        raise ValueError(
-            "Visual embedding export could not map image placeholders to expanded visual spans."
-        )
+        raise ValueError("Visual embedding export could not map image placeholders to expanded visual spans.")
 
     blocks = []
     for visual_index, visual in enumerate(visual_entries):
@@ -2701,14 +2121,7 @@ def _visual_token_embedding_blocks(clip, tokens, device: str, cache=None) -> lis
         end = start + visual["size"]
         if start <= 0 or end >= embeds.shape[1]:
             raise ValueError("Visual embedding export found an incomplete expanded visual block.")
-        blocks.append({
-            "interior": embeds[:, start:end, :],
-            "block": embeds[:, start - 1:end + 1, :],
-            "is_video": bool(
-                isinstance(tokens_only[0][placeholder], dict)
-                and tokens_only[0][placeholder].get("minimax_video_block", False)
-            ),
-        })
+        blocks.append({"interior": embeds[:, start:end, :], "block": embeds[:, start - 1 : end + 1, :], "is_video": bool(isinstance(tokens_only[0][placeholder], dict) and tokens_only[0][placeholder].get("minimax_video_block", False))})
     return blocks
 
 
@@ -2720,26 +2133,12 @@ def _raw_visual_token_embeddings(clip, tokens, device: str, visual_index: int = 
     return blocks[visual_index]["interior"]
 
 
-def save_source_visual_embeddings(
-    clip,
-    tokens,
-    visual_fusion_config: dict,
-    embedding_key: str,
-    device: str,
-    visual_indices: list[int] | None = None,
-    include_video_blocks: bool = False,
-    combine_video_blocks: bool = False,
-    output_index_offset: int = 0,
-    cache=None,
-) -> None:
+def save_source_visual_embeddings(clip, tokens, visual_fusion_config: dict, embedding_key: str, device: str, visual_indices: list[int] | None = None, include_video_blocks: bool = False, combine_video_blocks: bool = False, output_index_offset: int = 0, cache=None) -> None:
     """Save selected unfused image blocks and, optionally, one MiniMax H3 video sequence."""
     blocks = _visual_token_embedding_blocks(clip, tokens, device, cache=cache)
     indices = [0] if visual_indices is None else list(visual_indices)
     if include_video_blocks:
-        indices.extend(
-            index for index, block in enumerate(blocks)
-            if block["is_video"] and index not in indices
-        )
+        indices.extend(index for index, block in enumerate(blocks) if block["is_video"] and index not in indices)
     if combine_video_blocks:
         video_indices = [index for index in indices if blocks[index]["is_video"]]
         if not video_indices:
@@ -2750,14 +2149,7 @@ def save_source_visual_embeddings(
             save_name = config.get("save_path", "blended_visual_embeds")
             stem, suffix = os.path.splitext(save_name)
             config["save_path"] = f"{stem}_{output_index_offset + 1}{suffix}"
-        save_blended_visual_embeddings(
-            [
-                torch.cat([blocks[index]["block"][batch] for index in video_indices], dim=0).detach()
-                for batch in range(blocks[video_indices[0]]["block"].shape[0])
-            ],
-            config,
-            embedding_key,
-        )
+        save_blended_visual_embeddings([torch.cat([blocks[index]["block"][batch] for index in video_indices], dim=0).detach() for batch in range(blocks[video_indices[0]]["block"].shape[0])], config, embedding_key)
         return
     for output_index, visual_index in enumerate(indices):
         if not 0 <= visual_index < len(blocks):
@@ -2770,11 +2162,7 @@ def save_source_visual_embeddings(
             save_name = config.get("save_path", "blended_visual_embeds")
             stem, suffix = os.path.splitext(save_name)
             config["save_path"] = f"{stem}_{saved_index + 1}{suffix}"
-        save_blended_visual_embeddings(
-            [visual_block[batch].detach() for batch in range(visual_block.shape[0])],
-            config,
-            embedding_key,
-        )
+        save_blended_visual_embeddings([visual_block[batch].detach() for batch in range(visual_block.shape[0])], config, embedding_key)
 
 
 def resolve_embedding_output_path(embeddings_dir: str, file_name: str) -> str:
@@ -2794,18 +2182,7 @@ def resolve_embedding_output_path(embeddings_dir: str, file_name: str) -> str:
 
 
 def evaluate_conditioning_consensus_blend(
-    sequence_tensors: dict,
-    pooled_tensors: dict,
-    visual_fusion_config: dict = None,
-    device: str = "cpu",
-    visual_ranges: dict = None,
-    embedding_key: str = "qwen3vl_8b",
-    clip=None,
-    tokens_dict: dict = None,
-    visual_indices: dict = None,
-    mask_cache: dict = None,
-    visual_grids: dict = None,
-    cache=None,
+    sequence_tensors: dict, pooled_tensors: dict, visual_fusion_config: dict = None, device: str = "cpu", visual_ranges: dict = None, embedding_key: str = "qwen3vl_8b", clip=None, tokens_dict: dict = None, visual_indices: dict = None, mask_cache: dict = None, visual_grids: dict = None, cache=None
 ) -> tuple:
     """
     Decoupled blending engine focused entirely on isolated visual token spatial fusion.
@@ -2868,15 +2245,7 @@ def evaluate_conditioning_consensus_blend(
             suffixes[k] = t[v_end:, :]
 
         sources = [visuals[key] for key in active_keys]
-        blended_vis_2d = fuse_visual_token_sources(
-            sources,
-            visual_fusion_config,
-            device,
-            mask_cache,
-            expected_visual_length,
-            source_grids,
-            cache=cache,
-        )
+        blended_vis_2d = fuse_visual_token_sources(sources, visual_fusion_config, device, mask_cache, expected_visual_length, source_grids, cache=cache)
         # Surrounding text (prefixes & suffixes) are kept 100% pure from the reference pass
         blended_prefix = prefixes[ref_key]
         blended_suffix = suffixes[ref_key]
@@ -2888,31 +2257,11 @@ def evaluate_conditioning_consensus_blend(
 
     if visual_fusion_config.get("save_blended_embeds", False):
         reference_block = raw_visual_blocks[0]["block"]
-        if any(
-            source["block"].shape != reference_block.shape
-            or not torch.equal(source["block"][:, :1, :], reference_block[:, :1, :])
-            or not torch.equal(source["block"][:, -1:, :], reference_block[:, -1:, :])
-            for source in raw_visual_blocks[1:]
-        ):
+        if any(source["block"].shape != reference_block.shape or not torch.equal(source["block"][:, :1, :], reference_block[:, :1, :]) or not torch.equal(source["block"][:, -1:, :], reference_block[:, -1:, :]) for source in raw_visual_blocks[1:]):
             raise ValueError("Visual embedding export requires matching Qwen vision block boundaries.")
         save_blended_visual_embeddings(
             [
-                torch.cat(
-                    [
-                        reference_block[batch, :1, :],
-                        fuse_visual_token_sources(
-                            [source["interior"][batch] for source in raw_visual_blocks],
-                            visual_fusion_config,
-                            device,
-                            mask_cache,
-                            expected_visual_length,
-                            source_grids,
-                            cache=cache,
-                        ),
-                        reference_block[batch, -1:, :],
-                    ],
-                    dim=0,
-                ).detach()
+                torch.cat([reference_block[batch, :1, :], fuse_visual_token_sources([source["interior"][batch] for source in raw_visual_blocks], visual_fusion_config, device, mask_cache, expected_visual_length, source_grids, cache=cache), reference_block[batch, -1:, :]], dim=0).detach()
                 for batch in range(reference_block.shape[0])
             ],
             visual_fusion_config,
@@ -2926,19 +2275,7 @@ def evaluate_conditioning_consensus_blend(
     return C_blended, P_blended
 
 
-POWER_BLEND_PRESET = {
-    "method": "consensus",
-    "type": "median",
-    "align": "similarity",
-    "alignment_threshold": 0.9,
-    "thresh": 0.75,
-    "alpha": 8.0,
-    "beta": 0.0,
-    "norm": True,
-    "scale": 1.0,
-    "dsc": True,
-    "soft_comfort": False,
-}
+POWER_BLEND_PRESET = {"method": "consensus", "type": "median", "align": "similarity", "alignment_threshold": 0.9, "thresh": 0.75, "alpha": 8.0, "beta": 0.0, "norm": True, "scale": 1.0, "dsc": True, "soft_comfort": False}
 
 CONSENSUS_BLEND_PRESETS = {
     "baseline": {"method": "consensus", "type": "median", "align": "similarity", "alpha": 2.0, "thresh": 0.0, "beta": 0.0, "scale": 1.0, "norm": False, "dsc": False, "soft_comfort": False},
@@ -2985,9 +2322,7 @@ def resolve_consensus_blend_settings(blend_config):
             blend_method=selected["method"],
             consensus_type=selected["type"],
             alignment_method=selected["align"],
-            alignment_threshold=float(
-                selected.get("alignment_threshold", settings["alignment_threshold"])
-            ),
+            alignment_threshold=float(selected.get("alignment_threshold", settings["alignment_threshold"])),
             similarity_threshold=float(selected["thresh"]),
             power_alpha=float(selected["alpha"]),
             diversity_beta=float(selected["beta"]),
@@ -2998,12 +2333,8 @@ def resolve_consensus_blend_settings(blend_config):
         if settings["global_scale"] == 1.0:
             settings["global_scale"] = float(selected["scale"])
     elif preset == "custom":
-        settings["dynamic_similarity_contrast"] = bool(
-            blend_config.get("dynamic_similarity_contrast", False)
-        )
-        settings["soft_comfort_bandpass"] = bool(
-            blend_config.get("soft_comfort_bandpass", False)
-        )
+        settings["dynamic_similarity_contrast"] = bool(blend_config.get("dynamic_similarity_contrast", False))
+        settings["soft_comfort_bandpass"] = bool(blend_config.get("soft_comfort_bandpass", False))
     elif preset != "off":
         raise ValueError(f"Unsupported consensus blend preset: {preset}")
     return settings
@@ -3256,9 +2587,7 @@ def blend_text_vectors(sequence_tensors: dict, blend_config: dict, pooled_tensor
                 merged_seq[i] = merged_vec
             C_blended_list.append(torch.cat([preserved_prefix, merged_seq], dim=0))
 
-    C_blended = comfy.model_management.cast_to_device(
-        torch.stack(C_blended_list, dim=0), tensors_list[0].device, tensors_list[0].dtype
-    )
+    C_blended = comfy.model_management.cast_to_device(torch.stack(C_blended_list, dim=0), tensors_list[0].device, tensors_list[0].dtype)
 
     # Blend metadata pooled outputs
     P_blended = None
@@ -3267,10 +2596,7 @@ def blend_text_vectors(sequence_tensors: dict, blend_config: dict, pooled_tensor
         pooled_reference = pooled_list_active[0]
         P_blended_batches = []
         for b in range(B):
-            stacked_p = torch.stack([
-                comfy.model_management.cast_to_device(pooled[b], device, compute_dtype)
-                for pooled in pooled_list_active
-            ])
+            stacked_p = torch.stack([comfy.model_management.cast_to_device(pooled[b], device, compute_dtype) for pooled in pooled_list_active])
             if consensus_type == "median":
                 consensus_p = torch.median(stacked_p, dim=0).values
             else:
@@ -3313,21 +2639,12 @@ def blend_text_vectors(sequence_tensors: dict, blend_config: dict, pooled_tensor
             if global_scale != 1.0:
                 merged_p *= global_scale
             P_blended_batches.append(merged_p)
-        P_blended = comfy.model_management.cast_to_device(
-            torch.stack(P_blended_batches, dim=0), pooled_reference.device, pooled_reference.dtype
-        )
+        P_blended = comfy.model_management.cast_to_device(torch.stack(P_blended_batches, dim=0), pooled_reference.device, pooled_reference.dtype)
 
     return C_blended, P_blended
 
 
-def find_visual_token_range(
-    tokens,
-    cond_tensor,
-    legacy_krea_spatial=False,
-    minimax_token_tags=None,
-    minimax_visual_index=None,
-    qwen_image21=False,
-) -> tuple:
+def find_visual_token_range(tokens, cond_tensor, legacy_krea_spatial=False, minimax_token_tags=None, minimax_visual_index=None, qwen_image21=False) -> tuple:
     key_name = next(iter(tokens.keys()))
     token_list = tokens[key_name][0]
     if not any(is_image_token(token) for token in token_list):
@@ -3344,25 +2661,17 @@ def find_visual_token_range(
             else:
                 visual_blocks[-1].append(position)
         image_count = sum(is_image_token(token) for token in token_list)
-        if len(visual_blocks) != image_count or any(
-            len(block) < 3 for block in visual_blocks
-        ):
-            raise ValueError(
-                "MiniMax H3 modality tags do not match the numbered visual blocks."
-            )
+        if len(visual_blocks) != image_count or any(len(block) < 3 for block in visual_blocks):
+            raise ValueError("MiniMax H3 modality tags do not match the numbered visual blocks.")
         if minimax_visual_index is None:
             if len(visual_blocks) != 1:
-                raise ValueError(
-                    "MiniMax H3 visual fusion requires a selected visual block."
-                )
+                raise ValueError("MiniMax H3 visual fusion requires a selected visual block.")
             visual_block = visual_blocks[0]
         else:
             try:
                 visual_block = visual_blocks[minimax_visual_index]
             except (IndexError, TypeError) as exc:
-                raise ValueError(
-                    "MiniMax H3 visual fusion selected an unavailable visual block."
-                ) from exc
+                raise ValueError("MiniMax H3 visual fusion selected an unavailable visual block.") from exc
         return visual_block[0] + 1, visual_block[-1]
 
     if legacy_krea_spatial and cond_tensor.shape[-1] == 12 * 2560:
@@ -3380,9 +2689,7 @@ def find_visual_token_range(
             raise ValueError("Legacy Krea2 spatial mapping does not cover the conditioning sequence.")
         return visual_start, visual_end
 
-    mapping = build_token_to_conditioning_map(
-        token_list, cond_tensor, embedding_key=key_name, qwen_image21=qwen_image21
-    )
+    mapping = build_token_to_conditioning_map(token_list, cond_tensor, embedding_key=key_name, qwen_image21=qwen_image21)
     for i, t in enumerate(token_list):
         if is_image_token(t):
             return mapping[i][0], mapping[i][1]
@@ -3390,12 +2697,7 @@ def find_visual_token_range(
     return 0, 0
 
 
-def build_context_attention_bias(
-    tokens: dict | None,
-    cond_tensor: torch.Tensor,
-    image_strength: float = 1.0,
-    visual_ranges: dict | tuple | list | None = None,
-) -> torch.Tensor | None:
+def build_context_attention_bias(tokens: dict | None, cond_tensor: torch.Tensor, image_strength: float = 1.0, visual_ranges: dict | tuple | list | None = None) -> torch.Tensor | None:
     """Build additive context attention logit bias for visual tokens (e.g. MOSS-Image).
 
     Scales how much the diffusion model attends to the visual tokens encoded for reference image(s).
@@ -3424,6 +2726,7 @@ def build_context_attention_bias(
                 has_image = True
                 try:
                     import comfy.text_encoders.qwen_vl
+
                     _, grid = comfy.text_encoders.qwen_vl.process_qwen2vl_images(t[0]["data"], patch_size=16)
                     bias += [weight] * (int(grid[0, 1] * grid[0, 2]) // 4)
                 except Exception:
@@ -3458,16 +2761,7 @@ def build_context_attention_bias(
     return None
 
 
-def encode_embedding_classical_scaled_bias(
-    clip,
-    text,
-    llama_template=None,
-    visual_encoder_path="grid-deepstack",
-    tokenize_callback=None,
-    encode_callback=None,
-    cache=None,
-    **kwargs,
-):
+def encode_embedding_classical_scaled_bias(clip, text, llama_template=None, visual_encoder_path="grid-deepstack", tokenize_callback=None, encode_callback=None, cache=None, **kwargs):
     if clip is None:
         raise RuntimeError("ERROR: clip input is invalid: None\n\nIf the clip is from a checkpoint loader node your checkpoint does not contain a valid clip or text encoder model.")
 
@@ -3549,10 +2843,11 @@ def _contextual_token_weights(text: str):
     """Parse weights with the same backslash escaping contract as Core's tokenizer."""
     return [(unescape_important(segment), weight) for segment, weight in token_weights(escape_important(text), 1.0)]
 
+
 def load_vlm_image_tensor(path_str):
     if not path_str:
         return None
-    normalized_path = path_str.strip().replace('\\', '/')
+    normalized_path = path_str.strip().replace("\\", "/")
     normalized_path = os.path.normpath(normalized_path)
     if not os.path.isabs(normalized_path):
         normalized_path = os.path.abspath(normalized_path)
@@ -3560,15 +2855,15 @@ def load_vlm_image_tensor(path_str):
     if not os.path.isfile(normalized_path):
         raise FileNotFoundError(f"Invalid image path: {path_str} (resolved to: {normalized_path})")
 
-
     img = node_helpers.pillow(Image.open, normalized_path)
     for i in ImageSequence.Iterator(img):
         i = node_helpers.pillow(ImageOps.exif_transpose, i)
-        if i.mode == 'I':
+        if i.mode == "I":
             i = i.point(lambda x: x * (1 / 65535))
         image = i.convert("RGB")
         image_np = np.array(image).astype(np.float32) / 255.0
         return torch.from_numpy(image_np)[None,]  # Returns [1, H, W, C]
+
 
 def krea2_user_content_span(ids):
     best_start, best_end = None, None
@@ -3591,6 +2886,7 @@ def krea2_user_content_span(ids):
             return start, end
     return None, None
 
+
 def extract_and_flatten_images(image_inputs) -> tuple:
     """
     Extracts individual images from batched image tensors within the image_inputs dict.
@@ -3602,7 +2898,7 @@ def extract_and_flatten_images(image_inputs) -> tuple:
     is_zero_indexed = False
     if image_inputs is not None:
         for k in image_inputs.keys():
-            digits = re.findall(r'\d+', k)
+            digits = re.findall(r"\d+", k)
             if digits and int(digits[0]) == 0:
                 is_zero_indexed = True
                 break
@@ -3611,8 +2907,9 @@ def extract_and_flatten_images(image_inputs) -> tuple:
     if image_inputs is not None:
         # Sort keys numerically by their suffix to ensure correct sequential order
         def get_num(k):
-            digits = re.findall(r'\d+', k)
+            digits = re.findall(r"\d+", k)
             return int(digits[0]) if digits else 0
+
         sorted_keys = sorted(image_inputs.keys(), key=get_num)
 
         for k in sorted_keys:
@@ -3621,13 +2918,13 @@ def extract_and_flatten_images(image_inputs) -> tuple:
                 if isinstance(v, torch.Tensor) and len(v.shape) == 4:
                     # Shape is [B, H, W, C]. Slice into B individual tensors of [1, H, W, C]
                     for i in range(v.shape[0]):
-                        flat_images.append(v[i:i+1])
+                        flat_images.append(v[i : i + 1])
                 elif isinstance(v, list):
                     # Handle lists of tensors if passed
                     for item in v:
                         if isinstance(item, torch.Tensor) and len(item.shape) == 4:
                             for i in range(item.shape[0]):
-                                flat_images.append(item[i:i+1])
+                                flat_images.append(item[i : i + 1])
                         elif isinstance(item, torch.Tensor):
                             flat_images.append(item)
                 else:
@@ -3660,7 +2957,7 @@ def extract_image_socket_batches(image_inputs) -> list[tuple[int, list]]:
         for tensor in values:
             if not torch.is_tensor(tensor) or tensor.ndim != 4:
                 raise ValueError("Every visual input must be a BHWC IMAGE tensor.")
-            expanded.extend(tensor[index:index + 1] for index in range(tensor.shape[0]))
+            expanded.extend(tensor[index : index + 1] for index in range(tensor.shape[0]))
         if expanded:
             socket_batches.append((socket_number(name), expanded))
     return socket_batches
@@ -3687,10 +2984,7 @@ def build_visual_consensus_batch_lanes(image_inputs):
         raise ValueError(f"Visual input batch lengths must match or be 1 (got {lengths}).")
 
     lane_count = next(iter(non_singleton_lengths), 1)
-    lanes = [
-        [socket[0] if len(socket) == 1 else socket[lane] for socket in sockets]
-        for lane in range(lane_count)
-    ]
+    lanes = [[socket[0] if len(socket) == 1 else socket[lane] for socket in sockets] for lane in range(lane_count)]
     reference_images = [image for socket in sockets for image in socket]
     return lanes, reference_images
 
@@ -3715,33 +3009,13 @@ def blend_complete_conditionings(conditionings, blend_config):
         if any(value is not None for value in slots):
             if any(value != slots[0] for value in slots[1:]) or len({entry[0].shape[1] for entry in entries}) != 1:
                 raise ValueError("Consensus requires matching image_slots and sequence lengths; incompatible reference layouts cannot be blended.")
-        sequence_tensors = {
-            chr(97 + index): entry[0] for index, entry in enumerate(entries)
-        }
-        pooled_tensors = {
-            chr(97 + index): entry[1].get("pooled_output")
-            for index, entry in enumerate(entries)
-        }
-        tensor, pooled = blend_text_vectors(
-            sequence_tensors,
-            blend_config,
-            pooled_tensors=pooled_tensors,
-            device=device,
-            compute_dtype=compute_dtype,
-        )
+        sequence_tensors = {chr(97 + index): entry[0] for index, entry in enumerate(entries)}
+        pooled_tensors = {chr(97 + index): entry[1].get("pooled_output") for index, entry in enumerate(entries)}
+        tensor, pooled = blend_text_vectors(sequence_tensors, blend_config, pooled_tensors=pooled_tensors, device=device, compute_dtype=compute_dtype)
 
-        layout_keys = {
-            "attention_mask",
-            "attention_mask_img_shape",
-            "embeds_info",
-            "minimax_token_tags",
-            "pooled_output",
-            "image_slots",
-        }
+        layout_keys = {"attention_mask", "attention_mask_img_shape", "embeds_info", "minimax_token_tags", "pooled_output", "image_slots"}
         metadata_items = [entry[1] for entry in entries]
-        common_keys = set.intersection(
-            *(set(metadata) for metadata in metadata_items)
-        ) - layout_keys
+        common_keys = set.intersection(*(set(metadata) for metadata in metadata_items)) - layout_keys
         metadata = {}
         if slots[0] is not None:
             metadata["image_slots"] = list(slots[0])
@@ -3749,18 +3023,11 @@ def blend_complete_conditionings(conditionings, blend_config):
             values = [item[key] for item in metadata_items]
             first = values[0]
             if torch.is_tensor(first):
-                if all(
-                    torch.is_tensor(value)
-                    and value.shape == first.shape
-                    and torch.equal(value, first)
-                    for value in values[1:]
-                ):
+                if all(torch.is_tensor(value) and value.shape == first.shape and torch.equal(value, first) for value in values[1:]):
                     metadata[key] = first
             elif all(value is first for value in values[1:]):
                 metadata[key] = first
-            elif isinstance(first, (str, int, float, bool, type(None))) and all(
-                value == first for value in values[1:]
-            ):
+            elif isinstance(first, (str, int, float, bool, type(None))) and all(value == first for value in values[1:]):
                 metadata[key] = first
         if pooled is not None:
             metadata["pooled_output"] = pooled
@@ -3768,9 +3035,7 @@ def blend_complete_conditionings(conditionings, blend_config):
         minimax_tags = reference_entry[1].get("minimax_token_tags")
         if minimax_tags is not None:
             if not torch.is_tensor(minimax_tags) or minimax_tags.numel() != tensor.shape[1]:
-                raise ValueError(
-                    "MiniMax H3 modality tags do not match the consensus sequence length."
-                )
+                raise ValueError("MiniMax H3 modality tags do not match the consensus sequence length.")
             metadata["minimax_token_tags"] = minimax_tags
         blended.append([tensor, metadata])
     return blended
@@ -3791,9 +3056,7 @@ def batch_complete_conditionings(conditionings):
         entries = [conditioning[schedule_index] for conditioning in conditionings]
         tensors = [entry[0] for entry in entries]
         if any(tensor.shape[1:] != tensors[0].shape[1:] for tensor in tensors[1:]):
-            raise ValueError(
-                "Visual batch lanes produced incompatible conditioning shapes."
-            )
+            raise ValueError("Visual batch lanes produced incompatible conditioning shapes.")
         metadata_items = [entry[1] for entry in entries]
         metadata = {}
         common_keys = set.intersection(*(set(item) for item in metadata_items))
@@ -3801,17 +3064,11 @@ def batch_complete_conditionings(conditionings):
             values = [item[key] for item in metadata_items]
             first = values[0]
             if torch.is_tensor(first):
-                if all(
-                    torch.is_tensor(value)
-                    and value.shape[1:] == first.shape[1:]
-                    for value in values[1:]
-                ):
+                if all(torch.is_tensor(value) and value.shape[1:] == first.shape[1:] for value in values[1:]):
                     metadata[key] = torch.cat(values, dim=0)
             elif all(value is first for value in values[1:]):
                 metadata[key] = first
-            elif isinstance(first, (str, int, float, bool, type(None))) and all(
-                value == first for value in values[1:]
-            ):
+            elif isinstance(first, (str, int, float, bool, type(None))) and all(value == first for value in values[1:]):
                 metadata[key] = first
         batched.append([torch.cat(tensors, dim=0), metadata])
     return batched
@@ -3825,109 +3082,49 @@ def _format_advanced_visual_consensus_prompt(prompt, system_prompt, qwen_image21
     if moss_image:
         return format_moss_image_prompt(prompt, system_prompt)
     if system_prompt:
-        return (
-            "<|im_start|>user\n<|im_end|>\n"
-            f"<|im_start|>system\n{system_prompt}<|im_end|>\n"
-            f"<|im_start|>user\n{prompt}<|im_end|>\n"
-            "<|im_start|>assistant\n"
-        )
-    return (
-        "<|im_start|>system\nDescribe the image by detailing the color, shape, "
-        "size, texture, quantity, text, spatial relationships of the objects "
-        "and background:<|im_end|>\n"
-        f"<|im_start|>user\n{prompt}<|im_end|>\n"
-        "<|im_start|>assistant\n"
-    )
+        return f"<|im_start|>user\n<|im_end|>\n<|im_start|>system\n{system_prompt}<|im_end|>\n<|im_start|>user\n{prompt}<|im_end|>\n<|im_start|>assistant\n"
+    return f"<|im_start|>system\nDescribe the image by detailing the color, shape, size, texture, quantity, text, spatial relationships of the objects and background:<|im_end|>\n<|im_start|>user\n{prompt}<|im_end|>\n<|im_start|>assistant\n"
 
 
-def _encode_visual_consensus_source(
-    clip, source_image, resolution, prompt, visual_encoder_path
-):
+def _encode_visual_consensus_source(clip, source_image, resolution, prompt, visual_encoder_path):
     processed = prepare_vlm_image(source_image, resolution)
     minimax_h3 = is_minimax_h3_text_encoder(clip)
     tokenize_callback = None
     encode_kwargs = {"images": [processed], "skip_template": True}
     if minimax_h3:
-        tokenize_callback = lambda text: tokenize_minimax_h3_prompt(
-            clip, text, [processed]
-        )
+        tokenize_callback = lambda text: tokenize_minimax_h3_prompt(clip, text, [processed])
         encode_kwargs = {}
-    conditioning = encode_embedding_classical_scaled_bias(
-        clip,
-        prompt,
-        visual_encoder_path=visual_encoder_path,
-        tokenize_callback=tokenize_callback,
-        **encode_kwargs,
-    )
+    conditioning = encode_embedding_classical_scaled_bias(clip, prompt, visual_encoder_path=visual_encoder_path, tokenize_callback=tokenize_callback, **encode_kwargs)
     if len(conditioning) != 1:
         raise ValueError("Visual consensus encoding requires one schedule entry.")
     tensor, metadata = conditioning[0]
-    tokens = (
-        tokenize_minimax_h3_prompt(clip, prompt, [processed])
-        if minimax_h3
-        else clip.tokenize(prompt, images=[processed], skip_template=True, **({"keep_vision": True} if is_qwen_image21_text_encoder(clip) else {}))
-    )
-    visual_range = find_visual_token_range(
-        tokens,
-        tensor,
-        legacy_krea_spatial=visual_encoder_path == "legacy-flat",
-        minimax_token_tags=metadata.get("minimax_token_tags"),
-        qwen_image21=is_qwen_image21_text_encoder(clip),
-    )
-    return {
-        "conditioning": [[tensor, metadata]],
-        "tensor": tensor,
-        "metadata": metadata,
-        "pooled": metadata.get("pooled_output"),
-        "tokens": tokens,
-        "visual_range": visual_range,
-        "grid": visual_fusion_grid(
-            processed,
-            visual_range[1] - visual_range[0],
-            visual_encoder_path == "legacy-flat",
-        ),
-        "image": processed,
-    }
+    tokens = tokenize_minimax_h3_prompt(clip, prompt, [processed]) if minimax_h3 else clip.tokenize(prompt, images=[processed], skip_template=True, **({"keep_vision": True} if is_qwen_image21_text_encoder(clip) else {}))
+    visual_range = find_visual_token_range(tokens, tensor, legacy_krea_spatial=visual_encoder_path == "legacy-flat", minimax_token_tags=metadata.get("minimax_token_tags"), qwen_image21=is_qwen_image21_text_encoder(clip))
+    return {"conditioning": [[tensor, metadata]], "tensor": tensor, "metadata": metadata, "pooled": metadata.get("pooled_output"), "tokens": tokens, "visual_range": visual_range, "grid": visual_fusion_grid(processed, visual_range[1] - visual_range[0], visual_encoder_path == "legacy-flat"), "image": processed}
 
 
 def _tokenize_visual_consensus_source(clip, source_image, resolution, prompt):
     processed = prepare_vlm_image(source_image, resolution)
-    tokens = (
-        tokenize_minimax_h3_prompt(clip, prompt, [processed])
-        if is_minimax_h3_text_encoder(clip)
-        else clip.tokenize(prompt, images=[processed], skip_template=True, **({"keep_vision": True} if is_qwen_image21_text_encoder(clip) else {}))
-    )
+    tokens = tokenize_minimax_h3_prompt(clip, prompt, [processed]) if is_minimax_h3_text_encoder(clip) else clip.tokenize(prompt, images=[processed], skip_template=True, **({"keep_vision": True} if is_qwen_image21_text_encoder(clip) else {}))
     return tokens
 
 
-def _spatially_fuse_visual_consensus_sources(
-    branches, visual_config, clip, allow_export, cache=None
-):
+def _spatially_fuse_visual_consensus_sources(branches, visual_config, clip, allow_export, cache=None):
     keys = [chr(97 + index) for index in range(len(branches))]
     config = dict(visual_config)
-    config["save_blended_embeds"] = bool(
-        allow_export and config.get("save_blended_embeds", False)
-    )
+    config["save_blended_embeds"] = bool(allow_export and config.get("save_blended_embeds", False))
     tensor, pooled = evaluate_conditioning_consensus_blend(
         {key: branch["tensor"] for key, branch in zip(keys, branches)},
-        {
-            key: branch["pooled"]
-            for key, branch in zip(keys, branches)
-            if branch["pooled"] is not None
-        },
+        {key: branch["pooled"] for key, branch in zip(keys, branches) if branch["pooled"] is not None},
         visual_fusion_config=config,
         device=comfy.model_management.get_torch_device(),
-        visual_ranges={
-            key: branch["visual_range"] for key, branch in zip(keys, branches)
-        },
+        visual_ranges={key: branch["visual_range"] for key, branch in zip(keys, branches)},
         embedding_key=next(iter(branches[0]["tokens"])),
         clip=clip,
         tokens_dict={key: branch["tokens"] for key, branch in zip(keys, branches)},
         visual_indices={key: branch.get("raw_visual_index", 0) for key, branch in zip(keys, branches)},
         mask_cache={},
-        visual_grids={
-            key: branch["grid"] for key, branch in zip(keys, branches)
-        },
+        visual_grids={key: branch["grid"] for key, branch in zip(keys, branches)},
         cache=cache,
     )
     metadata = branches[0]["metadata"].copy()
@@ -3938,12 +3135,8 @@ def _spatially_fuse_visual_consensus_sources(
     if pooled is not None:
         metadata["pooled_output"] = pooled
     minimax_tags = metadata.get("minimax_token_tags")
-    if minimax_tags is not None and (
-        not torch.is_tensor(minimax_tags) or minimax_tags.numel() != tensor.shape[1]
-    ):
-        raise ValueError(
-            "MiniMax H3 modality tags do not match the spatially fused sequence length."
-        )
+    if minimax_tags is not None and (not torch.is_tensor(minimax_tags) or minimax_tags.numel() != tensor.shape[1]):
+        raise ValueError("MiniMax H3 modality tags do not match the spatially fused sequence length.")
     return [[tensor, metadata]]
 
 
@@ -3962,12 +3155,7 @@ def execute_minimax_h3_vlm_guide(conditioning, clip, image, timestamp, vlm_resol
     return splice_conditioning(conditioning, guide)
 
 
-def resolve_minimax_h3_frame_index(
-    frame_index: int,
-    conditioning=None,
-    latent=None,
-    fps: float = 24.0,
-) -> float:
+def resolve_minimax_h3_frame_index(frame_index: int, conditioning=None, latent=None, fps: float = 24.0) -> float:
     """Resolve a zero-based frame index (0 is first, 1 is second, -1 is last) to timestamp seconds."""
     if isinstance(frame_index, bool) or not isinstance(frame_index, numbers.Integral):
         raise ValueError("MiniMax H3 frame index must be an integer.")
@@ -3975,56 +3163,37 @@ def resolve_minimax_h3_frame_index(
 
     frame_count = None
     if latent is not None:
-        from .model_helpers import h3_video_from_latent, h3_pixel_frames_for_latent_steps
+        from .model_helpers import h3_pixel_frames_for_latent_steps, h3_video_from_latent
+
         video = h3_video_from_latent(latent)
         frame_count = h3_pixel_frames_for_latent_steps(video.shape[2])
-    elif (
-        isinstance(conditioning, (tuple, list))
-        and conditioning
-        and isinstance(conditioning[0], (tuple, list))
-        and len(conditioning[0]) > 1
-        and isinstance(conditioning[0][1], dict)
-    ):
+    elif isinstance(conditioning, (tuple, list)) and conditioning and isinstance(conditioning[0], (tuple, list)) and len(conditioning[0]) > 1 and isinstance(conditioning[0][1], dict):
         frame_count = conditioning[0][1].get("minimax_frame_count")
 
     if frame_index < 0:
         if frame_count is None:
-            raise ValueError(
-                f"Negative frame index ({frame_index}) requires video frame count; "
-                "connect latent or use conditioning with minimax_frame_count metadata."
-            )
+            raise ValueError(f"Negative frame index ({frame_index}) requires video frame count; connect latent or use conditioning with minimax_frame_count metadata.")
         resolved_frame = frame_count + frame_index
         if resolved_frame < 0:
-            raise ValueError(
-                f"Negative frame index ({frame_index}) is outside the video's {frame_count} frames."
-            )
+            raise ValueError(f"Negative frame index ({frame_index}) is outside the video's {frame_count} frames.")
     else:
         resolved_frame = frame_index
         if frame_count is not None and resolved_frame >= frame_count:
-            raise ValueError(
-                f"Frame index ({frame_index}) is outside the video's {frame_count} frames."
-            )
+            raise ValueError(f"Frame index ({frame_index}) is outside the video's {frame_count} frames.")
 
     return float(resolved_frame) / float(fps)
 
 
-def execute_minimax_h3_vlm_frame_guide(
-    conditioning, clip, image, frame_index, latent=None, vlm_resolution=384, cache=None, enable_caching="all"
-):
+def execute_minimax_h3_vlm_frame_guide(conditioning, clip, image, frame_index, latent=None, vlm_resolution=384, cache=None, enable_caching="all"):
     timestamp = resolve_minimax_h3_frame_index(frame_index, conditioning=conditioning, latent=latent)
-    return execute_minimax_h3_vlm_guide(
-        conditioning, clip, image, timestamp, vlm_resolution=vlm_resolution, cache=cache, enable_caching=enable_caching
-    )
+    return execute_minimax_h3_vlm_guide(conditioning, clip, image, timestamp, vlm_resolution=vlm_resolution, cache=cache, enable_caching=enable_caching)
 
 
 def _encode_minimax_h3_image_guide(clip, image, timestamp, vlm_resolution, cache):
     prepared = prepare_vlm_image(image, vlm_resolution)
     entries = _minimax_h3_text_entries(clip, f"<{timestamp:.1f} seconds>")
     entries += _minimax_h3_visual_token_entries(clip, prepared)
-    return _encode_minimax_h3_section(
-        clip, {"qwen3vl_32b": [entries]}, "grid-deepstack", cache=cache,
-        section_kind="guide", section_id="guide",
-    )
+    return _encode_minimax_h3_section(clip, {"qwen3vl_32b": [entries]}, "grid-deepstack", cache=cache, section_kind="guide", section_id="guide")
 
 
 def encode_minimax_h3_ref_vlm(clip, media_type, media, vlm_resolution=384, reference_number=17):
@@ -4038,27 +3207,18 @@ def encode_minimax_h3_ref_vlm(clip, media_type, media, vlm_resolution=384, refer
             prepared = prepare_vlm_image(media, vlm_resolution)
             entries = _minimax_h3_text_entries(clip, f"<Picture {reference_number}>: ")
             entries += _minimax_h3_visual_token_entries(clip, prepared)
-            sections = _encode_minimax_h3_section(
-                clip, {"qwen3vl_32b": [entries]}, "grid-deepstack", cache=invocation,
-                section_kind="image", section_id="ref_vlm",
-            )
+            sections = _encode_minimax_h3_section(clip, {"qwen3vl_32b": [entries]}, "grid-deepstack", cache=invocation, section_kind="image", section_id="ref_vlm")
         elif media_type == "video":
             indices = list(range(0, media.shape[0], 12))
             frames = prepare_minimax_h3_vlm_video_frames(media[indices], vlm_resolution)
-            tokens = clip.tokenize("", minimax_ref_items=[{
-                "type": "video", "data": frames,
-                "timestamps": [Fraction(index, 24) for index in indices],
-            }])
+            tokens = clip.tokenize("", minimax_ref_items=[{"type": "video", "data": frames, "timestamps": [Fraction(index, 24) for index in indices]}])
             entries = _token_entries(tokens, "qwen3vl_32b")
             label = _minimax_h3_text_entries(clip, "<Video 1>: ")
-            if [entry[0] for entry in entries[:len(label)]] != [entry[0] for entry in label]:
+            if [entry[0] for entry in entries[: len(label)]] != [entry[0] for entry in label]:
                 raise ValueError("MiniMax H3 tokenizer returned an unexpected video prefix.")
             numbered = _minimax_h3_text_entries(clip, f"<Video {reference_number}>: ")
-            numbered += entries[len(label):]
-            sections = _encode_minimax_h3_section(
-                clip, {"qwen3vl_32b": [numbered]}, "grid-deepstack", cache=invocation,
-                section_kind="video", section_id="ref_vlm",
-            )
+            numbered += entries[len(label) :]
+            sections = _encode_minimax_h3_section(clip, {"qwen3vl_32b": [numbered]}, "grid-deepstack", cache=invocation, section_kind="video", section_id="ref_vlm")
         else:
             raise ValueError("MiniMax H3 Ref VLM media must be image or video.")
     if len(sections) != 1:
@@ -4072,9 +3232,7 @@ def fuse_minimax_h3_ref_vlm_images(clip, images, vlm_resolution=384, reference_n
     tags = None
     output_dtype = None
     for index, image in enumerate(images):
-        embedding, image_tags = encode_minimax_h3_ref_vlm(
-            clip, "image", image.unsqueeze(0), vlm_resolution, reference_number,
-        )
+        embedding, image_tags = encode_minimax_h3_ref_vlm(clip, "image", image.unsqueeze(0), vlm_resolution, reference_number)
         if not torch.is_tensor(embedding) or not torch.is_tensor(image_tags):
             raise ValueError("MiniMax H3 Ref Qwen encoding must return embeddings and token tags.")
         if fused is None:
@@ -4089,10 +3247,7 @@ def fuse_minimax_h3_ref_vlm_images(clip, images, vlm_resolution=384, reference_n
 
 
 def _encode_minimax_h3_section(clip, tokens, visual_path, cache, *, section_kind, section_id):
-    return cache.encode_scheduled(
-        clip, tokens, visual_path, lambda: _encode_scheduled_with_visual_path(clip, tokens, visual_path),
-        section_kind=section_kind, section_id=section_id,
-    )
+    return cache.encode_scheduled(clip, tokens, visual_path, lambda: _encode_scheduled_with_visual_path(clip, tokens, visual_path), section_kind=section_kind, section_id=section_id)
 
 
 def _minimax_h3_stage1_vae(item: dict, cache) -> dict:
@@ -4128,17 +3283,11 @@ def _minimax_h3_stage1_vae(item: dict, cache) -> dict:
     fusion_socket_batches = extract_image_socket_batches(fusion_images)
     keyframe_mode = first_frame is not None or last_frame is not None
     if continuation_media is not None and first_frame is not None:
-        raise ValueError(
-            "MiniMax H3 Clip Continuation uses its saved tail frame 0. Disconnect first_frame."
-        )
+        raise ValueError("MiniMax H3 Clip Continuation uses its saved tail frame 0. Disconnect first_frame.")
     if keyframe_mode and flat_references:
-        raise ValueError(
-            "MiniMax H3 frame inputs cannot be combined with native reference images."
-        )
+        raise ValueError("MiniMax H3 frame inputs cannot be combined with native reference images.")
     if keyframe_mode and video is not None:
-        raise ValueError(
-            "MiniMax H3 frame inputs cannot be used with reference video."
-        )
+        raise ValueError("MiniMax H3 frame inputs cannot be used with reference video.")
     native_reference_mode = bool(flat_references)
     if native_reference_mode and ref_image_size not in ("match", "max", "none"):
         raise ValueError(f"Unsupported MiniMax H3 reference image size: {ref_image_size}")
@@ -4148,13 +3297,8 @@ def _minimax_h3_stage1_vae(item: dict, cache) -> dict:
     fusion_active = visual_method != "off" and bool(flat_fusion_images)
     base_vlm_count = (1 if first_frame is not None else 0) + (1 if last_frame is not None else 0) + len(flat_references)
     if fusion_active and keyframe_mode:
-        if any(
-            socket_number < 1 or socket_number > base_vlm_count
-            for socket_number, _ in fusion_socket_batches
-        ):
-            raise ValueError(
-                "MiniMax H3 frame fusion has a fusion image without a matching picture slot."
-            )
+        if any(socket_number < 1 or socket_number > base_vlm_count for socket_number, _ in fusion_socket_batches):
+            raise ValueError("MiniMax H3 frame fusion has a fusion image without a matching picture slot.")
 
     frame_vae_enabled = ref_image_size != "none"
     visual_sources = []
@@ -4162,26 +3306,11 @@ def _minimax_h3_stage1_vae(item: dict, cache) -> dict:
         visual_sources.append(("first frame", first_frame))
     if last_frame is not None:
         visual_sources.append(("last frame", last_frame))
-    visual_sources.extend(
-        (f"reference image {index}", image)
-        for index, image in enumerate(flat_references, start=1)
-    )
-    visual_sources.extend(
-        (f"fusion image {index}", image)
-        for index, image in enumerate(flat_fusion_images, start=1)
-    )
+    visual_sources.extend((f"reference image {index}", image) for index, image in enumerate(flat_references, start=1))
+    visual_sources.extend((f"fusion image {index}", image) for index, image in enumerate(flat_fusion_images, start=1))
     for label, image in visual_sources:
-        if (
-            not torch.is_tensor(image)
-            or image.ndim != 4
-            or image.shape[0] != 1
-            or image.shape[1] < 1
-            or image.shape[2] < 1
-            or image.shape[3] < 3
-        ):
-            raise ValueError(
-                f"MiniMax H3 {label} must contain exactly one BHWC image with at least three channels."
-            )
+        if not torch.is_tensor(image) or image.ndim != 4 or image.shape[0] != 1 or image.shape[1] < 1 or image.shape[2] < 1 or image.shape[3] < 3:
+            raise ValueError(f"MiniMax H3 {label} must contain exactly one BHWC image with at least three channels.")
 
     clip = cache.prepare_clip(clip)
 
@@ -4202,18 +3331,7 @@ def _minimax_h3_stage1_vae(item: dict, cache) -> dict:
     video_latent_fps = 2.0
     refine_steps = 100
     if media_config is not None:
-        (
-            picture_timestamps,
-            media_timestamp_format,
-            picture_structure,
-            default_single_visual,
-            video_fps,
-            video_latent_mode,
-            video_latent_keyframes,
-        ) = _validate_minimax_h3_media_config(
-            media_config,
-            frame_count,
-        )
+        (picture_timestamps, media_timestamp_format, picture_structure, default_single_visual, video_fps, video_latent_mode, video_latent_keyframes) = _validate_minimax_h3_media_config(media_config, frame_count)
         video_reference_resolution = media_config.get("video_reference_resolution", 256)
         video_latent_fps = float(media_config.get("video_latent_fps", 2.0))
         refine_steps = int(media_config.get("refine_steps", 100))
@@ -4224,99 +3342,37 @@ def _minimax_h3_stage1_vae(item: dict, cache) -> dict:
         resolved_video_latent_mode = video_latent_mode
         if resolved_video_latent_mode is None:
             resolved_video_latent_mode = "off"
-        if (
-            resolved_video_latent_mode == "even keyframes"
-            and frame_vae_enabled
-            and flat_references
-        ):
-            raise ValueError(
-                "MiniMax H3 even Video keyframes with native reference images require ref_image_size none."
-            )
-        video_frames, video_reference = prepare_minimax_h3_reference_video(
-            video,
-            vae,
-            frame_count,
-            encode_reference=resolved_video_latent_mode in ("full video", "pooled", "refined"),
-            cache=cache,
-        )
+        if resolved_video_latent_mode == "even keyframes" and frame_vae_enabled and flat_references:
+            raise ValueError("MiniMax H3 even Video keyframes with native reference images require ref_image_size none.")
+        video_frames, video_reference = prepare_minimax_h3_reference_video(video, vae, frame_count, encode_reference=resolved_video_latent_mode in ("full video", "pooled", "refined"), cache=cache)
         if resolved_video_latent_mode in ("pooled", "refined") and video_reference is not None:
             from .model_helpers import _refine_minimax_h3_visual_latent
+
             source_latent_t = video_reference["latent"].shape[2]
-            target_latent_frames = max(
-                1, min(source_latent_t, round(source_latent_t * (video_latent_fps / 24.0)))
-            ) if "video_latent_fps" in (media_config or {}) else min(source_latent_t, max(1, video_latent_keyframes))
-            target_shape = _minimax_h3_equivalent_square_pool_shape(
-                video_reference["latent"], video_reference_resolution, target_latent_frames
-            )
+            target_latent_frames = max(1, min(source_latent_t, round(source_latent_t * (video_latent_fps / 24.0)))) if "video_latent_fps" in (media_config or {}) else min(source_latent_t, max(1, video_latent_keyframes))
+            target_shape = _minimax_h3_equivalent_square_pool_shape(video_reference["latent"], video_reference_resolution, target_latent_frames)
             if target_shape == tuple(video_reference["latent"].shape[2:]):
                 pooled_latent = video_reference["latent"].clone()
             else:
-                pooled_latent = F.adaptive_avg_pool3d(
-                    video_reference["latent"].to(torch.float32), target_shape
-                ).to(video_reference["latent"].dtype)
-            final_latent = _refine_minimax_h3_visual_latent(
-                video_reference["latent"], pooled_latent, refine_steps
-            ) if resolved_video_latent_mode == "refined" else pooled_latent
-            video_reference = {
-                **video_reference,
-                "latent": final_latent,
-                "latent_t": final_latent.shape[2],
-                "latent_h": final_latent.shape[3],
-                "latent_w": final_latent.shape[4],
-            }
+                pooled_latent = F.adaptive_avg_pool3d(video_reference["latent"].to(torch.float32), target_shape).to(video_reference["latent"].dtype)
+            final_latent = _refine_minimax_h3_visual_latent(video_reference["latent"], pooled_latent, refine_steps) if resolved_video_latent_mode == "refined" else pooled_latent
+            video_reference = {**video_reference, "latent": final_latent, "latent_t": final_latent.shape[2], "latent_h": final_latent.shape[3], "latent_w": final_latent.shape[4]}
         elif resolved_video_latent_mode == "even keyframes":
-            positioned_video_keyframes = prepare_minimax_h3_positioned_video_keyframes(
-                video,
-                vae,
-                frame_count,
-                width,
-                height,
-                video_latent_keyframes,
-                cache=cache,
-            )
-    continuation_has_latent = (
-        isinstance(continuation_media, Mapping)
-        and continuation_media.get("latent") is not None
-    )
-    continuation_frames = (
-        prepare_minimax_h3_clip_continuation_frames(continuation_media, frame_count)
-        if continuation_media is not None and not continuation_has_latent
-        else None
-    )
+            positioned_video_keyframes = prepare_minimax_h3_positioned_video_keyframes(video, vae, frame_count, width, height, video_latent_keyframes, cache=cache)
+    continuation_has_latent = isinstance(continuation_media, Mapping) and continuation_media.get("latent") is not None
+    continuation_frames = prepare_minimax_h3_clip_continuation_frames(continuation_media, frame_count) if continuation_media is not None and not continuation_has_latent else None
     if continuation_frames is not None and vae is None:
         raise ValueError("MiniMax H3 Clip Continuation requires a video VAE.")
 
-    prepared_first = (
-        prepare_minimax_h3_frame(first_frame, width, height, "disabled")
-        if first_frame is not None and frame_vae_enabled
-        else None
-    )
-    prepared_last = (
-        prepare_minimax_h3_frame(last_frame, width, height, "center")
-        if last_frame is not None and frame_vae_enabled
-        else None
-    )
-    prepared_continuation_tail = (
-        comfy.utils.common_upscale(
-            continuation_frames[..., :3].movedim(-1, 1), int(width), int(height), "lanczos", "disabled"
-        ).movedim(1, -1)
-        if continuation_frames is not None
-        else None
-    )
-    prepared_references = (
-        [
-            prepare_minimax_h3_reference_image(
-                image, width, height, ref_image_size
-            )
-            for image in flat_references
-        ]
-        if native_reference_mode and frame_vae_enabled
-        else []
-    )
+    prepared_first = prepare_minimax_h3_frame(first_frame, width, height, "disabled") if first_frame is not None and frame_vae_enabled else None
+    prepared_last = prepare_minimax_h3_frame(last_frame, width, height, "center") if last_frame is not None and frame_vae_enabled else None
+    prepared_continuation_tail = comfy.utils.common_upscale(continuation_frames[..., :3].movedim(-1, 1), int(width), int(height), "lanczos", "disabled").movedim(1, -1) if continuation_frames is not None else None
+    prepared_references = [prepare_minimax_h3_reference_image(image, width, height, ref_image_size) for image in flat_references] if native_reference_mode and frame_vae_enabled else []
 
     keyframes = []
     if prepared_continuation_tail is not None:
-        from .model_helpers import h3_step_offsets, h3_pixel_frames_for_latent_steps
+        from .model_helpers import h3_pixel_frames_for_latent_steps, h3_step_offsets
+
         enc_tail = cache.encode_vae(vae, prepared_continuation_tail)
         steps = int(enc_tail.shape[2])
         if h3_pixel_frames_for_latent_steps(steps) == continuation_frames.shape[0]:
@@ -4325,41 +3381,21 @@ def _minimax_h3_stage1_vae(item: dict, cache) -> dict:
                 keyframes.append({"resolved_frame_index": p, "latent": enc_tail[:, :, k : k + 1]})
         else:
             first_enc = cache.encode_vae(vae, prepared_continuation_tail[:1])
-            last_enc = cache.encode_vae(
-                vae,
-                prepare_minimax_h3_frame(continuation_frames[-1:], width, height, "center"),
-            )
+            last_enc = cache.encode_vae(vae, prepare_minimax_h3_frame(continuation_frames[-1:], width, height, "center"))
             keyframes.append({"resolved_frame_index": 0, "latent": first_enc})
             keyframes.append({"resolved_frame_index": continuation_frames.shape[0] - 1, "latent": last_enc})
     if prepared_first is not None:
-        keyframes.append(
-            {"resolved_frame_index": 0, "latent": cache.encode_vae(vae, prepared_first)}
-        )
+        keyframes.append({"resolved_frame_index": 0, "latent": cache.encode_vae(vae, prepared_first)})
     if prepared_last is not None:
-        keyframes.append(
-            {
-                "resolved_frame_index": frame_count - 1,
-                "latent": cache.encode_vae(vae, prepared_last),
-            }
-        )
-    references = [
-        {
-            "kind": "image",
-            "latent_h": image.shape[1] // 16,
-            "latent_w": image.shape[2] // 16,
-            "latent": cache.encode_vae(vae, image),
-        }
-        for image in prepared_references
-    ] if native_reference_mode else []
+        keyframes.append({"resolved_frame_index": frame_count - 1, "latent": cache.encode_vae(vae, prepared_last)})
+    references = [{"kind": "image", "latent_h": image.shape[1] // 16, "latent_w": image.shape[2] // 16, "latent": cache.encode_vae(vae, image)} for image in prepared_references] if native_reference_mode else []
     if video_reference is not None:
         references.append(video_reference)
     if positioned_video_keyframes:
         if continuation_frames is not None:
             merge_mode = continuation_media.get("video_merge_mode", "replace") if continuation_media is not None else "replace"
             if merge_mode in ("replace", "prepend"):
-                positioned_video_keyframes = align_minimax_h3_continuation_keyframes(
-                    positioned_video_keyframes, continuation_frames.shape[0], merge_mode
-                )
+                positioned_video_keyframes = align_minimax_h3_continuation_keyframes(positioned_video_keyframes, continuation_frames.shape[0], merge_mode)
         keyframes.extend(positioned_video_keyframes)
         keyframes.sort(key=lambda keyframe: keyframe["resolved_frame_index"])
 
@@ -4368,17 +3404,9 @@ def _minimax_h3_stage1_vae(item: dict, cache) -> dict:
         base_vlm_images.append(prepare_vlm_image(first_frame, vlm_resolution))
     if last_frame is not None:
         base_vlm_images.append(prepare_vlm_image(last_frame, vlm_resolution))
-    base_vlm_images.extend(
-        prepare_vlm_image(image, vlm_resolution) for image in flat_references
-    )
-    continuation_picture = (
-        prepare_vlm_image(continuation_frames[:1], vlm_resolution)
-        if continuation_frames is not None
-        else None
-    )
-    fusion_vlm_images = [
-        prepare_vlm_image(image, vlm_resolution) for image in flat_fusion_images
-    ]
+    base_vlm_images.extend(prepare_vlm_image(image, vlm_resolution) for image in flat_references)
+    continuation_picture = prepare_vlm_image(continuation_frames[:1], vlm_resolution) if continuation_frames is not None else None
+    fusion_vlm_images = [prepare_vlm_image(image, vlm_resolution) for image in flat_fusion_images]
     if native_reference_mode and visual_method == "off":
         fusion_vlm_images = []
 
@@ -4387,10 +3415,7 @@ def _minimax_h3_stage1_vae(item: dict, cache) -> dict:
     if not (token_fusion and fusion_active):
         actual_prompt = strip_contextual_weight_syntax(actual_prompt)
     if continuation_frames is not None:
-        actual_prompt = minimax_h3_continuation_anchor_prefix(
-            0,
-            len(base_vlm_images) + len(fusion_vlm_images) + 1,
-        ) + actual_prompt
+        actual_prompt = minimax_h3_continuation_anchor_prefix(0, len(base_vlm_images) + len(fusion_vlm_images) + 1) + actual_prompt
 
     prompt_entries = _minimax_h3_text_entries(clip, actual_prompt)
     prompt_spans = [_conditioning_token_span(entry) for entry in prompt_entries]
@@ -4466,15 +3491,7 @@ def _minimax_h3_stage2_audio_vae(item: dict, stage1_res: dict, cache):
 
     audio_reference = _encode_minimax_h3_audio_reference(active_audio, audio_vae, cache=cache)
     stage1_res["audio_reference"] = audio_reference
-    continuation_audio_reference = (
-        _encode_minimax_h3_audio_reference(
-            continuation_media.get("audio") if continuation_media is not None else None,
-            audio_vae,
-            cache=cache,
-        )
-        if not continuation_has_latent
-        else None
-    )
+    continuation_audio_reference = _encode_minimax_h3_audio_reference(continuation_media.get("audio") if continuation_media is not None else None, audio_vae, cache=cache) if not continuation_has_latent else None
     if audio_reference is not None:
         stage1_res["references"].append(audio_reference)
     if continuation_audio_reference is not None:
@@ -4482,10 +3499,7 @@ def _minimax_h3_stage2_audio_vae(item: dict, stage1_res: dict, cache):
         end_coord = round((5.0 / 3.0) * float(span_frames))
         end_frame = end_coord / (5.0 / 3.0)
         rt = int(continuation_audio_reference["audio_latent"].shape[-1])
-        stage1_res["keyframes"].append({
-            "resolved_frame_index": end_frame - rt / (5.0 / 3.0),
-            "audio_latent": continuation_audio_reference["audio_latent"],
-        })
+        stage1_res["keyframes"].append({"resolved_frame_index": end_frame - rt / (5.0 / 3.0), "audio_latent": continuation_audio_reference["audio_latent"]})
         stage1_res["keyframes"].sort(key=lambda keyframe: keyframe["resolved_frame_index"])
 
 
@@ -4519,14 +3533,8 @@ def _minimax_h3_stage3_clip(item: dict, stage1_res: dict, cache):
     picture_structure = stage1_res["picture_structure"]
     default_single_visual = stage1_res["default_single_visual"]
 
-    continuation_temporal = (
-        continuation_frames is not None and video_frames is not None
-        and continuation_media.get("video_merge_mode", "replace") == "temporal fusion"
-    )
-    continuation_fusion_video = (
-        prepare_minimax_h3_continuation_fusion_video(continuation_frames, video_frames, video_fps)
-        if continuation_temporal else None
-    )
+    continuation_temporal = continuation_frames is not None and video_frames is not None and continuation_media.get("video_merge_mode", "replace") == "temporal fusion"
+    continuation_fusion_video = prepare_minimax_h3_continuation_fusion_video(continuation_frames, video_frames, video_fps) if continuation_temporal else None
 
     def tokenize_presentation(text, images):
         continuation_temporal_frames = continuation_fusion_video[0] if continuation_fusion_video is not None else None
@@ -4536,16 +3544,9 @@ def _minimax_h3_stage3_clip(item: dict, stage1_res: dict, cache):
             continuation_video_frames = prepare_minimax_h3_vlm_video_frames(continuation_temporal_frames, vlm_video_resolution)
             continuation_video_timestamps = continuation_fusion_video[1]
         elif continuation_frames is not None:
-            continuation_video_frames, continuation_video_timestamps = minimax_h3_qwen_video_samples(
-                continuation_frames,
-                video_frames,
-                video_fps,
-                continuation_media.get("video_merge_mode", "replace"),
-            )
+            continuation_video_frames, continuation_video_timestamps = minimax_h3_qwen_video_samples(continuation_frames, video_frames, video_fps, continuation_media.get("video_merge_mode", "replace"))
             if continuation_video_frames is not None:
-                continuation_video_frames = prepare_minimax_h3_vlm_video_frames(
-                    continuation_video_frames, vlm_video_resolution
-                )
+                continuation_video_frames = prepare_minimax_h3_vlm_video_frames(continuation_video_frames, vlm_video_resolution)
         if media_config is not None:
             presentation_images = images
             default_video_frames = None
@@ -4554,15 +3555,9 @@ def _minimax_h3_stage3_clip(item: dict, stage1_res: dict, cache):
                 default_video_frames = continuation_video_frames
                 default_video_timestamps = continuation_video_timestamps
             elif video_frames is not None:
-                sample_indices = minimax_h3_video_sample_indices(
-                    video_frames.shape[0], video_fps
-                )
-                default_video_frames = prepare_minimax_h3_vlm_video_frames(
-                    video_frames[sample_indices], vlm_video_resolution
-                )
-                default_video_timestamps = [
-                    Fraction(index, 24) for index in sample_indices
-                ]
+                sample_indices = minimax_h3_video_sample_indices(video_frames.shape[0], video_fps)
+                default_video_frames = prepare_minimax_h3_vlm_video_frames(video_frames[sample_indices], vlm_video_resolution)
+                default_video_timestamps = [Fraction(index, 24) for index in sample_indices]
             return tokenize_minimax_h3_media_prompt(
                 clip,
                 text,
@@ -4575,46 +3570,22 @@ def _minimax_h3_stage3_clip(item: dict, stage1_res: dict, cache):
                 default_video_frames=default_video_frames,
                 default_video_timestamps=default_video_timestamps,
                 continuation_picture=continuation_picture,
-                continuation_frame_index=(
-                    0
-                    if continuation_frames is not None else None
-                ),
+                continuation_frame_index=(0 if continuation_frames is not None else None),
             )
         if continuation_frames is not None:
             return tokenize_minimax_h3_media_prompt(
-                clip,
-                text,
-                images,
-                (),
-                "0.00s",
-                MINIMAX_H3_MEDIA_STRUCTURE,
-                audio=audio_reference is not None,
-                default_video_frames=continuation_video_frames,
-                default_video_timestamps=continuation_video_timestamps,
-                continuation_picture=continuation_picture,
-                continuation_frame_index=0,
+                clip, text, images, (), "0.00s", MINIMAX_H3_MEDIA_STRUCTURE, audio=audio_reference is not None, default_video_frames=continuation_video_frames, default_video_timestamps=continuation_video_timestamps, continuation_picture=continuation_picture, continuation_frame_index=0
             )
         if video_frames is not None or audio_reference is not None:
             reference_items = [{"type": "image", "data": image} for image in images]
             if video_frames is not None:
                 sample_indices = list(range(0, video_frames.shape[0], 12))
-                reference_items.append({
-                    "type": "video",
-                    "data": prepare_minimax_h3_vlm_video_frames(
-                        video_frames[sample_indices], vlm_video_resolution
-                    ),
-                    "timestamps": [Fraction(index, 24) for index in sample_indices],
-                })
+                reference_items.append({"type": "video", "data": prepare_minimax_h3_vlm_video_frames(video_frames[sample_indices], vlm_video_resolution), "timestamps": [Fraction(index, 24) for index in sample_indices]})
             if audio_reference is not None:
                 reference_items.append({"type": "audio"})
             return clip.tokenize(text, minimax_ref_items=reference_items)
         if native_reference_mode:
-            return clip.tokenize(
-                text,
-                minimax_ref_items=[
-                    {"type": "image", "data": image} for image in images
-                ],
-            )
+            return clip.tokenize(text, minimax_ref_items=[{"type": "image", "data": image} for image in images])
         return clip.tokenize(text, images=images)
 
     temporal_encode = None
@@ -4626,10 +3597,7 @@ def _minimax_h3_stage3_clip(item: dict, stage1_res: dict, cache):
             raise ValueError("MiniMax H3 temporal density must be an integer from 1 to 24.")
         if method not in ("consensus", "spatial"):
             raise ValueError("Unsupported MiniMax H3 temporal fusion method.")
-        default_consensus = {
-            "blend_preset": "custom", "alignment_method": "index", "consensus_type": "median",
-            "power_alpha": 2.0, "diversity_beta": 0.0, "rescale_norm": True, "global_scale": 1.0,
-        }
+        default_consensus = {"blend_preset": "custom", "alignment_method": "index", "consensus_type": "median", "power_alpha": 2.0, "diversity_beta": 0.0, "rescale_norm": True, "global_scale": 1.0}
         settings = resolve_consensus_blend_settings(default_consensus if text_blend_config is None else text_blend_config)
         enabled = settings["blend_preset"] != "off" if method == "consensus" else stage1_res["visual_method"] != "off"
         if continuation_temporal or (density > 1 and enabled):
@@ -4638,24 +3606,19 @@ def _minimax_h3_stage3_clip(item: dict, stage1_res: dict, cache):
             pair_frames = continuation_fusion_video[2] if continuation_temporal else video_frames
 
             def fuse_video_block(sources, grids, deepstack):
+
                 def compute():
-                    return fuse_temporal_block(
-                        sources, method, settings, config, grids,
-                        spatial_fuse_callback=fuse_visual_token_sources,
-                        position_score_callback=_position_biased_similarity_scores,
-                        deepstack_layers=deepstack,
-                    )
+                    return fuse_temporal_block(sources, method, settings, config, grids, spatial_fuse_callback=fuse_visual_token_sources, position_score_callback=_position_biased_similarity_scores, deepstack_layers=deepstack)
+
                 if len(sources) == 1 or temporal_token_fusion:
                     return compute()
-                return cache.get_or_compute("encoded_section", {
-                    "sources": sources, "grids": grids, "deepstack": deepstack,
-                    "method": method, "settings": temporal_cache_settings(method, settings, config),
-                    "section": "temporal_post_qwen", "device": str(sources[0].device),
-                }, compute)
+                return cache.get_or_compute("encoded_section", {"sources": sources, "grids": grids, "deepstack": deepstack, "method": method, "settings": temporal_cache_settings(method, settings, config), "section": "temporal_post_qwen", "device": str(sources[0].device)}, compute)
 
             def temporal_encode(tokens, encode_tokens_callback=None):
                 return encode_temporal_conditioning(
-                    clip, tokens, frame_pairs,
+                    clip,
+                    tokens,
+                    frame_pairs,
                     lambda pair: prepare_minimax_h3_vlm_video_frames(pair_frames[list(pair)], vlm_video_resolution),
                     token_fusion=temporal_token_fusion,
                     fusion_callback=fuse_video_block,
@@ -4669,10 +3632,10 @@ def _minimax_h3_stage3_clip(item: dict, stage1_res: dict, cache):
                 )
 
     def encode_picture_slots(tokens, slots):
+
         def encode(lane_tokens):
-            return encode_token_fused_visual_slots(
-                clip, lane_tokens, slots, config, visual_encoder_path, cache=cache
-            )
+            return encode_token_fused_visual_slots(clip, lane_tokens, slots, config, visual_encoder_path, cache=cache)
+
         return temporal_encode(tokens, encode) if continuation_temporal else encode(tokens)
 
     video_export_tokens = None
@@ -4680,26 +3643,13 @@ def _minimax_h3_stage3_clip(item: dict, stage1_res: dict, cache):
 
     if fusion_active and (keyframe_mode or native_reference_mode):
         if keyframe_mode:
-            fusion_slot_batches = [
-                (socket_number - 1, socket_images)
-                for socket_number, socket_images in fusion_socket_batches
-            ]
+            fusion_slot_batches = [(socket_number - 1, socket_images) for socket_number, socket_images in fusion_socket_batches]
         elif len(base_vlm_images) == 1:
             fusion_slot_batches = [(0, fusion_vlm_images)]
-        elif (
-            len(fusion_socket_batches) == 1
-            and fusion_socket_batches[0][0] == 1
-            and len(fusion_socket_batches[0][1]) == 1
-        ):
-            fusion_slot_batches = [
-                (index, fusion_socket_batches[0][1])
-                for index in range(len(base_vlm_images))
-            ]
+        elif len(fusion_socket_batches) == 1 and fusion_socket_batches[0][0] == 1 and len(fusion_socket_batches[0][1]) == 1:
+            fusion_slot_batches = [(index, fusion_socket_batches[0][1]) for index in range(len(base_vlm_images))]
         else:
-            fusion_slot_batches = [
-                (index, [image])
-                for index, image in enumerate(fusion_vlm_images[:len(base_vlm_images)])
-            ]
+            fusion_slot_batches = [(index, [image]) for index, image in enumerate(fusion_vlm_images[: len(base_vlm_images)])]
 
         tokenize_callback = lambda text: tokenize_presentation(text, base_vlm_images)
         if token_fusion:
@@ -4717,18 +3667,9 @@ def _minimax_h3_stage3_clip(item: dict, stage1_res: dict, cache):
             video_export_offset = len(slot_sources)
         else:
             raw_prompt = item.get("prompt") or ""
-            conditioning = encode_embedding_classical_scaled_bias(
-                clip,
-                raw_prompt,
-                tokenize_callback=tokenize_callback,
-                visual_encoder_path=visual_encoder_path,
-                encode_callback=temporal_encode if continuation_temporal else None,
-                cache=cache,
-            )
+            conditioning = encode_embedding_classical_scaled_bias(clip, raw_prompt, tokenize_callback=tokenize_callback, visual_encoder_path=visual_encoder_path, encode_callback=temporal_encode if continuation_temporal else None, cache=cache)
             if len(conditioning) != 1:
-                raise ValueError(
-                    "MiniMax H3 visual conditioning requires one schedule entry."
-                )
+                raise ValueError("MiniMax H3 visual conditioning requires one schedule entry.")
             base_tensor, base_metadata = conditioning[0]
             base_tokens = tokenize_callback(actual_prompt)
             fused_tensor = base_tensor.clone()
@@ -4739,35 +3680,20 @@ def _minimax_h3_stage3_clip(item: dict, stage1_res: dict, cache):
                     branch_images = list(base_vlm_images)
                     branch_images[visual_index] = fusion_image
                     branch_callback = lambda text, images=branch_images: tokenize_presentation(text, images)
-                    branch_conditioning = encode_embedding_classical_scaled_bias(
-                        clip, raw_prompt, tokenize_callback=branch_callback,
-                        visual_encoder_path=visual_encoder_path,
-                        encode_callback=temporal_encode if continuation_temporal else None,
-                        cache=cache,
-                    )
+                    branch_conditioning = encode_embedding_classical_scaled_bias(clip, raw_prompt, tokenize_callback=branch_callback, visual_encoder_path=visual_encoder_path, encode_callback=temporal_encode if continuation_temporal else None, cache=cache)
                     if len(branch_conditioning) != 1:
                         raise ValueError("MiniMax H3 visual fusion requires one conditioning schedule entry.")
                     branch_tensor, branch_metadata = branch_conditioning[0]
                     branch_sources.append((fusion_image, branch_tensor, branch_metadata, branch_callback(actual_prompt)))
                 for image, tensor, metadata, tokens in branch_sources:
-                    visual_range = find_visual_token_range(
-                        tokens, tensor,
-                        legacy_krea_spatial=visual_encoder_path == "legacy-flat",
-                        minimax_token_tags=metadata.get("minimax_token_tags"),
-                        minimax_visual_index=visual_index,
-                    )
+                    visual_range = find_visual_token_range(tokens, tensor, legacy_krea_spatial=visual_encoder_path == "legacy-flat", minimax_token_tags=metadata.get("minimax_token_tags"), minimax_visual_index=visual_index)
                     if visual_range == (0, 0):
                         raise ValueError(f"Could not locate MiniMax H3 picture {visual_index + 1} for fusion.")
-                    branches.append({
-                        "tensor": tensor, "pooled": metadata.get("pooled_output"),
-                        "metadata": metadata, "tokens": tokens, "visual_range": visual_range,
-                        "grid": visual_fusion_grid(image, visual_range[1] - visual_range[0], visual_encoder_path == "legacy-flat"),
-                        "raw_visual_index": visual_index,
-                    })
+                    branches.append({"tensor": tensor, "pooled": metadata.get("pooled_output"), "metadata": metadata, "tokens": tokens, "visual_range": visual_range, "grid": visual_fusion_grid(image, visual_range[1] - visual_range[0], visual_encoder_path == "legacy-flat"), "raw_visual_index": visual_index})
                 slot_conditioning = _spatially_fuse_visual_consensus_sources(branches, config, clip, allow_export=True, cache=cache)
                 slot_tensor = slot_conditioning[0][0]
                 base_range = branches[0]["visual_range"]
-                fused_tensor[:, base_range[0]:base_range[1], :] = slot_tensor[:, base_range[0]:base_range[1], :]
+                fused_tensor[:, base_range[0] : base_range[1], :] = slot_tensor[:, base_range[0] : base_range[1], :]
             conditioning = [[fused_tensor, base_metadata]]
         if video_frames is not None and video_export_tokens is None:
             video_export_tokens = tokenize_callback(actual_prompt)
@@ -4777,10 +3703,7 @@ def _minimax_h3_stage3_clip(item: dict, stage1_res: dict, cache):
             canonical_images = [*base_vlm_images, fusion_vlm_images[0]]
             canonical_tokens = tokenize_presentation(actual_prompt, canonical_images)
             visual_index = len(canonical_images) - 1
-            alternatives = [
-                tokenize_presentation(actual_prompt, [*base_vlm_images, image])
-                for image in fusion_vlm_images[1:]
-            ]
+            alternatives = [tokenize_presentation(actual_prompt, [*base_vlm_images, image]) for image in fusion_vlm_images[1:]]
             conditioning = encode_picture_slots(canonical_tokens, [(visual_index, alternatives)])
             video_export_tokens = canonical_tokens
             video_export_offset = 1
@@ -4790,108 +3713,41 @@ def _minimax_h3_stage3_clip(item: dict, stage1_res: dict, cache):
             for index, image in enumerate(fusion_vlm_images):
                 branch_images = [*base_vlm_images, image]
                 tokenize_callback = lambda text, images=branch_images: tokenize_presentation(text, images)
-                cond = encode_embedding_classical_scaled_bias(
-                    clip, raw_prompt, tokenize_callback=tokenize_callback,
-                    visual_encoder_path=visual_encoder_path,
-                    encode_callback=temporal_encode if continuation_temporal else None,
-                    cache=cache,
-                )
+                cond = encode_embedding_classical_scaled_bias(clip, raw_prompt, tokenize_callback=tokenize_callback, visual_encoder_path=visual_encoder_path, encode_callback=temporal_encode if continuation_temporal else None, cache=cache)
                 if len(cond) != 1:
                     raise ValueError("MiniMax H3 visual fusion requires one conditioning schedule entry.")
                 tensor, metadata = cond[0]
                 tokens = tokenize_callback(actual_prompt)
-                visual_range = find_visual_token_range(
-                    tokens, tensor,
-                    legacy_krea_spatial=visual_encoder_path == "legacy-flat",
-                    minimax_token_tags=metadata.get("minimax_token_tags"),
-                    minimax_visual_index=len(branch_images) - 1,
-                )
+                visual_range = find_visual_token_range(tokens, tensor, legacy_krea_spatial=visual_encoder_path == "legacy-flat", minimax_token_tags=metadata.get("minimax_token_tags"), minimax_visual_index=len(branch_images) - 1)
                 if visual_range == (0, 0):
                     raise ValueError(f"Could not locate the MiniMax H3 visual span for fusion image {index + 1}.")
-                branches.append({
-                    "tensor": tensor, "pooled": metadata.get("pooled_output"),
-                    "metadata": metadata, "tokens": tokens, "visual_range": visual_range,
-                    "grid": visual_fusion_grid(image, visual_range[1] - visual_range[0], visual_encoder_path == "legacy-flat"),
-                    "raw_visual_index": len(branch_images) - 1,
-                })
+                branches.append({"tensor": tensor, "pooled": metadata.get("pooled_output"), "metadata": metadata, "tokens": tokens, "visual_range": visual_range, "grid": visual_fusion_grid(image, visual_range[1] - visual_range[0], visual_encoder_path == "legacy-flat"), "raw_visual_index": len(branch_images) - 1})
             conditioning = _spatially_fuse_visual_consensus_sources(branches, config, clip, allow_export=True, cache=cache)
         if video_frames is not None and video_export_tokens is None:
-            video_export_tokens = tokenize_presentation(
-                actual_prompt, [*base_vlm_images, fusion_vlm_images[0]]
-            )
+            video_export_tokens = tokenize_presentation(actual_prompt, [*base_vlm_images, fusion_vlm_images[0]])
             video_export_offset = 1
     else:
         presentation_images = [*base_vlm_images, *fusion_vlm_images]
-        tokenize_callback = lambda text: tokenize_presentation(
-            text, presentation_images
-        )
+        tokenize_callback = lambda text: tokenize_presentation(text, presentation_images)
         raw_prompt = item.get("prompt") or ""
-        conditioning = encode_embedding_classical_scaled_bias(
-            clip,
-            raw_prompt,
-            tokenize_callback=tokenize_callback,
-            visual_encoder_path="grid-deepstack",
-            encode_callback=temporal_encode,
-            cache=cache,
-        )
+        conditioning = encode_embedding_classical_scaled_bias(clip, raw_prompt, tokenize_callback=tokenize_callback, visual_encoder_path="grid-deepstack", encode_callback=temporal_encode, cache=cache)
         if len(conditioning) != 1 and not (temporal_fusion or continuation_temporal):
-            raise ValueError(
-                "MiniMax H3 visual conditioning requires one schedule entry."
-            )
+            raise ValueError("MiniMax H3 visual conditioning requires one schedule entry.")
         if config.get("save_blended_embeds", False) and presentation_images:
             tokens = tokenize_callback(actual_prompt)
-            save_source_visual_embeddings(
-                clip,
-                tokens,
-                config,
-                visual_embedding_key(clip, tokens),
-                comfy.model_management.get_torch_device(),
-                list(range(len(presentation_images))),
-                cache=cache,
-            )
+            save_source_visual_embeddings(clip, tokens, config, visual_embedding_key(clip, tokens), comfy.model_management.get_torch_device(), list(range(len(presentation_images))), cache=cache)
         if config.get("save_blended_embeds", False) and video_frames is not None:
             tokens = tokenize_callback(actual_prompt)
-            save_source_visual_embeddings(
-                clip,
-                tokens,
-                config,
-                visual_embedding_key(clip, tokens),
-                comfy.model_management.get_torch_device(),
-                [],
-                include_video_blocks=True,
-                combine_video_blocks=config.get("combine_video_embeds", True),
-                output_index_offset=len(presentation_images),
-                cache=cache,
-            )
+            save_source_visual_embeddings(clip, tokens, config, visual_embedding_key(clip, tokens), comfy.model_management.get_torch_device(), [], include_video_blocks=True, combine_video_blocks=config.get("combine_video_embeds", True), output_index_offset=len(presentation_images), cache=cache)
 
-    if (
-        config.get("save_blended_embeds", False)
-        and video_export_tokens is not None
-        and video_frames is not None
-    ):
-        save_source_visual_embeddings(
-            clip,
-            video_export_tokens,
-            config,
-            visual_embedding_key(clip, video_export_tokens),
-            comfy.model_management.get_torch_device(),
-            [],
-            include_video_blocks=True,
-            combine_video_blocks=config.get("combine_video_embeds", True),
-            output_index_offset=video_export_offset,
-            cache=cache,
-        )
+    if config.get("save_blended_embeds", False) and video_export_tokens is not None and video_frames is not None:
+        save_source_visual_embeddings(clip, video_export_tokens, config, visual_embedding_key(clip, video_export_tokens), comfy.model_management.get_torch_device(), [], include_video_blocks=True, combine_video_blocks=config.get("combine_video_embeds", True), output_index_offset=video_export_offset, cache=cache)
 
     layout_conditioning = []
     for tensor, metadata in conditioning:
         tags = metadata.get("minimax_token_tags")
         if not torch.is_tensor(tags) or tags.numel() != tensor.shape[1]:
-            raise ValueError(
-                "MiniMax H3 modality tags do not match the conditioning sequence length: "
-                f"conditioning={tuple(tensor.shape)}, "
-                f"tags={tuple(tags.shape) if torch.is_tensor(tags) else type(tags).__name__}, "
-                f"metadata_keys={sorted(metadata)}."
-            )
+            raise ValueError(f"MiniMax H3 modality tags do not match the conditioning sequence length: conditioning={tuple(tensor.shape)}, tags={tuple(tags.shape) if torch.is_tensor(tags) else type(tags).__name__}, metadata_keys={sorted(metadata)}.")
         metadata = metadata.copy()
         empty_padding = not actual_prompt and not base_vlm_images and not fusion_vlm_images and video_frames is None and continuation_frames is None and audio_reference is None
         boundary = 0 if empty_padding else tensor.shape[1] - prompt_length
@@ -4941,28 +3797,11 @@ def _package_minimax_h3_entry_stage4(item: dict, stage1_res: dict, conditioning,
         conditioning = node_helpers.conditioning_set_values(conditioning, metadata)
     if continuation_has_latent:
         from .model_helpers import apply_minimax_h3_clip_continuation
-        conditioning, _ = apply_minimax_h3_clip_continuation(
-            conditioning,
-            latent,
-            tail_frames=int(continuation_media.get("tail_frames", 22)),
-            audio_tail_frames=24,
-            continuation_media=continuation_media,
-            vae=vae,
-            audio_vae=audio_vae,
-            cache=cache,
-        )
 
-    cond_meta = (
-        conditioning[0][1]
-        if conditioning and len(conditioning[0]) > 1 and isinstance(conditioning[0][1], dict)
-        else {}
-    )
-    trim_frames = int(
-        cond_meta.get(
-            "minimax_trim_frames",
-            cond_meta.get("uc_overlap_frames", latent.get("uc_overlap_frames", 0) if isinstance(latent, dict) else 0),
-        )
-    )
+        conditioning, _ = apply_minimax_h3_clip_continuation(conditioning, latent, tail_frames=int(continuation_media.get("tail_frames", 22)), audio_tail_frames=0, continuation_media=continuation_media, vae=vae, audio_vae=audio_vae, cache=cache)
+
+    cond_meta = conditioning[0][1] if conditioning and len(conditioning[0]) > 1 and isinstance(conditioning[0][1], dict) else {}
+    trim_frames = int(cond_meta.get("minimax_trim_frames", cond_meta.get("uc_overlap_frames", latent.get("uc_overlap_frames", 0) if isinstance(latent, dict) else 0)))
     return conditioning, latent, trim_frames
 
 
@@ -5008,10 +3847,6 @@ def execute_batch_minimax_h3_image_to_video(items: list[dict], enable_caching="a
         return all_conds, all_latents, all_trim_frames
 
 
-
-
-
-
 def execute_advanced_minimax_h3_image_to_video(
     clip,
     vae,
@@ -5042,20 +3877,33 @@ def execute_advanced_minimax_h3_image_to_video(
 ):
     """Build coordinated Qwen conditioning, H3 image controls, and AV latent."""
     item = {
-        "clip": clip, "vae": vae, "prompt": prompt, "width": width, "height": height, "length": length,
-        "first_frame": first_frame, "last_frame": last_frame, "reference_images": reference_images,
-        "fusion_images": fusion_images, "visual_fusion_config": visual_fusion_config,
-        "multiplier": multiplier, "ref_image_size": ref_image_size,
-        "vlm_resolution": vlm_resolution, "vlm_video_resolution": vlm_video_resolution,
-        "media_config": media_config, "video": video, "continuation_media": continuation_media,
-        "audio": audio, "audio_vae": audio_vae, "token_fusion": token_fusion,
-        "temporal_fusion": temporal_fusion, "temporal_token_fusion": temporal_token_fusion,
+        "clip": clip,
+        "vae": vae,
+        "prompt": prompt,
+        "width": width,
+        "height": height,
+        "length": length,
+        "first_frame": first_frame,
+        "last_frame": last_frame,
+        "reference_images": reference_images,
+        "fusion_images": fusion_images,
+        "visual_fusion_config": visual_fusion_config,
+        "multiplier": multiplier,
+        "ref_image_size": ref_image_size,
+        "vlm_resolution": vlm_resolution,
+        "vlm_video_resolution": vlm_video_resolution,
+        "media_config": media_config,
+        "video": video,
+        "continuation_media": continuation_media,
+        "audio": audio,
+        "audio_vae": audio_vae,
+        "token_fusion": token_fusion,
+        "temporal_fusion": temporal_fusion,
+        "temporal_token_fusion": temporal_token_fusion,
         "text_blend_config": text_blend_config,
     }
     if not is_minimax_h3_text_encoder(clip):
-        raise ValueError(
-            "Advanced MiniMax H3 Image to Video requires the qwen3vl_32b text encoder."
-        )
+        raise ValueError("Advanced MiniMax H3 Image to Video requires the qwen3vl_32b text encoder.")
     if cache is not None:
         stage1 = _minimax_h3_stage1_vae(item, cache)
         _minimax_h3_stage2_audio_vae(item, stage1, cache)
@@ -5067,23 +3915,7 @@ def execute_advanced_minimax_h3_image_to_video(
     return all_conds[0], all_latents[0]
 
 
-def execute_advanced_visual_consensus(
-    clip,
-    prompt,
-    system_prompt,
-    vlm_resolution,
-    image_inputs,
-    joint_config,
-    vae_resolution,
-    ref_latent_mode,
-    vae,
-    multiplier,
-    vae_dimension_multiple,
-    apply_reference_latents,
-    token_fusion=False,
-    semantic_anchor=False,
-    image_strength=1.0,
-):
+def execute_advanced_visual_consensus(clip, prompt, system_prompt, vlm_resolution, image_inputs, joint_config, vae_resolution, ref_latent_mode, vae, multiplier, vae_dimension_multiple, apply_reference_latents, token_fusion=False, semantic_anchor=False, image_strength=1.0):
     """Run spatial fusion per resolution, then consensus over complete outputs."""
     if not isinstance(joint_config, dict):
         raise ValueError("Connect a Visual Consensus Configuration.")
@@ -5093,60 +3925,25 @@ def execute_advanced_visual_consensus(
     moss_image = is_moss_image_text_encoder(clip)
     minimax_h3 = is_minimax_h3_text_encoder(clip)
     if minimax_h3 and ref_latent_mode != "off":
-        raise ValueError(
-            "MiniMax H3 reference latents require Core's MiniMax H3 reference conditioning node; set ref_latent_mode to off."
-        )
+        raise ValueError("MiniMax H3 reference latents require Core's MiniMax H3 reference conditioning node; set ref_latent_mode to off.")
 
     lanes, reference_images = build_visual_consensus_batch_lanes(image_inputs)
     if not lanes:
-        clean_prompt, _ = prepare_image_placeholder_prompt(
-            prompt, 0, False, "Advanced Visual Consensus Encoder"
-        )
-        formatted_prompt = (
-            format_minimax_h3_prompt(clean_prompt, system_prompt)
-            if minimax_h3
-            else _format_advanced_visual_consensus_prompt(
-                clean_prompt, system_prompt, qwen_image21, flux3, moss_image
-            )
-        )
-        conditioning = encode_embedding_classical_scaled_bias(
-            clip,
-            formatted_prompt,
-            skip_template=True,
-        )
-        return _scale_and_attach_visual_consensus_references(
-            clip,
-            conditioning,
-            reference_images,
-            vae_resolution,
-            ref_latent_mode,
-            vae,
-            multiplier,
-            vae_dimension_multiple,
-            apply_reference_latents,
-            image_strength,
-        )
+        clean_prompt, _ = prepare_image_placeholder_prompt(prompt, 0, False, "Advanced Visual Consensus Encoder")
+        formatted_prompt = format_minimax_h3_prompt(clean_prompt, system_prompt) if minimax_h3 else _format_advanced_visual_consensus_prompt(clean_prompt, system_prompt, qwen_image21, flux3, moss_image)
+        conditioning = encode_embedding_classical_scaled_bias(clip, formatted_prompt, skip_template=True)
+        return _scale_and_attach_visual_consensus_references(clip, conditioning, reference_images, vae_resolution, ref_latent_mode, vae, multiplier, vae_dimension_multiple, apply_reference_latents, image_strength)
 
     spatial_enabled = bool(joint_config.get("enable_spatial_fusion", True))
     consensus_enabled = bool(joint_config.get("enable_consensus", True))
     if minimax_h3 and not consensus_enabled and len(lanes) > 1:
-        raise ValueError(
-            "MiniMax H3 supports batch size 1; enable consensus or provide one batch lane."
-        )
+        raise ValueError("MiniMax H3 supports batch size 1; enable consensus or provide one batch lane.")
     visual_config = dict(joint_config["visual"])
     consensus_config = dict(joint_config["consensus"])
     visual_encoder_path = visual_config.get("visual_encoder_path", "grid-deepstack")
 
-    prepared_prompt, _ = prepare_image_placeholder_prompt(
-        prompt,
-        max(len(lane) for lane in lanes),
-        spatial_enabled or consensus_enabled,
-        "Advanced Visual Consensus Encoder",
-    )
-    if not any(
-        marker in prepared_prompt
-        for marker in ("<|image_pad|>", "<|image|>", "<|vision_start|>")
-    ):
+    prepared_prompt, _ = prepare_image_placeholder_prompt(prompt, max(len(lane) for lane in lanes), spatial_enabled or consensus_enabled, "Advanced Visual Consensus Encoder")
+    if not any(marker in prepared_prompt for marker in ("<|image_pad|>", "<|image|>", "<|vision_start|>")):
         prepared_prompt = VISION_BLOCK + prepared_prompt
     if semantic_anchor and not minimax_h3:
         segments = prepared_prompt.split(VISION_BLOCK)
@@ -5154,32 +3951,17 @@ def execute_advanced_visual_consensus(
         for index, segment in enumerate(segments[1:], start=1):
             anchored_prompt.extend((f"<Picture {index}>: {VISION_BLOCK}", segment))
         prepared_prompt = "".join(anchored_prompt)
-    full_prompt = (
-        format_minimax_h3_prompt(prepared_prompt, system_prompt)
-        if minimax_h3
-        else _format_advanced_visual_consensus_prompt(prepared_prompt, system_prompt, qwen_image21, flux3, moss_image)
-    )
+    full_prompt = format_minimax_h3_prompt(prepared_prompt, system_prompt) if minimax_h3 else _format_advanced_visual_consensus_prompt(prepared_prompt, system_prompt, qwen_image21, flux3, moss_image)
 
     if consensus_enabled:
         requested_samples = int(consensus_config.get("resolution_samples", 1))
-        if (
-            requested_samples < 1
-            or requested_samples > 15
-            or requested_samples % 2 == 0
-        ):
+        if requested_samples < 1 or requested_samples > 15 or requested_samples % 2 == 0:
             raise ValueError("Resolution samples must be an odd integer from 1 to 15.")
         effective_samples = requested_samples
     else:
         effective_samples = 1
-    if (
-        consensus_enabled
-        and effective_samples > 1
-        and resolve_vlm_resolution(vlm_resolution) is None
-    ):
-        raise ValueError(
-            "Original VLM resolution cannot construct adjacent resolution samples; "
-            "set resolution_samples to 1 or select a numeric VLM resolution."
-        )
+    if consensus_enabled and effective_samples > 1 and resolve_vlm_resolution(vlm_resolution) is None:
+        raise ValueError("Original VLM resolution cannot construct adjacent resolution samples; set resolution_samples to 1 or select a numeric VLM resolution.")
 
     completed_conditionings = []
     base_conditioning = None
@@ -5187,130 +3969,52 @@ def execute_advanced_visual_consensus(
     sample_tokens = None
     sample_range = None
     for lane in lanes:
-        targets = vlm_resolution_samples(
-            lane[0],
-            vlm_resolution,
-            effective_samples,
-            consensus_config.get("sample_offset", VLM_RESOLUTION_STEP),
-        )
+        targets = vlm_resolution_samples(lane[0], vlm_resolution, effective_samples, consensus_config.get("sample_offset", VLM_RESOLUTION_STEP))
         if len(targets) < effective_samples:
-            raise ValueError(
-                f"Could not construct {effective_samples} distinct adjacent VLM "
-                "resolution samples for this batch lane."
-            )
+            raise ValueError(f"Could not construct {effective_samples} distinct adjacent VLM resolution samples for this batch lane.")
         for target in targets:
             sources = lane if spatial_enabled or consensus_enabled else lane[:1]
             if spatial_enabled and token_fusion:
-                token_sources = [
-                    _tokenize_visual_consensus_source(
-                        clip, source, target, full_prompt
-                    )
-                    for source in sources
-                ]
+                token_sources = [_tokenize_visual_consensus_source(clip, source, target, full_prompt) for source in sources]
                 if sample_tokens is None and token_sources:
                     sample_tokens = token_sources[0]
                 token_fusion_config = dict(visual_config)
-                token_fusion_config["save_blended_embeds"] = bool(
-                    export_pending
-                    and token_fusion_config.get("save_blended_embeds", False)
-                )
-                completed = encode_token_fused_visual_sources(
-                    clip,
-                    token_sources,
-                    token_fusion_config,
-                    visual_encoder_path=visual_encoder_path,
-                )
+                token_fusion_config["save_blended_embeds"] = bool(export_pending and token_fusion_config.get("save_blended_embeds", False))
+                completed = encode_token_fused_visual_sources(clip, token_sources, token_fusion_config, visual_encoder_path=visual_encoder_path)
                 export_pending = False
                 completed_conditionings.append(completed)
                 if base_conditioning is None:
                     base_conditioning = completed
                 continue
-            branches = [
-                _encode_visual_consensus_source(
-                    clip, source, target, full_prompt, visual_encoder_path
-                )
-                for source in sources
-            ]
+            branches = [_encode_visual_consensus_source(clip, source, target, full_prompt, visual_encoder_path) for source in sources]
             if sample_tokens is None and branches:
                 sample_tokens = branches[0].get("tokens")
                 sample_range = branches[0].get("visual_range")
             if spatial_enabled:
-                completed = _spatially_fuse_visual_consensus_sources(
-                    branches, visual_config, clip, export_pending
-                )
+                completed = _spatially_fuse_visual_consensus_sources(branches, visual_config, clip, export_pending)
                 export_pending = False
                 completed_conditionings.append(completed)
                 if base_conditioning is None:
                     base_conditioning = completed
             else:
-                source_conditionings = [
-                    branch["conditioning"] for branch in branches
-                ]
+                source_conditionings = [branch["conditioning"] for branch in branches]
                 completed_conditionings.extend(source_conditionings)
                 if base_conditioning is None:
                     base_conditioning = source_conditionings[0]
 
-    conditioning = (
-        blend_complete_conditionings(completed_conditionings, consensus_config)
-        if consensus_enabled
-        else batch_complete_conditionings(completed_conditionings)
-    )
-    return _scale_and_attach_visual_consensus_references(
-        clip,
-        conditioning,
-        reference_images,
-        vae_resolution,
-        ref_latent_mode,
-        vae,
-        multiplier,
-        vae_dimension_multiple,
-        apply_reference_latents,
-        image_strength,
-        sample_tokens,
-        sample_range,
-    )
+    conditioning = blend_complete_conditionings(completed_conditionings, consensus_config) if consensus_enabled else batch_complete_conditionings(completed_conditionings)
+    return _scale_and_attach_visual_consensus_references(clip, conditioning, reference_images, vae_resolution, ref_latent_mode, vae, multiplier, vae_dimension_multiple, apply_reference_latents, image_strength, sample_tokens, sample_range)
 
 
-def _scale_and_attach_visual_consensus_references(
-    clip,
-    conditioning,
-    reference_images,
-    vae_resolution,
-    ref_latent_mode,
-    vae,
-    multiplier,
-    vae_dimension_multiple,
-    apply_reference_latents,
-    image_strength=1.0,
-    tokens=None,
-    visual_ranges=None,
-):
+def _scale_and_attach_visual_consensus_references(clip, conditioning, reference_images, vae_resolution, ref_latent_mode, vae, multiplier, vae_dimension_multiple, apply_reference_latents, image_strength=1.0, tokens=None, visual_ranges=None):
     if multiplier != 1.0:
-        conditioning = [
-            [
-                tensor * multiplier,
-                {
-                    **metadata,
-                    **(
-                        {"pooled_output": metadata["pooled_output"] * multiplier}
-                        if metadata.get("pooled_output") is not None
-                        else {}
-                    ),
-                },
-            ]
-            for tensor, metadata in conditioning
-        ]
+        conditioning = [[tensor * multiplier, {**metadata, **({"pooled_output": metadata["pooled_output"] * multiplier} if metadata.get("pooled_output") is not None else {})}] for tensor, metadata in conditioning]
 
     if image_strength != 1.0 and reference_images:
         for item in conditioning:
             c_tensor = item[0]
             c_meta = item[1]
-            ctx_bias = build_context_attention_bias(
-                tokens,
-                c_tensor,
-                image_strength=image_strength,
-                visual_ranges=visual_ranges,
-            )
+            ctx_bias = build_context_attention_bias(tokens, c_tensor, image_strength=image_strength, visual_ranges=visual_ranges)
             if ctx_bias is not None:
                 c_meta["context_attention_bias"] = ctx_bias
 
@@ -5324,13 +4028,9 @@ def _scale_and_attach_visual_consensus_references(
                 _, s_vae = prepare_qwen_image21_image(image, 0 if target is None else target)
                 ref_latents.append(vae.encode(s_vae))
             else:
-                prepared = prepare_vae_reference_image(
-                    image.movedim(-1, 1), target, vae_dimension_multiple
-                )
+                prepared = prepare_vae_reference_image(image.movedim(-1, 1), target, vae_dimension_multiple)
                 ref_latents.append(vae.encode(prepared.movedim(1, -1)[..., :3]))
-    return apply_reference_latents(
-        clip, conditioning, ref_latents, ref_latent_mode
-    )
+    return apply_reference_latents(clip, conditioning, ref_latents, ref_latent_mode)
 
 
 def resolve_reference_latent_output(ref_latents: list | None) -> dict | None:
@@ -5364,13 +4064,14 @@ def krea2_token_ids(clip, text):
     key = next(iter(tok))
     return [t[0] if isinstance(t, tuple) else t for t in tok[key][0]]
 
+
 def find_subsequence(seq, sub, lo, hi):
     out = []
     n = len(sub)
     if n == 0:
         return out
     for i in range(lo, hi - n + 1):
-        if seq[i:i + n] == sub:
+        if seq[i : i + n] == sub:
             out.append(i)
     return out
 
@@ -5410,13 +4111,7 @@ def krea2_attn_forward_weight(self, x, freqs=None, mask=None, transformer_option
     return self.wo(out * torch.sigmoid(gate))
 
 
-def prepare_krea2_edit_reference_latent(
-    image: torch.Tensor,
-    vae,
-    target_width: int,
-    target_height: int,
-    fit_mode: str = "fit",
-) -> torch.Tensor:
+def prepare_krea2_edit_reference_latent(image: torch.Tensor, vae, target_width: int, target_height: int, fit_mode: str = "fit") -> torch.Tensor:
     """Pre-sample pixel fitting and VAE encoding for Krea2 reference images.
 
     Pre-fits source image to target canvas in pixel space before VAE encoding.
@@ -5458,4 +4153,3 @@ def prepare_krea2_edit_reference_latent(
     img = img[..., y0 : y0 + ch, x0 : x0 + cw]
     img = F.interpolate(img.float(), size=(px_h, px_w), mode="bicubic", antialias=True)
     return vae.encode(img.movedim(1, -1)[..., :3].clamp(0, 1))
-

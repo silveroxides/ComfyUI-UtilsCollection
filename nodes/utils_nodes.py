@@ -155,7 +155,7 @@ class UC_MiniMaxH3ClipContinuationSave(io.ComfyNode):
                 io.Image.Input("images", optional=True, tooltip="Optional decoded frames from the video clip you just made. Can be left disconnected when latent is connected."),
                 io.Audio.Input("audio", optional=True, tooltip="Optional sound track from the same clip. Can be left disconnected when latent is connected."),
                 io.Latent.Input("latent", optional=True, tooltip="Optional sampler output latent (recommended). Saves both video and audio streams directly in latent space so the next clip continues without decoding or re-encoding."),
-                io.Combo.Input("tail_frames", options=["5", "22", "39", "56"], default="22", tooltip="How many ending frames to keep for the next clip to follow (default 22 = ~0.9s)."),
+                io.Combo.Input("tail_frames", options=["5", "22", "39", "56", "73", "90"], default="22", tooltip="How many ending frames to keep for the next clip to follow (default 22 = ~0.9s)."),
                 io.String.Input("filename_prefix", default="h3_clip_continuation/clip", tooltip="Name or folder for this continuation sequence. Keep this the same on both Save and Load."),
                 io.Int.Input("clip_index", default=1, min=0, max=99999, step=1, tooltip="Manual clip number. Start with 1, then increase by 1 for each new clip. Ignored when auto_index is enabled."),
                 io.Boolean.Input("auto_index", default=False, label_on="Auto (next clip number)", label_off="Manual", tooltip="When enabled, automatically numbers this clip as the next one in sequence (latest + 1). Eliminates the need for integer counters or math nodes."),

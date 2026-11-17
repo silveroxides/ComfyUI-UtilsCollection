@@ -694,8 +694,11 @@ def split_h3_video_components_into_segments(
         else:
             window_frames = 124
 
+        valid_overlaps = (0, 5, 22, 39, 56, 73, 90)
         if ov_frames >= window_frames:
-            ov_frames = max(0, window_frames - 17)
+            ov_frames = max((g for g in valid_overlaps if g < window_frames), default=0)
+        elif ov_frames not in valid_overlaps:
+            ov_frames = max((g for g in valid_overlaps if g <= ov_frames), default=0)
 
         windows: list[tuple[int, int, int, int, int]] = []
         curr = start_offset
@@ -781,7 +784,7 @@ def split_h3_video_components_into_segments(
     )
 
     if return_trim_metadata:
-        return (frames_list, audio_list, out_w, out_h, length_list, video_list, transcript_list, str(ov_frames if ov_frames in (5, 22, 39, 56) else 22), trim_trailing_list)
+        return (frames_list, audio_list, out_w, out_h, length_list, video_list, transcript_list, str(ov_frames), trim_trailing_list)
     return frames_list, audio_list, out_w, out_h, length_list, video_list, transcript_list
 
 

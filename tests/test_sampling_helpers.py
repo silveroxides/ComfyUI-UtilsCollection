@@ -3,6 +3,7 @@
 import pathlib
 import sys
 import types
+
 import pytest
 import torch
 
@@ -14,13 +15,7 @@ sys.modules.setdefault(PACKAGE_NAME, package)
 
 from comfy.nested_tensor import NestedTensor
 from utils_collection_sampling_test.helpers.sampling_helpers import (
-    H3_LATENT_BASE,
-    H3_VIDEO_T_DIM,
-    H3_AUDIO_T_DIM,
-    build_carry_noise_mask,
-    check_core_per_row_masking,
     h3_frame_at_latent,
-    h3_frames_to_audio_t,
     h3_frames_to_latents,
     h3_latents_to_frames,
     h3_pack_av,
@@ -32,22 +27,13 @@ from utils_collection_sampling_test.helpers.sampling_helpers import (
     prepare_chunk_guider,
     prepare_h3_source_audio,
     sample_dmad_renoise,
+    split_h3_video_components_into_segments,
     start_sampling_loop,
     strip_stale_keyframes,
-    split_h3_video_components_into_segments,
 )
-from utils_collection_sampling_test.helpers.scheduler_helpers import (
-    dmad_scheduler,
-    register_scheduler_handlers,
-)
-from utils_collection_sampling_test.nodes.sampling_nodes import (
-    UC_H3LoopSampler,
-    UC_H3RefVideoSegments,
-    UC_SamplerDMADReNoise,
-)
-from utils_collection_sampling_test.nodes.scheduler_nodes import (
-    UC_DMADSchedule,
-)
+from utils_collection_sampling_test.helpers.scheduler_helpers import dmad_scheduler, register_scheduler_handlers
+from utils_collection_sampling_test.nodes.sampling_nodes import UC_H3LoopSampler, UC_H3RefVideoSegments, UC_SamplerDMADReNoise
+from utils_collection_sampling_test.nodes.scheduler_nodes import UC_DMADSchedule
 
 
 def test_h3_temporal_conversions():
@@ -105,6 +91,7 @@ def test_plan_h3_windows():
 
 def test_plan_h3_schedule_spans_and_records():
     from utils_collection_sampling_test.helpers.sampling_helpers import plan_h3_schedule
+
     total_v, total_a, records, spans = plan_h3_schedule(total_frames=124, window_frames=56, overlap_frames=22)
     assert total_v == 37
     assert len(records) >= 2
@@ -116,6 +103,7 @@ def test_plan_h3_schedule_spans_and_records():
 
 
 def test_prepare_chunk_guider_isolation():
+
     class FakeGuider:
         def __init__(self):
             self.original_conds = {"positive": [["p0", {}]], "negative": [["n0", {}]]}
@@ -136,10 +124,7 @@ def test_prepare_chunk_guider_isolation():
 
 
 def test_strip_stale_keyframes():
-    cond = [
-        [torch.zeros([1, 10, 64]), {"minimax_keyframes": [{"fake": 1}], "keep_me": "yes"}],
-        [torch.zeros([1, 10, 64]), {"other": 123}],
-    ]
+    cond = [[torch.zeros([1, 10, 64]), {"minimax_keyframes": [{"fake": 1}], "keep_me": "yes"}], [torch.zeros([1, 10, 64]), {"other": 123}]]
     stripped = strip_stale_keyframes(cond)
     assert "minimax_keyframes" not in stripped[0][1]
     assert stripped[0][1]["keep_me"] == "yes"
@@ -166,6 +151,7 @@ def test_start_sampling_loop_mock():
     sigmas = torch.tensor([1.0, 0.5, 0.0])
 
     from utils_collection_sampling_test.helpers import sampling_helpers as sh
+
     orig_run = sh.run_chunk_sampling
 
     def dummy_run_chunk(noise, g, s, sig, chunk_latent, **kwargs):
@@ -173,17 +159,7 @@ def test_start_sampling_loop_mock():
 
     sh.run_chunk_sampling = dummy_run_chunk
     try:
-        out_latent, num_chunks, report, passthrough_audio = start_sampling_loop(
-            noise=None,
-            guider=MockGuider(),
-            sampler=MockSampler(),
-            sigmas=sigmas,
-            cond_list=cond,
-            latent=latent,
-            chunk_frames=22,
-            overlap_frames=0,
-            carry_mode="mask",
-        )
+        out_latent, num_chunks, report, passthrough_audio = start_sampling_loop(noise=None, guider=MockGuider(), sampler=MockSampler(), sigmas=sigmas, cond_list=cond, latent=latent, chunk_frames=22, overlap_frames=0, carry_mode="mask")
         assert num_chunks >= 1
         res_v, res_a = h3_unpack_av(out_latent)
         assert res_v.shape == v.shape
@@ -225,6 +201,7 @@ def test_h3_source_audio_is_encoded_pinned_and_returned_cleanly():
             self.original_conds["positive"] = positive
 
     from utils_collection_sampling_test.helpers import sampling_helpers as sh
+
     observed_masks = []
     original_run = sh.run_chunk_sampling
 
@@ -234,18 +211,7 @@ def test_h3_source_audio_is_encoded_pinned_and_returned_cleanly():
 
     sh.run_chunk_sampling = identity_chunk
     try:
-        result, _, _, direct_audio = start_sampling_loop(
-            noise=None,
-            guider=MockGuider(),
-            sampler=object(),
-            sigmas=torch.tensor([1.0, 0.0]),
-            cond_list=cond,
-            latent=h3_pack_av({}, video, audio_latent),
-            chunk_frames=22,
-            overlap_frames=22,
-            source_audio=source_audio,
-            audio_vae=MockAudioVAE(),
-        )
+        result, _, _, direct_audio = start_sampling_loop(noise=None, guider=MockGuider(), sampler=object(), sigmas=torch.tensor([1.0, 0.0]), cond_list=cond, latent=h3_pack_av({}, video, audio_latent), chunk_frames=22, overlap_frames=22, source_audio=source_audio, audio_vae=MockAudioVAE())
     finally:
         sh.run_chunk_sampling = original_run
 
@@ -262,38 +228,16 @@ def test_h3_source_audio_rejects_generated_audio_modes():
     video = torch.zeros([1, 24, 7, 4, 4])
     audio_latent = torch.zeros([1, 32, 2, 37])
     with pytest.raises(ValueError, match="preserve_input"):
-        start_sampling_loop(
-            noise=None,
-            guider=object(),
-            sampler=object(),
-            sigmas=torch.tensor([1.0, 0.0]),
-            cond_list=[[torch.zeros([1, 5, 16]), {}]],
-            latent=h3_pack_av({}, video, audio_latent),
-            audio_mode="full_generation",
-            source_audio={"waveform": torch.ones([1, 2, 10]), "sample_rate": 10},
-        )
+        start_sampling_loop(noise=None, guider=object(), sampler=object(), sigmas=torch.tensor([1.0, 0.0]), cond_list=[[torch.zeros([1, 5, 16]), {}]], latent=h3_pack_av({}, video, audio_latent), audio_mode="full_generation", source_audio={"waveform": torch.ones([1, 2, 10]), "sample_rate": 10})
 
 
 def test_h3_source_audio_requires_joint_latent_and_valid_waveform():
     video = torch.zeros([1, 24, 7, 4, 4])
     source_audio = {"waveform": torch.ones([1, 2, 10]), "sample_rate": 10}
     with pytest.raises(ValueError, match="joint video/audio latent"):
-        start_sampling_loop(
-            noise=None,
-            guider=object(),
-            sampler=object(),
-            sigmas=torch.tensor([1.0, 0.0]),
-            cond_list=[[torch.zeros([1, 5, 16]), {}]],
-            latent=h3_pack_av({}, video),
-            source_audio=source_audio,
-        )
+        start_sampling_loop(noise=None, guider=object(), sampler=object(), sigmas=torch.tensor([1.0, 0.0]), cond_list=[[torch.zeros([1, 5, 16]), {}]], latent=h3_pack_av({}, video), source_audio=source_audio)
     with pytest.raises(ValueError, match="finite mono or stereo"):
-        prepare_h3_source_audio(
-            {"waveform": torch.ones([1, 3, 10]), "sample_rate": 10},
-            object(),
-            torch.zeros([1, 32, 2, 37]),
-            total_frames=22,
-        )
+        prepare_h3_source_audio({"waveform": torch.ones([1, 3, 10]), "sample_rate": 10}, object(), torch.zeros([1, 32, 2, 37]), total_frames=22)
 
 
 def test_h3_loop_sampler_execute_handles_all_input_variants():
@@ -325,6 +269,7 @@ def test_h3_loop_sampler_execute_handles_all_input_variants():
             self.original_conds["positive"] = positive
 
     from utils_collection_sampling_test.helpers import sampling_helpers as sh
+
     orig_run = sh.run_chunk_sampling
 
     def dummy_run_chunk(noise, g, s, sig, chunk_latent, **kwargs):
@@ -333,39 +278,15 @@ def test_h3_loop_sampler_execute_handles_all_input_variants():
     sh.run_chunk_sampling = dummy_run_chunk
     try:
         # 1. Test when segment_lengths is a single int (caused by ComfyUI list unwrapping)
-        res1 = UC_H3LoopSampler.execute(
-            noise=[None],
-            sampler=[object()],
-            sigmas=[torch.tensor([1.0, 0.0])],
-            conditioning=[multi_cond],
-            latent=[latent],
-            model=[FakeModel()],
-            segment_lengths=[22],
-        )
+        res1 = UC_H3LoopSampler.execute(noise=[None], sampler=[object()], sigmas=[torch.tensor([1.0, 0.0])], conditioning=[multi_cond], latent=[latent], model=[FakeModel()], segment_lengths=[22])
         assert res1.result[0] is not None
 
         # 2. Test when segment_lengths is list of ints
-        res2 = UC_H3LoopSampler.execute(
-            noise=None,
-            sampler=object(),
-            sigmas=torch.tensor([1.0, 0.0]),
-            conditioning=multi_cond,
-            latent=latent,
-            guider=MockGuider(),
-            segment_lengths=[7, 15],
-        )
+        res2 = UC_H3LoopSampler.execute(noise=None, sampler=object(), sigmas=torch.tensor([1.0, 0.0]), conditioning=multi_cond, latent=latent, guider=MockGuider(), segment_lengths=[7, 15])
         assert res2.result[0] is not None
 
         # 3. Test when segment_lengths is list of lists
-        res3 = UC_H3LoopSampler.execute(
-            noise=None,
-            sampler=object(),
-            sigmas=torch.tensor([1.0, 0.0]),
-            conditioning=single_cond,
-            latent=latent,
-            model=FakeModel(),
-            segment_lengths=[[7], [15]],
-        )
+        res3 = UC_H3LoopSampler.execute(noise=None, sampler=object(), sigmas=torch.tensor([1.0, 0.0]), conditioning=single_cond, latent=latent, model=FakeModel(), segment_lengths=[[7], [15]])
         assert res3.result[0] is not None
     finally:
         sh.run_chunk_sampling = orig_run
@@ -409,6 +330,7 @@ def test_node_schema():
 
     # Test split_h3_video_components_into_segments with megapixels=0.0 preserves resolution
     import types
+
     raw_frames = torch.zeros(24, 60, 120, 3)
     comp = types.SimpleNamespace(images=raw_frames, frame_rate=24, audio=None)
     vid = types.SimpleNamespace(get_components=lambda: comp)
@@ -430,35 +352,34 @@ def test_node_schema():
     frames_200 = torch.arange(200, dtype=torch.float32).view(200, 1, 1, 1).expand(200, 32, 32, 3)
     comp_200 = types.SimpleNamespace(images=frames_200, frame_rate=24, audio=None)
     vid_200 = types.SimpleNamespace(get_components=lambda: comp_200)
-    f_list, _, _, _, l_list, _, _, tail_opt, trail_list = split_h3_video_components_into_segments(
-        vid_200, megapixels=0.0, overlap_frames=22, enable_whisper=False, return_trim_metadata=True
-    )
+    f_list, _, _, _, l_list, _, _, tail_opt, trail_list = split_h3_video_components_into_segments(vid_200, megapixels=0.0, overlap_frames=22, enable_whisper=False, return_trim_metadata=True)
     assert l_list == [124, 107]
     assert tail_opt == "22"
     assert trail_list == [0, 9]
     assert float(f_list[1][0].mean()) == pytest.approx(102.0)
+
+    # Overlap options 0, 73, and 90 must be preserved verbatim (not silently coerced to "22")
+    for ov in (0, 73, 90):
+        _, _, _, _, _, _, _, ov_tail_opt, _ = split_h3_video_components_into_segments(vid_200, megapixels=0.0, overlap_frames=ov, enable_whisper=False, return_trim_metadata=True)
+        assert ov_tail_opt == str(ov)
 
     # Verify 15.062s clip (361 frames at 24fps) with segment_count=3 produces exactly 3 segments (not 4)
     frames_361 = torch.zeros(361, 32, 32, 3)
     frames_361[10:] = 1.0
     comp_361 = types.SimpleNamespace(images=frames_361, frame_rate=361 / 15.062, audio=None)
     vid_361 = types.SimpleNamespace(get_components=lambda: comp_361)
-    _, _, _, _, l_361, v_361, _, tail_361, trail_361 = split_h3_video_components_into_segments(
-        vid_361, megapixels=0.0, segment_count=3, overlap_frames=22, enable_whisper=False, return_trim_metadata=True
-    )
+    _, _, _, _, l_361, v_361, _, tail_361, trail_361 = split_h3_video_components_into_segments(vid_361, megapixels=0.0, segment_count=3, overlap_frames=22, enable_whisper=False, return_trim_metadata=True)
     assert len(l_361) == 3
     assert l_361 == [141, 141, 124]
     assert trail_361 == [0, 0, 1]
     assert [getattr(x, "_uc_overlap_frames", None) for x in l_361] == [0, 22, 22]
     assert [getattr(x, "_uc_padded_frames", None) for x in l_361] == [0, 0, 1]
     import av
+
     src_buf = v_361[0].get_stream_source()
     src_buf.seek(0)
     with av.open(src_buf, mode="r") as container:
-        keyframe_indices = [
-            idx for idx, packet in enumerate(container.demux(container.streams.video[0]))
-            if packet.pts is not None and packet.is_keyframe
-        ]
+        keyframe_indices = [idx for idx, packet in enumerate(container.demux(container.streams.video[0])) if packet.pts is not None and packet.is_keyframe]
     assert 0 in keyframe_indices and 10 in keyframe_indices
 
 
@@ -494,13 +415,7 @@ def test_sample_dmad_renoise_step_math_and_terminal():
     def mock_noise_sampler(s, sn):
         return fixed_noise.clone()
 
-    result = sample_dmad_renoise(
-        mock_model,
-        init_noise,
-        sigmas,
-        noise_sampler=mock_noise_sampler,
-        s_noise=1.0,
-    )
+    result = sample_dmad_renoise(mock_model, init_noise, sigmas, noise_sampler=mock_noise_sampler, s_noise=1.0)
 
     # In step 0 (sigma 1.0 -> 0.8): x = 0.2 * target_x0 + 0.8 * fixed_noise
     # In step 1 (sigma 0.8 -> 0.0): sigma_next == 0, so x = target_x0
@@ -517,12 +432,7 @@ def test_sample_dmad_renoise_nested_tensor():
         return x
 
     sigmas = torch.tensor([1.0, 0.9, 0.0], dtype=torch.float32)
-    out = sample_dmad_renoise(
-        mock_model,
-        nt_in,
-        sigmas,
-        extra_args={"seed": 42},
-    )
+    out = sample_dmad_renoise(mock_model, nt_in, sigmas, extra_args={"seed": 42})
 
     assert isinstance(out, NestedTensor)
     parts = out.unbind()
@@ -557,6 +467,7 @@ def test_dmad_sampler_node_and_registration():
 
     out = UC_SamplerDMADReNoise.execute(s_noise=1.0).result[0]
     import comfy.samplers
+
     assert isinstance(out, comfy.samplers.KSAMPLER)
     assert out.sampler_function is sample_dmad_renoise
     assert out.extra_options.get("s_noise") == 1.0
@@ -565,5 +476,3 @@ def test_dmad_sampler_node_and_registration():
     register_scheduler_handlers()
     assert "dmad" in comfy.samplers.SCHEDULER_HANDLERS
     assert "dmad" in comfy.samplers.SCHEDULER_NAMES
-
-

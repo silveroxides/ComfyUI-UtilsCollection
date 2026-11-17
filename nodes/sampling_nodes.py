@@ -246,13 +246,11 @@ class UC_MiniMaxH3ClipContinuationApply(io.ComfyNode):
                 io.Latent.Input("latent", tooltip="Target clip latent from your MiniMax H3 encoder."),
                 io.Combo.Input(
                     "tail_frames",
-                    options=["22", "5", "39", "56"],
+                    options=["22", "5", "39", "56", "73", "90"],
                     default="22",
-                    tooltip="Keep at 22 (recommended ~0.9s sweet spot). Controls how many ending video frames of the previous clip are pinned onto the start of the next clip to lock in motion, then removed by Trim. 5 is barely fluid; 39 or 56 spend more of each render on overlap frames that get trimmed away.",
+                    tooltip="Keep at 22 (recommended ~0.9s sweet spot). Controls how many ending video frames of the previous clip are pinned onto the start of the next clip to lock in motion, then removed by Trim. 5 is barely fluid; higher values spend more of each render on overlap frames that get trimmed away.",
                 ),
-                io.Int.Input(
-                    "audio_tail_frames", default=24, min=0, max=240, step=1, tooltip="Keep at 24 (1 full second of sound) or 48 (2 seconds for musical beats). Controls how much ending audio is carried over across the cut without costing any extra video frames. Multiples of 24 are whole seconds; 0 matches tail_frames."
-                ),
+                io.Int.Input("audio_tail_frames", default=0, min=-1, max=240, step=1, tooltip="Keep at 0 to match tail_frames (recommended). Positive values carry that many ending audio frames across the cut (24 is 1 second, 48 is 2 seconds). Set to -1 to skip audio continuation when external audio drives the clip."),
                 io.Latent.Input("continuation_latent", optional=True, tooltip="Previous clip's sampler output latent (recommended). Slices both picture and sound directly in latent space without any decode or re-encode."),
                 io.Custom("MINIMAX_H3_CLIP_CONTINUATION_MEDIA").Input("continuation_media", optional=True, tooltip="Optional output from MiniMax H3 Clip Continuation Load."),
                 io.Image.Input("continuation_frames", optional=True, tooltip="Optional decoded frames from the previous clip (used only when continuation_latent and continuation_media are not connected)."),
@@ -267,7 +265,7 @@ class UC_MiniMaxH3ClipContinuationApply(io.ComfyNode):
         )
 
     @classmethod
-    def execute(cls, conditioning, latent, tail_frames: str = "22", audio_tail_frames: int = 24, continuation_latent=None, continuation_media=None, continuation_frames=None, continuation_audio=None, vae=None, audio_vae=None) -> io.NodeOutput:
+    def execute(cls, conditioning, latent, tail_frames: str = "22", audio_tail_frames: int = 0, continuation_latent=None, continuation_media=None, continuation_frames=None, continuation_audio=None, vae=None, audio_vae=None) -> io.NodeOutput:
         out_cond, trim_frames = apply_minimax_h3_clip_continuation(
             conditioning, latent, tail_frames=int(tail_frames), audio_tail_frames=int(audio_tail_frames), continuation_latent=continuation_latent, continuation_media=continuation_media, continuation_frames=continuation_frames, continuation_audio=continuation_audio, vae=vae, audio_vae=audio_vae
         )
@@ -293,12 +291,12 @@ class UC_MiniMaxH3ClipContinuationSampler(io.ComfyNode):
                 io.Latent.Input("latent_image", tooltip="Target latent (or list of segment latents) from your MiniMax H3 encoder."),
                 io.Combo.Input(
                     "tail_frames",
-                    options=["22", "5", "39", "56"],
+                    options=["22", "5", "39", "56", "73", "90", "0"],
                     default="22",
-                    tooltip="Keep at 22 (recommended ~0.9s sweet spot). Controls how many ending video frames of the previous segment are pinned onto the start of the next segment to lock in motion, then removed by Trim. 5 is barely fluid; 39 or 56 spend more of each render on overlap frames that get trimmed away.",
+                    tooltip="Keep at 22 (recommended ~0.9s sweet spot). Controls how many ending video frames of the previous segment are pinned onto the start of the next segment to lock in motion, then removed by Trim. 0 disables continuation chaining; 5 is barely fluid; higher values spend more of each render on overlap frames.",
                 ),
                 io.Int.Input(
-                    "audio_tail_frames", default=24, min=0, max=240, step=1, tooltip="Keep at 24 (1 full second of sound) or 48 (2 seconds for musical beats). Controls how much ending audio is carried over across the cut without costing any extra video frames. Multiples of 24 are whole seconds; 0 matches tail_frames."
+                    "audio_tail_frames", default=0, min=-1, max=240, step=1, tooltip="Keep at 0 to match tail_frames (recommended). Positive values carry that many ending audio frames across the cut (24 is 1 second, 48 is 2 seconds). Set to -1 to skip audio continuation when external audio drives each segment."
                 ),
             ],
             outputs=[
@@ -311,7 +309,7 @@ class UC_MiniMaxH3ClipContinuationSampler(io.ComfyNode):
         )
 
     @classmethod
-    def execute(cls, noise, guider, sampler, sigmas, latent_image, tail_frames="22", audio_tail_frames=24) -> io.NodeOutput:
+    def execute(cls, noise, guider, sampler, sigmas, latent_image, tail_frames="22", audio_tail_frames=0) -> io.NodeOutput:
         segment_latents, trim_leading_frames, trim_trailing_frames, combined_latent, last_latent = sample_minimax_h3_clip_continuation_chain(noise=noise, guider=guider, sampler=sampler, sigmas=sigmas, latent=latent_image, tail_frames=tail_frames, audio_tail_frames=audio_tail_frames)
         return io.NodeOutput(segment_latents, trim_leading_frames, trim_trailing_frames, combined_latent, last_latent)
 

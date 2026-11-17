@@ -318,7 +318,7 @@ class UC_H3RefVideoSegments(io.ComfyNode):
                 io.Int.Output("lengths", is_output_list=True, tooltip="List of segment frame lengths at 24 fps."),
                 io.Video.Output("video_list", is_output_list=True, tooltip="List of preview video objects for each segment."),
                 io.String.Output("transcribed_audio_list", is_output_list=True, tooltip="List of word-timed transcripts aligned to each individual segment."),
-                io.Combo.Output("tail_frames", options=["22", "5", "39", "56"], tooltip="The selected overlap frame count (e.g. '22'), ready to connect directly to tail_frames on MiniMax H3 Clip Continuation Sampler."),
+                io.Combo.Output("tail_frames", options=["22", "5", "39", "56", "73", "90", "0"], tooltip="The selected overlap frame count (e.g. '22' or '0'), ready to connect directly to tail_frames on MiniMax H3 Clip Continuation Sampler."),
                 io.Int.Output(
                     "trim_trailing_frames", is_output_list=True, tooltip="Number of padded frames added at the end of each segment to fit the H3 grid (0 for full segments, positive only on the final segment when padded). Connect to trim_trailing_frames on MiniMax H3 Clip Continuation Trim to cut off the padded tail."
                 ),
