@@ -1211,8 +1211,8 @@ def test_minimax_h3_scene_image_any2va_contract():
         assert "MiniMax H3 Scene Image to Video Adaptive Timeline" in instruction
         assert "The single supplied image acts as the visual seed" in instruction
         assert "extrapolate a continuous, escalating progression of motion" in instruction
-        assert "do not emit `<Picture 1>` or any media identifier inside the summary or timeline" in instruction or "do not emit <Picture 1> or any media identifier inside the summary or timeline" in instruction
-        assert "do not create a <Video N> namespace from the image" in instruction
+        assert "do not emit `<Picture 1>` or any media identifier inside `summary:` or `Timeline:`" in instruction
+        assert "do not create a `<Video N>` tag from an image or unreferenced video" in instruction
         assert "Conditional User-Instructed Reference Rule:" in instruction
         assert "Only when the user instruction explicitly specifies" in instruction
         assert "referenced from <Picture N>" in instruction
@@ -1248,9 +1248,9 @@ def test_minimax_h3_scene_image_any2va_contract():
         assert "Conditional Downstream Reference Variants (Autonomously Constructed from User Semantic Intent):" in instruction
         assert "do not cite <Picture N>, <Video N>, or <Audio N> tags in `summary:`" in instruction
         assert "when user instruction specifies a copied or referenced soundtrack/music <Audio N>" not in instruction
-        assert "Only when a video is provided AND the user request explicitly mentions `<Video 1>`" in instruction
-        assert "never use vague or meta references (`the guide`, `in the guide`, `from the guide`, `shown in the guide`, `mimicking`, `source video`, `guide video`, `original video`, `reference video`, `pre-existing video`" in instruction
-        assert "complete self-contained visual anchors" in instruction
+        assert "Only write `<Video N>` when a video is provided AND the user names `<Video N>`." in instruction
+        assert "Never write `source video`, `guide video`, `original video`, `reference video`, `input video`, `story guide`, `the guide`" in instruction
+        assert "describe each <Subject N> in full in `subject_definitions:` and on first appearance in `Timeline:`" in instruction
         assert re.search(r"\{[^{}]*\{[^{}]*\}[^{}]*\}", instruction) is None
 
 
@@ -1324,9 +1324,9 @@ def test_minimax_h3_storyboard_any2va_contract():
         assert "when user instruction specifies a copied or referenced soundtrack/music <Audio N>" not in instruction
         assert "<Audio 1>: fully_copy - source audio track is copied entirely" in instruction
         assert "<Audio 1>: reference - vocal timbre and delivery guide speech of <Subject {N}> (S{N}) without copying audio signal" in instruction
-        assert "Only when a video is provided AND the user request explicitly mentions `<Video 1>`" in instruction
-        assert "never use vague or meta references (`the guide`, `in the guide`, `from the guide`, `shown in the guide`, `mimicking`, `source video`, `guide video`, `original video`, `reference video`, `pre-existing video`" in instruction
-        assert "complete self-contained anchors" in instruction
+        assert "Only write `<Video N>` when a video is provided AND the user names `<Video N>`." in instruction
+        assert "Never write `source video`, `guide video`, `original video`, `reference video`, `input video`, `story guide`, `the guide`" in instruction
+        assert "Describe each `<Subject N>` in full in `subject_definitions:` and on first appearance in `Timeline:`." in instruction
         assert re.search(r"\{[^{}]*\{[^{}]*\}[^{}]*\}", instruction) is None
 
 
@@ -1451,8 +1451,8 @@ def test_h3_dedicated_query_presets_contracts():
     assert "Omit by default; include `retention_analysis:`" in scene_any_suff
     assert "only when the user request explicitly specifies downstream reference media" in scene_any_suff
     assert "completely replace the character in-place across all instances" in scene_any_suff
-    assert "Only when a video is provided AND the user request explicitly mentions `<Video 1>`" in scene_any_pref
-    assert "never write vague semantic video references" in scene_any_suff
+    assert "Only write `<Video N>` when a video is provided AND the user names `<Video N>`." in scene_any_pref
+    assert "never write `source video`, `guide video`, `original video`, `reference video`, or `the guide`" in scene_any_suff
 
     scene_t2va_pref = vlm_presets.system_query_additional_vlm["h3_scene_image_t2va_prefix"]
     scene_t2va_suff = vlm_presets.system_query_additional_vlm["h3_scene_image_t2va_suffix"]
@@ -1481,8 +1481,8 @@ def test_h3_dedicated_query_presets_contracts():
     assert "Omit by default; include `retention_analysis:`" in story_any_suff
     assert "only when the user request explicitly specifies downstream reference media" in story_any_suff
     assert "completely replace the character in-place across all instances" in story_any_suff
-    assert "Only when a video is provided AND the user request explicitly mentions `<Video 1>`" in story_any_pref
-    assert "never write vague references like `source video`, `guide video`, `original video`, `reference video`, or `pre-existing video`" in story_any_suff
+    assert "Only write `<Video N>` when a video is provided AND the user names `<Video N>`." in story_any_pref
+    assert "never write `source video`, `guide video`, `original video`, `reference video`, or `the guide`" in story_any_suff
 
     story_t2va_pref = vlm_presets.system_query_additional_vlm["h3_storyboard_t2va_prefix"]
     story_t2va_suff = vlm_presets.system_query_additional_vlm["h3_storyboard_t2va_suffix"]
