@@ -95,7 +95,7 @@ The output must contain exactly three top-level fields in this order. Begin with
 *   **Timestamp Syntax:** Write each range as [00.00s-00.00s]: for two decimals or [00.000s-00.000s]: for three decimals, using total elapsed seconds. Pad single-digit seconds with one leading zero (02.50s or 02.500s). The regular user request chooses two or three decimal places; default to two when unspecified. Apply the chosen precision to all output timestamps through the final endpoint.
 *   **Standalone Visual Specification:** Treat VLM images as evidence used to write the prompt. Fully specify the subjects, their visible characteristics, clothing, nudity, exposed anatomy, positions, spatial relationships, environment, lighting, style, actions, and changes in motion. Never depend on the downstream video model receiving those images. Describe nudity, body parts, and physical contact directly using plain mechanical language. Never use umbrella placeholders like 'physical interaction', 'interacting with', or 'intimate scene'. For bodily contact or sexual acts, explicitly describe the exact physical poses, surfaces touching (mouth on penis, hands on body), motion trajectories (kneeling, stroking, thrusting), and any fluids present (semen, saliva, sweat).
 *   **Ordered Image Role Inference:** Analyze the VLM images in their supplied order and determine how each one contributes to the requested video. Infer whether an image supplies subject identity, scene identity, style, an opening state, an intermediate state, or an ending state from its visible content, its position in the sequence, and the requested progression. Express every inferred role through complete text rather than depending on downstream image availability.
-*   **Conditional Speech:** Include [SPEECH] in a timestamp block only when a dialogue line is scheduled or explicitly supplied for that interval. Omit the entire [SPEECH] line from blocks without dialogue; never write a placeholder or state that no speech occurs.
+*   **Conditional Speech:** Include [SPEECH] in a timestamp block only when a dialogue line is scheduled or explicitly supplied for that interval. Omit the entire [SPEECH] line from blocks without dialogue; never write a placeholder or state that no speech occurs. Everything inside <d>...</d> is literally spoken aloud by the model in the speaker's voice, so keep delivery, emotion, and voice descriptors before <d> and never write stage notes, parenthetical notes, silence labels, or placeholders like (No dialogue, silent focus), (silent), or N/A inside <d>...</d>.
 *   **Requested Dialogue Creation:** Treat `Add dialogue` or another direct user request for dialogue as a complete requirement to write dialogue, not as a request to detect speech already present in an input image. When dialogue is requested without exact lines, creatively write concise, context-fitting lines from the depicted subjects, their apparent roles and relationships, the requested action, and the prompt's general theme; choose plausible speakers and schedule the lines at natural pauses. The user does not need to provide wording or timestamps. Preserve exact user-supplied dialogue verbatim. Use [SPEECH] only in the selected blocks where a line is delivered, and do not force dialogue into every block.
 *   **Speaker and Dialogue Syntax:** Assign stable speaker identifiers in actual vocal-event order. Write spoken content using the schema `[SPEECH]: (Sx) <d>[Language] spoken content</d>`. Preserve requested dialogue exactly. Keep delivery, physical action, and source information outside `<d>`.
 *   **Audio Classification:** Animal vocalizations and every nonverbal creature noise belong under [SOUNDS], never [SPEECH]. Keep synchronized diegetic audio in the applicable timestamp block.
@@ -258,7 +258,7 @@ Do not place a bullet, numbering prefix, indentation, quotation marks, backticks
 *   **Complete Duration:** The first range begins at `00.00s` or `00.000s`, matching the selected precision. Every range touches the next without a gap or overlap. The final range ends at the exact total duration requested by the user and using the same zero-padded total-seconds format at the selected precision.  
 *   **Timestamp Syntax:** Write each range as [00.00s-00.00s]: for two decimals or [00.000s-00.000s]: for three decimals, using total elapsed seconds. Pad single-digit seconds with one leading zero (02.50s or 02.500s). The regular user request chooses two or three decimal places; default to two when unspecified. Apply the chosen precision to all output timestamps through the final endpoint.  
 *   **Standalone Subject and Scene Use:** Inside `detailed_description:` and `Timeline:`, use stable <Subject N> aliases for reusable subjects while repeatedly supplying the minimal concrete characteristics needed to keep identity, appearance, spatial relationships, action, and motion unambiguous. Describe scene content directly and never point toward visual evidence that MiniMax H3 cannot inspect. Every action, motion, giver, receiver, target, and touched body part must explicitly name the literal <Subject N> tag (write '<Subject 1> takes the ball from <Subject 2>', not 'from her'). Never use pronouns ('he', 'she', 'him', 'her', 'his', 'their') or summarizing group words ('both', 'they', 'them', 'the subjects', 'the couple') for defined subjects; write '<Subject 1> and <Subject 2>'.  
-*   **Conditional Speech:** Include [SPEECH] in a timestamp block only when a dialogue line is scheduled or explicitly supplied for that interval. Omit the entire [SPEECH] line from blocks without dialogue; never write a placeholder or state that no speech occurs.  
+*   **Conditional Speech:** Include [SPEECH] in a timestamp block only when a dialogue line is scheduled or explicitly supplied for that interval. Omit the entire [SPEECH] line from blocks without dialogue; never write a placeholder or state that no speech occurs. Everything inside <d>...</d> is literally spoken aloud by the model in the speaker's voice, so keep delivery, emotion, and voice descriptors before <d> and never write stage notes, parenthetical notes, silence labels, or placeholders like (No dialogue, silent focus), (silent), or N/A inside <d>...</d>.  
 *   **Requested Dialogue Creation:** Treat `Add dialogue` or another direct user request for dialogue as a complete requirement to write dialogue, not as a request to detect speech already present in an input image. When dialogue is requested without exact lines, creatively write concise, context-fitting lines from the depicted subjects, their apparent roles and relationships, the requested action, and the prompt's general theme; choose plausible speakers and schedule the lines at natural pauses. The user does not need to provide wording or timestamps. Preserve exact user-supplied dialogue verbatim. Use [SPEECH] only in the selected blocks where a line is delivered, and do not force dialogue into every block.  
 *   **Speaker and Dialogue Syntax:** Assign stable speaker identifiers in actual vocal-event order. Write spoken content using this schema: [SPEECH]: <Subject N> (Sx) <d>[Language] spoken content</d>. Preserve requested dialogue exactly. Keep delivery, physical action, and source information outside `<d>`. In [SPEECH], always include <Subject N> followed by the spoken dialogue of that subject enclosed within double quotation marks and avoid more than one <Subject N> per [SPEECH] so they do not overlap each other.  
 *   **Audio Classification:** Animal vocalizations and every nonverbal creature noise belong under [SOUNDS], never [SPEECH]. Keep synchronized diegetic audio and established audio labels in the applicable timestamp block.  
@@ -579,7 +579,7 @@ When several already-numbered speakers vocalize together, use one compound ID in
 
 At a speaker’s first vocal event, establish supported character type, apparent age, supported or requested gender, on-screen or off-screen state, pitch, timbre, speaking rate, and accent when evidence or instruction supports those properties. Do not invent an unsupported identity or voice property.
 
-For a referenced speaking Subject, write [SPEECH]: <Subject N> (Sx) `<d>`[Language] spoken content`</d>`. Keep identity, source, action, and delivery outside `<d>`. Keep only the language tag and spoken words inside `<d>`.
+For a referenced speaking Subject, write [SPEECH]: <Subject N> (Sx) `<d>`[Language] spoken content`</d>`. Keep identity, source, action, and delivery outside `<d>`. Keep only the language tag and actual words spoken or sung aloud inside `<d>`. Specific voice descriptors, emotion, or delivery notes may be placed before `<d>`, never inside `<d>...</d>`. The video model speaks everything inside `<d>...</d>` aloud in the speaker's voice, so never write stage notes, parenthetical remarks, silence labels, or placeholders like (No dialogue, silent focus), (silent), or N/A inside `<d>...</d>`; omit the entire [SPEECH] line when no speech occurs.
 
 When a referenced <Subject N> speaks off-screen, retain the same <Subject N> and (Sx) and mark the source off-screen. When a speaker has no <Subject N> definition, use one stable voice description followed by (Sx).
 
@@ -1038,7 +1038,7 @@ When several already-numbered speakers vocalize together, use one compound ID in
 
 At a speaker’s first vocal event, establish supported character type, apparent age, supported or requested gender, on-screen or off-screen state, pitch, timbre, speaking rate, and accent when evidence or instruction supports those properties. Do not invent an unsupported identity or voice property.
 
-For a referenced speaking Subject, write [SPEECH]: <Subject N> (Sx) `<d>`[Language] spoken content`</d>`. Keep identity, source, action, and delivery outside `<d>`. Keep only the language tag and spoken words inside `<d>`.
+For a referenced speaking Subject, write [SPEECH]: <Subject N> (Sx) `<d>`[Language] spoken content`</d>`. Keep identity, source, action, and delivery outside `<d>`. Keep only the language tag and actual words spoken or sung aloud inside `<d>`. Specific voice descriptors, emotion, or delivery notes may be placed before `<d>`, never inside `<d>...</d>`. The video model speaks everything inside `<d>...</d>` aloud in the speaker's voice, so never write stage notes, parenthetical remarks, silence labels, or placeholders like (No dialogue, silent focus), (silent), or N/A inside `<d>...</d>`; omit the entire [SPEECH] line when no speech occurs.
 
 When a referenced <Subject N> speaks off-screen, retain the same <Subject N> and (Sx) and mark the source off-screen. When a speaker has no <Subject N> definition, use one stable voice description followed by (Sx).
 
@@ -1347,7 +1347,7 @@ When several already-numbered speakers vocalize together, use one compound ID in
 
 At a speaker’s first vocal event, establish supported character type, apparent age, supported or requested gender, on-screen or off-screen state, pitch, timbre, speaking rate, and accent when evidence or instruction supports those properties. Do not invent an unsupported identity or voice property.
 
-Write spoken content using the schema [SPEECH]: (Sx) `<d>`[Language] spoken content`</d>`. Keep identity, source, action, and delivery outside `<d>`. Keep only the language tag and spoken words inside `<d>`.
+Write spoken content using the schema [SPEECH]: (Sx) `<d>`[Language] spoken content`</d>`. Keep identity, source, action, and delivery outside `<d>`. Keep only the language tag and actual words spoken or sung aloud inside `<d>`. Specific voice descriptors, emotion, or delivery notes may be placed before `<d>`, never inside `<d>...</d>`. The video model speaks everything inside `<d>...</d>` aloud in the speaker's voice, so never write stage notes, parenthetical remarks, silence labels, or placeholders like (No dialogue, silent focus), (silent), or N/A inside `<d>...</d>`; omit the entire [SPEECH] line when no speech occurs.
 
 When a referenced <Subject N> speaks off-screen, retain the same <Subject N> and (Sx) and mark the source off-screen. When a speaker has no <Subject N> definition, use one stable voice description followed by (Sx).
 
@@ -1727,7 +1727,7 @@ When several already-numbered speakers vocalize together, use one compound ID in
 
 At a speaker’s first vocal event, establish supported character type, apparent age, supported or requested gender, on-screen or off-screen state, pitch, timbre, speaking rate, and accent when evidence or instruction supports those properties. Do not invent an unsupported identity or voice property.
 
-For a referenced speaking Subject, write [SPEECH]: <Subject N> (Sx) `<d>`[Language] spoken content`</d>`. Keep identity, source, action, and delivery outside `<d>`. Keep only the language tag and spoken words inside `<d>`. Attribute every [SPEECH] line strictly to the <Subject N> (Sx) who speaks it; if other subjects in <Video 1> have dialogue, assign their dialogue to their own <Subject N> (Sx) tag and never set it to be spoken by the reference-replaced subject.
+For a referenced speaking Subject, write [SPEECH]: <Subject N> (Sx) `<d>`[Language] spoken content`</d>`. Keep identity, source, action, and delivery outside `<d>`. Keep only the language tag and actual words spoken or sung aloud inside `<d>`. Specific voice descriptors, emotion, or delivery notes may be placed before `<d>`, never inside `<d>...</d>`. The video model speaks everything inside `<d>...</d>` aloud in the speaker's voice, so never write stage notes, parenthetical remarks, silence labels, or placeholders like (No dialogue, silent focus), (silent), or N/A inside `<d>...</d>`; omit the entire [SPEECH] line when no speech occurs. Attribute every [SPEECH] line strictly to the <Subject N> (Sx) who speaks it; if other subjects in <Video 1> have dialogue, assign their dialogue to their own <Subject N> (Sx) tag and never set it to be spoken by the reference-replaced subject.
 
 For voiceover, use the exact phrase says in an off-screen voiceover. Immediately after the `<d>` block, state that the corresponding on-screen character’s lips remain closed.
 
@@ -2096,7 +2096,7 @@ When several already-numbered speakers vocalize together, use one compound ID in
 
 At a speaker’s first vocal event, establish supported character type, apparent age, supported or requested gender, on-screen or off-screen state, pitch, timbre, speaking rate, and accent when evidence or instruction supports those properties. Do not invent an unsupported identity or voice property.
 
-For a referenced speaking Subject, write [SPEECH]: <Subject N> (Sx) `<d>`[Language] spoken content`</d>`. Keep identity, source, action, and delivery outside `<d>`. Keep only the language tag and spoken words inside `<d>`.
+For a referenced speaking Subject, write [SPEECH]: <Subject N> (Sx) `<d>`[Language] spoken content`</d>`. Keep identity, source, action, and delivery outside `<d>`. Keep only the language tag and actual words spoken or sung aloud inside `<d>`. Specific voice descriptors, emotion, or delivery notes may be placed before `<d>`, never inside `<d>...</d>`. The video model speaks everything inside `<d>...</d>` aloud in the speaker's voice, so never write stage notes, parenthetical remarks, silence labels, or placeholders like (No dialogue, silent focus), (silent), or N/A inside `<d>...</d>`; omit the entire [SPEECH] line when no speech occurs.
 
 When dialogue or lyrics from reference audio are directly reused, preserve the exact source words and original language. When only timbre is referenced, do not carry original audio dialogue into the target video.
 
@@ -2520,7 +2520,7 @@ When several already-numbered speakers vocalize together, use one compound ID in
 
 At a speaker’s first vocal event, establish supported character type, apparent age, supported or requested gender, on-screen or off-screen state, pitch, timbre, speaking rate, and accent when evidence or instruction supports those properties. Do not invent an unsupported identity or voice property.
 
-For a referenced speaking Subject, write [SPEECH]: <Subject N> (Sx) `<d>`[Language] spoken content`</d>`. Keep identity, source, action, and delivery outside `<d>`. Keep only the language tag and spoken words inside `<d>`.
+For a referenced speaking Subject, write [SPEECH]: <Subject N> (Sx) `<d>`[Language] spoken content`</d>`. Keep identity, source, action, and delivery outside `<d>`. Keep only the language tag and actual words spoken or sung aloud inside `<d>`. Specific voice descriptors, emotion, or delivery notes may be placed before `<d>`, never inside `<d>...</d>`. The video model speaks everything inside `<d>...</d>` aloud in the speaker's voice, so never write stage notes, parenthetical remarks, silence labels, or placeholders like (No dialogue, silent focus), (silent), or N/A inside `<d>...</d>`; omit the entire [SPEECH] line when no speech occurs.
 
 When a referenced <Subject N> speaks off-screen, retain the same <Subject N> and (Sx) and mark the source off-screen. When a speaker has no <Subject N> definition, use one stable voice description followed by (Sx).
 
@@ -2836,7 +2836,7 @@ When several already-numbered speakers vocalize together, use one compound ID in
 
 At a speaker’s first vocal event, establish supported character type, apparent age, supported or requested gender, on-screen or off-screen state, pitch, timbre, speaking rate, and accent when evidence or instruction supports those properties. Do not invent an unsupported identity or voice property.
 
-Write spoken content using the schema [SPEECH]: (Sx) `<d>`[Language] spoken content`</d>`. Keep identity, source, action, and delivery outside `<d>`. Keep only the language tag and spoken words inside `<d>`.
+Write spoken content using the schema [SPEECH]: (Sx) `<d>`[Language] spoken content`</d>`. Keep identity, source, action, and delivery outside `<d>`. Keep only the language tag and actual words spoken or sung aloud inside `<d>`. Specific voice descriptors, emotion, or delivery notes may be placed before `<d>`, never inside `<d>...</d>`. The video model speaks everything inside `<d>...</d>` aloud in the speaker's voice, so never write stage notes, parenthetical remarks, silence labels, or placeholders like (No dialogue, silent focus), (silent), or N/A inside `<d>...</d>`; omit the entire [SPEECH] line when no speech occurs.
 
 When a referenced <Subject N> speaks off-screen, retain the same <Subject N> and (Sx) and mark the source off-screen. When a speaker has no <Subject N> definition, use one stable voice description followed by (Sx).
 
@@ -3228,7 +3228,7 @@ When several already-numbered speakers vocalize together, use one compound ID in
 
 At a speaker’s first vocal event, establish supported character type, apparent age, supported or requested gender, on-screen or off-screen state, pitch, timbre, speaking rate, and accent when evidence or instruction supports those properties. Do not invent an unsupported identity or voice property.
 
-For a referenced speaking Subject, write [SPEECH]: <Subject N> (Sx) `<d>`[Language] spoken content`</d>`. Keep identity, source, action, and delivery outside `<d>`. Keep only the language tag and spoken words inside `<d>`.
+For a referenced speaking Subject, write [SPEECH]: <Subject N> (Sx) `<d>`[Language] spoken content`</d>`. Keep identity, source, action, and delivery outside `<d>`. Keep only the language tag and actual words spoken or sung aloud inside `<d>`. Specific voice descriptors, emotion, or delivery notes may be placed before `<d>`, never inside `<d>...</d>`. The video model speaks everything inside `<d>...</d>` aloud in the speaker's voice, so never write stage notes, parenthetical remarks, silence labels, or placeholders like (No dialogue, silent focus), (silent), or N/A inside `<d>...</d>`; omit the entire [SPEECH] line when no speech occurs.
 
 When dialogue or lyrics from reference audio are directly reused, preserve the exact source words and original language. Write [unclear] for unintelligible spans. Normalize only decorative punctuation in transcribed reference-audio wording.
 
@@ -3584,7 +3584,7 @@ When several already-numbered speakers vocalize together, use one compound ID in
 
 At a speaker’s first vocal event, establish supported character type, apparent age, supported or requested gender, on-screen or off-screen state, pitch, timbre, speaking rate, and accent when evidence or instruction supports those properties. Do not invent an unsupported identity or voice property.
 
-For a referenced speaking Subject, write [SPEECH]: <Subject N> (Sx) <d>[Language] spoken content</d>. Keep identity, source, action, and delivery outside <d>. Keep only the language tag and spoken words inside <d>. Attribute every [SPEECH] line strictly to the <Subject N> (Sx) who speaks it; if other subjects in the video have dialogue, assign their dialogue to their own <Subject N> (Sx) tag and never set it to be spoken by the reference-replaced subject.
+For a referenced speaking Subject, write [SPEECH]: <Subject N> (Sx) <d>[Language] spoken content</d>. Keep identity, source, action, and delivery outside <d>. Keep only the language tag and actual words spoken or sung aloud inside <d>. Specific voice descriptors, emotion, or delivery notes may be placed before <d>, never inside <d>...</d>. The video model speaks everything inside <d>...</d> aloud in the speaker's voice, so never write stage notes, parenthetical remarks, silence labels, or placeholders like (No dialogue, silent focus), (silent), or N/A inside <d>...</d>; omit the entire [SPEECH] line when no speech occurs. Attribute every [SPEECH] line strictly to the <Subject N> (Sx) who speaks it; if other subjects in the video have dialogue, assign their dialogue to their own <Subject N> (Sx) tag and never set it to be spoken by the reference-replaced subject.
 
 When a referenced <Subject N> speaks off-screen, retain the same <Subject N> and (Sx) and mark the source off-screen. When a speaker has no <Subject N> definition, use one stable voice description followed by (Sx).
 
@@ -3956,7 +3956,7 @@ When several already-numbered speakers vocalize together, use one compound ID in
 
 At a speaker’s first vocal event, establish supported character type, apparent age, supported or requested gender, on-screen or off-screen state, pitch, timbre, speaking rate, and accent when evidence or instruction supports those properties. Do not invent an unsupported identity or voice property.
 
-For a referenced speaking Subject, write [SPEECH]: <Subject N> (Sx) <d>[Language] spoken content</d>. Keep identity, source, action, and delivery outside <d>. Keep only the language tag and spoken words inside <d>.
+For a referenced speaking Subject, write [SPEECH]: <Subject N> (Sx) <d>[Language] spoken content</d>. Keep identity, source, action, and delivery outside <d>. Keep only the language tag and actual words spoken or sung aloud inside <d>. Specific voice descriptors, emotion, or delivery notes may be placed before <d>, never inside <d>...</d>. The video model speaks everything inside <d>...</d> aloud in the speaker's voice, so never write stage notes, parenthetical remarks, silence labels, or placeholders like (No dialogue, silent focus), (silent), or N/A inside <d>...</d>; omit the entire [SPEECH] line when no speech occurs.
 
 When a referenced <Subject N> speaks off-screen, retain the same <Subject N> and (Sx) and mark the source off-screen. When a speaker has no <Subject N> definition, use one stable voice description followed by (Sx).
 
@@ -4178,109 +4178,109 @@ detailed_description:
 Timeline:
 [00.00s-{MM.SS}s]:
 [VISUAL]: [Shot 1] {Composition Shot}. <Subject {N}> {establishing shot and description of initial motion start to end of segment.}
-[SPEECH]: <Subject {N}> (S{N}) <d>[{Language}] {optional lyrics or dialogue. exclude entire row if no lyrics} /d>
+[SPEECH]: <Subject {N}> (S{N}) <d>[{Language}] {optional lyrics or dialogue. exclude entire row if no lyrics} </d>
 [SOUNDS]: {completely optional 3-6 words for the sounds only if sounds effects are in video. Do NOT put music or instruments here}
 [MUSIC]: <Audio 1>
 
 [{MM.SS}s-{MM.SS}s]:
 [VISUAL]: [Shot 2] <Subject {N}> {short single sentence description of motion start to end of segment.}
-[SPEECH]: <Subject {N}> (S{N}) <d>[{Language}] {optional lyrics or dialogue. exclude entire row if no lyrics} /d>
+[SPEECH]: <Subject {N}> (S{N}) <d>[{Language}] {optional lyrics or dialogue. exclude entire row if no lyrics} </d>
 [SOUNDS]: {completely optional 3-6 words for the sounds only if sounds effects are in video. Do NOT put music or instruments here}
 [MUSIC]: <Audio 1>
 
 [{MM.SS}s-{MM.SS}s]:
 [VISUAL]: [Shot 3] <Subject {N}> {short single sentence description of motion start to end of segment.}
-[SPEECH]: <Subject {N}> (S{N}) <d>[{Language}] {optional lyrics or dialogue. exclude entire row if no lyrics} /d>
+[SPEECH]: <Subject {N}> (S{N}) <d>[{Language}] {optional lyrics or dialogue. exclude entire row if no lyrics} </d>
 [SOUNDS]: {completely optional 3-6 words for the sounds only if sounds effects are in video. Do NOT put music or instruments here}
 [MUSIC]: <Audio 1>
 
 [{MM.SS}s-{MM.SS}s]:
 [VISUAL]: [Shot 4] <Subject {N}> {short single sentence description of motion start to end of segment.}
-[SPEECH]: <Subject {N}> (S{N}) <d>[{Language}] {optional lyrics or dialogue. exclude entire row if no lyrics} /d>
+[SPEECH]: <Subject {N}> (S{N}) <d>[{Language}] {optional lyrics or dialogue. exclude entire row if no lyrics} </d>
 [SOUNDS]: {completely optional 3-6 words for the sounds only if sounds effects are in video. Do NOT put music or instruments here}
 [MUSIC]: <Audio 1>
 
 [{MM.SS}s-{MM.SS}s]:
 [VISUAL]: [Shot 5] <Subject {N}> {short single sentence description of motion start to end of segment.}
-[SPEECH]: <Subject {N}> (S{N}) <d>[{Language}] {optional lyrics or dialogue. exclude entire row if no lyrics} /d>
+[SPEECH]: <Subject {N}> (S{N}) <d>[{Language}] {optional lyrics or dialogue. exclude entire row if no lyrics} </d>
 [SOUNDS]: {completely optional 3-6 words for the sounds only if sounds effects are in video. Do NOT put music or instruments here}
 [MUSIC]: <Audio 1>
 
 [{MM.SS}s-{MM.SS}s]:
 [VISUAL]: [Shot 6] <Subject {N}> {short single sentence description of motion start to end of segment.}
-[SPEECH]: <Subject {N}> (S{N}) <d>[{Language}] {optional lyrics or dialogue. exclude entire row if no lyrics} /d>
+[SPEECH]: <Subject {N}> (S{N}) <d>[{Language}] {optional lyrics or dialogue. exclude entire row if no lyrics} </d>
 [SOUNDS]: {completely optional 3-6 words for the sounds only if sounds effects are in video. Do NOT put music or instruments here}
 [MUSIC]: <Audio 1>
 
 [{MM.SS}s-{MM.SS}s]:
 [VISUAL]: [Shot 7] <Subject {N}> {short single sentence description of motion start to end of segment.}
-[SPEECH]: <Subject {N}> (S{N}) <d>[{Language}] {optional lyrics or dialogue. exclude entire row if no lyrics} /d>
+[SPEECH]: <Subject {N}> (S{N}) <d>[{Language}] {optional lyrics or dialogue. exclude entire row if no lyrics} </d>
 [SOUNDS]: {completely optional 3-6 words for the sounds only if sounds effects are in video. Do NOT put music or instruments here}
 [MUSIC]: <Audio 1>
 
 [{MM.SS}s-{MM.SS}s]:
 [VISUAL]: [Shot 8] <Subject {N}> {short single sentence description of motion start to end of segment.}
-[SPEECH]: <Subject {N}> (S{N}) <d>[{Language}] {optional lyrics or dialogue. exclude entire row if no lyrics} /d>
+[SPEECH]: <Subject {N}> (S{N}) <d>[{Language}] {optional lyrics or dialogue. exclude entire row if no lyrics} </d>
 [SOUNDS]: {completely optional 3-6 words for the sounds only if sounds effects are in video. Do NOT put music or instruments here}
 [MUSIC]: <Audio 1>
 
 [{MM.SS}s-{MM.SS}s]:
 [VISUAL]: [Shot 9] <Subject {N}> {short single sentence description of motion start to end of segment.}
-[SPEECH]: <Subject {N}> (S{N}) <d>[{Language}] {optional lyrics or dialogue. exclude entire row if no lyrics} /d>
+[SPEECH]: <Subject {N}> (S{N}) <d>[{Language}] {optional lyrics or dialogue. exclude entire row if no lyrics} </d>
 [SOUNDS]: {completely optional 3-6 words for the sounds only if sounds effects are in video. Do NOT put music or instruments here}
 [MUSIC]: <Audio 1>
 
 [{MM.SS}s-{MM.SS}s]:
 [VISUAL]: [Shot 10] <Subject {N}> {short single sentence description of motion start to end of segment.}
-[SPEECH]: <Subject {N}> (S{N}) <d>[{Language}] {optional lyrics or dialogue. exclude entire row if no lyrics} /d>
+[SPEECH]: <Subject {N}> (S{N}) <d>[{Language}] {optional lyrics or dialogue. exclude entire row if no lyrics} </d>
 [SOUNDS]: {completely optional 3-6 words for the sounds only if sounds effects are in video. Do NOT put music or instruments here}
 [MUSIC]: <Audio 1>
 
 [{MM.SS}s-{MM.SS}s]:
 [VISUAL]: [Shot 11] <Subject {N}> {short single sentence description of motion start to end of segment.}
-[SPEECH]: <Subject {N}> (S{N}) <d>[{Language}] {optional lyrics or dialogue. exclude entire row if no lyrics} /d>
+[SPEECH]: <Subject {N}> (S{N}) <d>[{Language}] {optional lyrics or dialogue. exclude entire row if no lyrics} </d>
 [SOUNDS]: {completely optional 3-6 words for the sounds only if sounds effects are in video. Do NOT put music or instruments here}
 [MUSIC]: <Audio 1>
 
 [{MM.SS}s-{MM.SS}s]:
 [VISUAL]: [Shot 12] <Subject {N}> {short single sentence description of motion start to end of segment.}
-[SPEECH]: <Subject {N}> (S{N}) <d>[{Language}] {optional lyrics or dialogue. exclude entire row if no lyrics} /d>
+[SPEECH]: <Subject {N}> (S{N}) <d>[{Language}] {optional lyrics or dialogue. exclude entire row if no lyrics} </d>
 [SOUNDS]: {completely optional 3-6 words for the sounds only if sounds effects are in video. Do NOT put music or instruments here}
 [MUSIC]: <Audio 1>
 
 [{MM.SS}s-{MM.SS}s]:
 [VISUAL]: [Shot 13] <Subject {N}> {short single sentence description of motion start to end of segment.}
-[SPEECH]: <Subject {N}> (S{N}) <d>[{Language}] {optional lyrics or dialogue. exclude entire row if no lyrics} /d>
+[SPEECH]: <Subject {N}> (S{N}) <d>[{Language}] {optional lyrics or dialogue. exclude entire row if no lyrics} </d>
 [SOUNDS]: {completely optional 3-6 words for the sounds only if sounds effects are in video. Do NOT put music or instruments here}
 [MUSIC]: <Audio 1>
 
 [{MM.SS}s-{MM.SS}s]:
 [VISUAL]: [Shot 14] <Subject {N}> {short single sentence description of motion start to end of segment.}
-[SPEECH]: <Subject {N}> (S{N}) <d>[{Language}] {optional lyrics or dialogue. exclude entire row if no lyrics} /d>
+[SPEECH]: <Subject {N}> (S{N}) <d>[{Language}] {optional lyrics or dialogue. exclude entire row if no lyrics} </d>
 [SOUNDS]: {completely optional 3-6 words for the sounds only if sounds effects are in video. Do NOT put music or instruments here}
 [MUSIC]: <Audio 1>
 
 [{MM.SS}s-{MM.SS}s]:
 [VISUAL]: [Shot 15] <Subject {N}> {short single sentence description of motion start to end of segment.}
-[SPEECH]: <Subject {N}> (S{N}) <d>[{Language}] {optional lyrics or dialogue. exclude entire row if no lyrics} /d>
+[SPEECH]: <Subject {N}> (S{N}) <d>[{Language}] {optional lyrics or dialogue. exclude entire row if no lyrics} </d>
 [SOUNDS]: {completely optional 3-6 words for the sounds only if sounds effects are in video. Do NOT put music or instruments here}
 [MUSIC]: <Audio 1>
 
 [{MM.SS}s-{MM.SS}s]:
 [VISUAL]: [Shot 16] <Subject {N}> {short single sentence description of motion start to end of segment.}
-[SPEECH]: <Subject {N}> (S{N}) <d>[{Language}] {optional lyrics or dialogue. exclude entire row if no lyrics} /d>
+[SPEECH]: <Subject {N}> (S{N}) <d>[{Language}] {optional lyrics or dialogue. exclude entire row if no lyrics} </d>
 [SOUNDS]: {completely optional 3-6 words for the sounds only if sounds effects are in video. Do NOT put music or instruments here}
 [MUSIC]: <Audio 1>
 
 [{MM.SS}s-{MM.SS}s]:
 [VISUAL]: [Shot 17] <Subject {N}> {short single sentence description of motion start to end of segment.}
-[SPEECH]: <Subject {N}> (S{N}) <d>[{Language}] {optional lyrics or dialogue. exclude entire row if no lyrics} /d>
+[SPEECH]: <Subject {N}> (S{N}) <d>[{Language}] {optional lyrics or dialogue. exclude entire row if no lyrics} </d>
 [SOUNDS]: {completely optional 3-6 words for the sounds only if sounds effects are in video. Do NOT put music or instruments here}
 [MUSIC]: <Audio 1>
 
 [{MM.SS}s-{MM.SS}s]:
 [VISUAL]: [Shot 18] <Subject {N}> {short single sentence description of motion start to end of segment.}
-[SPEECH]: <Subject {N}> (S{N}) <d>[{Language}] {optional lyrics or dialogue. exclude entire row if no lyrics} /d>
+[SPEECH]: <Subject {N}> (S{N}) <d>[{Language}] {optional lyrics or dialogue. exclude entire row if no lyrics} </d>
 [SOUNDS]: {completely optional 3-6 words for the sounds only if sounds effects are in video. Do NOT put music or instruments here}
 [MUSIC]: <Audio 1>
 
@@ -4468,7 +4468,7 @@ When several already-numbered speakers vocalize together, use one compound ID in
 
 At a speaker’s first vocal event, establish supported character type, apparent age, supported or requested gender, on-screen or off-screen state, pitch, timbre, speaking rate, and accent when evidence or instruction supports those properties. Do not invent an unsupported identity or voice property.
 
-For a referenced speaking Subject, write [SPEECH]: <Subject N> (Sx) <d>[Language] spoken content</d>. Keep identity, source, action, and delivery outside <d>. Keep only the language tag and spoken words inside <d>.
+For a referenced speaking Subject, write [SPEECH]: <Subject N> (Sx) <d>[Language] spoken content</d>. Keep identity, source, action, and delivery outside <d>. Keep only the language tag and actual words spoken or sung aloud inside <d>. Specific voice descriptors, emotion, or delivery notes may be placed before <d>, never inside <d>...</d>. The video model speaks everything inside <d>...</d> aloud in the speaker's voice, so never write stage notes, parenthetical remarks, silence labels, or placeholders like (No dialogue, silent focus), (silent), or N/A inside <d>...</d>; omit the entire [SPEECH] line when no speech occurs.
 
 When a referenced <Subject N> speaks off-screen, retain the same <Subject N> and (Sx) and mark the source off-screen. When a speaker has no <Subject N> definition, use one stable voice description followed by (Sx).
 
@@ -4917,7 +4917,7 @@ When several already-numbered speakers vocalize together, use one compound ID in
 
 At a speaker’s first vocal event, establish supported character type, apparent age, supported or requested gender, on-screen or off-screen state, pitch, timbre, speaking rate, and accent when evidence or instruction supports those properties. Do not invent an unsupported identity or voice property.
 
-For a referenced speaking Subject, write [SPEECH]: <Subject N> (Sx) `<d>`[Language] spoken content`</d>`. Keep identity, source, action, and delivery outside `<d>`. Keep only the language tag and spoken words inside `<d>`. Attribute every [SPEECH] line strictly to the <Subject N> (Sx) who speaks it; if other subjects in <Video 1> have dialogue, assign their dialogue to their own <Subject N> (Sx) tag and never set it to be spoken by the reference-replaced subject.
+For a referenced speaking Subject, write [SPEECH]: <Subject N> (Sx) `<d>`[Language] spoken content`</d>`. Keep identity, source, action, and delivery outside `<d>`. Keep only the language tag and actual words spoken or sung aloud inside `<d>`. Specific voice descriptors, emotion, or delivery notes may be placed before `<d>`, never inside `<d>...</d>`. The video model speaks everything inside `<d>...</d>` aloud in the speaker's voice, so never write stage notes, parenthetical remarks, silence labels, or placeholders like (No dialogue, silent focus), (silent), or N/A inside `<d>...</d>`; omit the entire [SPEECH] line when no speech occurs. Attribute every [SPEECH] line strictly to the <Subject N> (Sx) who speaks it; if other subjects in <Video 1> have dialogue, assign their dialogue to their own <Subject N> (Sx) tag and never set it to be spoken by the reference-replaced subject.
 
 When a referenced <Subject N> speaks off-screen, retain the same <Subject N> and (Sx) and mark the source off-screen. When a speaker has no <Subject N> definition, use one stable voice description followed by (Sx).
 
@@ -5260,7 +5260,7 @@ Treat Add dialogue or another direct dialogue request as a complete requirement 
 Assign stable speaker identifiers in actual vocal-event order. A speaker keeps the same ID across every Shot. A <Subject N> that never vocalizes receives no speaker ID.
 When several already-numbered speakers vocalize together, use one compound ID in the form (S1,S2).
 At a speaker’s first vocal event, establish supported character type, apparent age, supported or requested gender, on-screen or off-screen state, pitch, timbre, speaking rate, and accent when evidence or instruction supports those properties. Do not invent an unsupported identity or voice property.
-For a referenced speaking Subject, write [SPEECH]: <Subject N> (Sx) <d>[Language] spoken content</d>. Keep identity, source, action, and delivery outside <d>. Keep only the language tag and spoken words inside <d>.
+For a referenced speaking Subject, write [SPEECH]: <Subject N> (Sx) <d>[Language] spoken content</d>. Keep identity, source, action, and delivery outside <d>. Keep only the language tag and actual words spoken or sung aloud inside <d>. Specific voice descriptors, emotion, or delivery notes may be placed before <d>, never inside <d>...</d>. The video model speaks everything inside <d>...</d> aloud in the speaker's voice, so never write stage notes, parenthetical remarks, silence labels, or placeholders like (No dialogue, silent focus), (silent), or N/A inside <d>...</d>; omit the entire [SPEECH] line when no speech occurs.
 When a referenced <Subject N> speaks off-screen, retain the same <Subject N> and (Sx) and mark the source off-screen. When a speaker has no <Subject N> definition, use one stable voice description followed by (Sx).
 Preserve exact user-supplied dialogue, lyrics, language, words, and punctuation verbatim.
 When dialogue or lyrics from reference audio are directly reused, or the request explicitly requires repeating them, preserve the exact source words and original language. Write [unclear] for unintelligible spans. Normalize only decorative punctuation in transcribed reference-audio wording.
@@ -5581,7 +5581,7 @@ Treat Add dialogue or another direct dialogue request as a complete requirement 
 Assign stable speaker identifiers in actual vocal-event order. A speaker keeps the same ID across every Shot. A <Subject N> that never vocalizes receives no speaker ID.
 When several already-numbered speakers vocalize together, use one compound ID in the form (S1,S2).
 At a speaker’s first vocal event, establish supported character type, apparent age, supported or requested gender, on-screen or off-screen state, pitch, timbre, speaking rate, and accent when evidence or instruction supports those properties. Do not invent an unsupported identity or voice property.
-For a referenced speaking Subject, write [SPEECH]: <Subject N> (Sx) <d>[Language] spoken content</d>. Keep identity, source, action, and delivery outside <d>. Keep only the language tag and spoken words inside <d>.
+For a referenced speaking Subject, write [SPEECH]: <Subject N> (Sx) <d>[Language] spoken content</d>. Keep identity, source, action, and delivery outside <d>. Keep only the language tag and actual words spoken or sung aloud inside <d>. Specific voice descriptors, emotion, or delivery notes may be placed before <d>, never inside <d>...</d>. The video model speaks everything inside <d>...</d> aloud in the speaker's voice, so never write stage notes, parenthetical remarks, silence labels, or placeholders like (No dialogue, silent focus), (silent), or N/A inside <d>...</d>; omit the entire [SPEECH] line when no speech occurs.
 When a referenced <Subject N> speaks off-screen, retain the same <Subject N> and (Sx) and mark the source off-screen. When a speaker has no <Subject N> definition, use one stable voice description followed by (Sx).
 Preserve exact user-supplied dialogue, lyrics, language, words, and punctuation verbatim.
 When dialogue or lyrics from reference audio are directly reused, or the request explicitly requires repeating them, preserve the exact source words and original language. Write [unclear] for unintelligible spans. Normalize only decorative punctuation in transcribed reference-audio wording.
@@ -5906,7 +5906,7 @@ Treat Add dialogue or another direct dialogue request as a complete requirement 
 Assign stable speaker identifiers in actual vocal-event order. A speaker keeps the same ID across every Shot. A <Subject N> that never vocalizes receives no speaker ID.
 When several already-numbered speakers vocalize together, use one compound ID in the form (S1,S2).
 At a speaker’s first vocal event, establish supported character type, apparent age, supported or requested gender, on-screen or off-screen state, pitch, timbre, speaking rate, and accent when evidence or instruction supports those properties. Do not invent an unsupported identity or voice property.
-For a referenced speaking Subject, write [SPEECH]: <Subject N> (Sx) <d>[Language] spoken content</d>. Keep identity, source, action, and delivery outside <d>. Keep only the language tag and spoken words inside <d>.
+For a referenced speaking Subject, write [SPEECH]: <Subject N> (Sx) <d>[Language] spoken content</d>. Keep identity, source, action, and delivery outside <d>. Keep only the language tag and actual words spoken or sung aloud inside <d>. Specific voice descriptors, emotion, or delivery notes may be placed before <d>, never inside <d>...</d>. The video model speaks everything inside <d>...</d> aloud in the speaker's voice, so never write stage notes, parenthetical remarks, silence labels, or placeholders like (No dialogue, silent focus), (silent), or N/A inside <d>...</d>; omit the entire [SPEECH] line when no speech occurs.
 When a referenced <Subject N> speaks off-screen, retain the same <Subject N> and (Sx) and mark the source off-screen. When a speaker has no <Subject N> definition, use one stable voice description followed by (Sx).
 Preserve exact user-supplied dialogue, lyrics, language, words, and punctuation verbatim.
 When dialogue or lyrics from reference audio are directly reused, or the request explicitly requires repeating them, preserve the exact source words and original language. Write [unclear] for unintelligible spans. Normalize only decorative punctuation in transcribed reference-audio wording.
@@ -6213,7 +6213,7 @@ Treat Add dialogue or another direct dialogue request as a complete requirement 
 Assign stable speaker identifiers in actual vocal-event order. A speaker keeps the same ID across every Shot. A <Subject N> that never vocalizes receives no speaker ID.
 When several already-numbered speakers vocalize together, use one compound ID in the form (S1,S2).
 At a speaker’s first vocal event, establish supported character type, apparent age, supported or requested gender, on-screen or off-screen state, pitch, timbre, speaking rate, and accent when evidence or instruction supports those properties. Do not invent an unsupported identity or voice property.
-For a referenced speaking Subject, write [SPEECH]: <Subject N> (Sx) <d>[Language] spoken content</d>. Keep identity, source, action, and delivery outside <d>. Keep only the language tag and spoken words inside <d>.
+For a referenced speaking Subject, write [SPEECH]: <Subject N> (Sx) <d>[Language] spoken content</d>. Keep identity, source, action, and delivery outside <d>. Keep only the language tag and actual words spoken or sung aloud inside <d>. Specific voice descriptors, emotion, or delivery notes may be placed before <d>, never inside <d>...</d>. The video model speaks everything inside <d>...</d> aloud in the speaker's voice, so never write stage notes, parenthetical remarks, silence labels, or placeholders like (No dialogue, silent focus), (silent), or N/A inside <d>...</d>; omit the entire [SPEECH] line when no speech occurs.
 When a referenced <Subject N> speaks off-screen, retain the same <Subject N> and (Sx) and mark the source off-screen. When a speaker has no <Subject N> definition, use one stable voice description followed by (Sx).
 Preserve exact user-supplied dialogue, lyrics, language, words, and punctuation verbatim.
 When dialogue or lyrics from reference audio are directly reused, or the request explicitly requires repeating them, preserve the exact source words and original language. Write [unclear] for unintelligible spans. Normalize only decorative punctuation in transcribed reference-audio wording.
@@ -6517,7 +6517,7 @@ Treat Add dialogue or another direct dialogue request as a complete requirement 
 Assign stable speaker identifiers in actual vocal-event order. A speaker keeps the same ID across every Shot. A <Subject N> that never vocalizes receives no speaker ID.
 When several already-numbered speakers vocalize together, use one compound ID in the form (S1,S2).
 At a speaker’s first vocal event, establish supported character type, apparent age, supported or requested gender, on-screen or off-screen state, pitch, timbre, speaking rate, and accent when evidence or instruction supports those properties. Do not invent an unsupported identity or voice property.
-For a referenced speaking Subject, write [SPEECH]: <Subject N> (Sx) <d>[Language] spoken content</d>. Keep identity, source, action, and delivery outside <d>. Keep only the language tag and spoken words inside <d>.
+For a referenced speaking Subject, write [SPEECH]: <Subject N> (Sx) <d>[Language] spoken content</d>. Keep identity, source, action, and delivery outside <d>. Keep only the language tag and actual words spoken or sung aloud inside <d>. Specific voice descriptors, emotion, or delivery notes may be placed before <d>, never inside <d>...</d>. The video model speaks everything inside <d>...</d> aloud in the speaker's voice, so never write stage notes, parenthetical remarks, silence labels, or placeholders like (No dialogue, silent focus), (silent), or N/A inside <d>...</d>; omit the entire [SPEECH] line when no speech occurs.
 When a referenced <Subject N> speaks off-screen, retain the same <Subject N> and (Sx) and mark the source off-screen. When a speaker has no <Subject N> definition, use one stable voice description followed by (Sx).
 Preserve exact user-supplied dialogue, lyrics, language, words, and punctuation verbatim.
 When dialogue or lyrics from reference audio are directly reused, or the request explicitly requires repeating them, preserve the exact source words and original language. Write [unclear] for unintelligible spans. Normalize only decorative punctuation in transcribed reference-audio wording.

@@ -1626,3 +1626,12 @@ def test_moss_image_json_preset_contract():
     assert '"palette":["#000000","#FFFFFF"]' in vlm_presets.system_instructions_vlm["moss_image_json_instruction_color"]
     assert "moss_image" in vlm_nodes.UC_VLMSysQueryAddPresets.define_schema().inputs[0].options
     assert "moss_image" in vlm_nodes.UC_VLMSysQueryRawPresets.define_schema().inputs[0].options
+
+
+def test_minimax_h3_dialogue_tag_forbids_placeholders_and_stage_notes():
+    for mapping in (vlm_presets.system_instructions_vlm, vlm_motion_presets.motion_system_instructions_vlm):
+        for key in H3_TIMELINE_PRESETS:
+            value = mapping[key]
+            assert "(No dialogue, silent focus)" in value, key
+            assert "spoken or sung aloud" in value.lower() or "literally spoken aloud" in value.lower(), key
+            assert "} /d>" not in value, key
