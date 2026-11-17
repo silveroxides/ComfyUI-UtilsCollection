@@ -641,7 +641,7 @@ The number of Subjects described must match the number clearly featured in the i
 
 ## Step-by-Step Frame Analysis and Prompt Generation Process
 
-1. Analyze every input image as visual evidence. Identify Subjects, actions, environment, style, features, spatial relationships, and frame anchor roles (<Picture 1> as first frame, optional <Picture 2> as final frame).
+1. Analyze every input image as visual evidence. Describe visible subjects, actions, environment, style, features, spatial relationships, and frame anchor roles (<Picture 1> as first frame, optional <Picture 2> as final frame).
 2. Parse `\\{user_query\\}` for exact duration, requested development, dialogue, lyrics, sound, and music.
 3. Preserve existing <Picture N> identifiers. Create only supported <Subject N> aliases.
 4. Determine governing visual style, medium, era, and Subject presentation.
@@ -1075,7 +1075,7 @@ The number of Subjects described must match the number clearly featured in the i
 
 ## Step-by-Step Frame Analysis and Prompt Generation Process
 
-1. Analyze the input image as the visual seed. Identify Subjects, initial action, environment, style, features, and spatial relationships at 00.00s.
+1. Analyze the input image as the visual seed. Describe visible subjects, initial action, environment, style, features, and spatial relationships at 00.00s.
 2. Parse the user instruction for exact duration, requested development, character replacement requests, any user-instructed downstream reference roles (<Picture N>, <Video N>, <Audio N>), dialogue, lyrics, sound, and music.
 3. Define every reusable subject completely in subject_definitions with thorough head-to-toe target-appropriate visual language. Only when the user instruction explicitly specifies a downstream reference role (such as <Picture N> for a retained or replacement subject), include `, referenced from <Picture N>.` or the requested media declaration in `subject_definitions:`. If the user requests replacing a character, completely replace that character in-place across subject_definitions, summary, optional retention_analysis, and every Timeline instance using only the replacement character's identity and appearance without writing replacement instructions or retaining replaced-character traits.
 4. Begin summary with `[reference generation]` (plus any additional task types explicitly required by user-specified references in the user instruction). Write 3 to 5 full sentences (minimum 50 words) stating the overall premise, development arc, and visual style using only <Subject N> labels without citing <Picture N>, <Video N>, or <Audio N> tags (unless explicitly requested for `summary:`) and without retelling the timeline.
@@ -1389,7 +1389,7 @@ The number of Subjects described must match the number clearly featured in the i
 
 ## Step-by-Step Frame Analysis and Prompt Generation Process
 
-1. Analyze the single input image as visual evidence. Identify subjects, setting, initial pose, clothing, lighting, and camera angle.
+1. Analyze the single input image as visual evidence. Describe visible subjects, setting, initial pose, clothing, lighting, and camera angle.
 2. Parse `\\{user_query\\}` and the user request for exact duration, requested development, character replacement requests, dialogue, lyrics, sound, and music.
 3. Plan adaptive contiguous timestamp ranges from 00.00s through the exact requested endpoint. Place boundaries only at meaningful chronological, foreground, or camera changes.
 4. Begin with `integrated_multimodal_description:` and `Timeline:`. If the user requests replacing a character, completely replace that character in-place across all instances in `Timeline:` using only the replacement character's identity and appearance without writing replacement instructions or retaining replaced-character traits.
@@ -2557,7 +2557,7 @@ The number of Subjects described must match the number clearly featured in the i
 
 ## Step-by-Step Frame Analysis and Prompt Generation Process
 
-1. Analyze the storyboard input—whether in the form of a comic strip, a stitched-together row of images outlining the timeline progression, multiple separate images showing progression of the timeline, or a video showing a detailed progression—in chronological sequence order. Identify Subjects, actions, setting, lighting, and narrative transitions.
+1. Analyze the storyboard input—whether in the form of a comic strip, a stitched-together row of images outlining the timeline progression, multiple separate images showing progression of the timeline, or a video showing a detailed progression—in chronological sequence order. Describe visible subjects, actions, setting, lighting, and narrative transitions.
 2. Parse the user instruction for exact duration, requested development, character replacement requests, any user-instructed downstream reference roles (<Picture N>, <Video N>, <Audio N>), dialogue, lyrics, sound, and music.
 3. Transcribe speech bubbles into dialogue lines and strip all comic graphics (borders, balloons, sound text).
 4. Define every recurring subject completely in subject_definitions with thorough head-to-toe target-appropriate visual language. Only when the user instruction explicitly specifies a downstream reference role (such as <Picture N> for a retained or replacement subject), include `, referenced from <Picture N>.` or the requested media declaration in `subject_definitions:`. If the user requests replacing a character, completely replace that character in-place across subject_definitions, summary, optional retention_analysis, and every Timeline instance using only the replacement character's identity and appearance without writing replacement instructions or retaining replaced-character traits.
@@ -2878,7 +2878,7 @@ The number of Subjects described must match the number clearly featured in the i
 
 ## Step-by-Step Frame Analysis and Prompt Generation Process
 
-1. Analyze the storyboard input—whether in the form of a comic strip, a stitched-together row of images outlining the timeline progression, multiple separate images showing progression of the timeline, or a video showing a detailed progression—in chronological sequence order. Identify subjects, environment, sequential beats, poses, dialogue bubbles, sound effect lettering/onomatopoeia, and musical/rhythmic cues.
+1. Analyze the storyboard input—whether in the form of a comic strip, a stitched-together row of images outlining the timeline progression, multiple separate images showing progression of the timeline, or a video showing a detailed progression—in chronological sequence order. Describe visible subjects, environment, sequential beats, poses, dialogue bubbles, sound effect lettering/onomatopoeia, and musical/rhythmic cues.
 2. Parse `\\{user_query\\}` and the user request for exact duration, requested development, character replacement requests, dialogue, sound, and music.
 3. Plan adaptive contiguous timestamp ranges from 00.00s through the exact requested endpoint, mapping panel beats to timeline segments.
 4. Begin with `integrated_multimodal_description:` and `Timeline:`. If the user requests replacing a character, completely replace that character in-place across all instances in `Timeline:` using only the replacement character's identity and appearance without writing replacement instructions or retaining replaced-character traits.
@@ -3625,7 +3625,7 @@ The number of Subjects described must match the number clearly featured in the i
 
 ## Step-by-Step Frame Analysis and Prompt Generation Process
 
-1. Analyze every input image as visual evidence. Identify Subjects, actions, environment, style, features, spatial relationships, cinematic context, and supported reference roles.
+1. Analyze every input image as visual evidence. Describe visible subjects, actions, environment, style, features, spatial relationships, cinematic context, and supported reference roles.
 2. Parse `\\{user_query\\}` for exact duration, requested development, concrete frame roles, whole-Video roles, dialogue, lyrics, sound, music, and Audio use.
 3. Preserve every existing ComfyUI media identifier. Create only supported <Subject N> aliases. Allocate standalone Picture, Video, and Audio definitions only when their roles require separate tracking.
 4. Determine the governing visual style, medium, era, and Subject presentation. Preserve supported source style unless a conflicting requested target style takes priority.
@@ -3997,7 +3997,7 @@ The number of Subjects described must match the number clearly featured in the i
 
 ## Step-by-Step Frame Analysis and Prompt Generation Process
 
-1. Analyze every input image as visual evidence. Identify Subjects, actions, environment, style, features, spatial relationships, cinematic context, and supported reference roles.
+1. Analyze every input image as visual evidence. Describe visible subjects, actions, environment, style, features, spatial relationships, cinematic context, and supported reference roles.
 2. Parse `\\{user_query\\}` for exact duration, requested development, concrete frame roles, whole-Video roles, dialogue, lyrics, sound, music, and Audio use.
 3. Preserve every existing ComfyUI media identifier. Create only supported <Subject N> aliases. Allocate standalone Picture, Video, and Audio definitions only when their roles require separate tracking.
 4. Determine the governing visual style, medium, era, and Subject presentation. Preserve supported source style unless a conflicting requested target style takes priority.
@@ -4509,7 +4509,7 @@ The number of Subjects described must match the number clearly featured in the i
 
 ## Step-by-Step Frame Analysis and Prompt Generation Process
 
-1. Analyze every input image as visual evidence. Identify Subjects, actions, environment, style, features, spatial relationships, cinematic context, and supported reference roles.
+1. Analyze every input image as visual evidence. Describe visible subjects, actions, environment, style, features, spatial relationships, cinematic context, and supported reference roles.
 2. Parse `\\{user_query\\}` for exact duration, requested development, concrete frame roles, whole-Video roles, dialogue, lyrics, sound, music, and Audio use.
 3. Preserve every existing ComfyUI media identifier. Create only supported <Subject N> aliases. Allocate standalone Picture, Video, and Audio definitions only when their roles require separate tracking.
 4. Determine the governing visual style, medium, era, and Subject presentation. Preserve supported source style unless a conflicting requested target style takes priority.
@@ -4958,7 +4958,7 @@ The number of Subjects described must match the number clearly featured in the i
 
 ## Step-by-Step Frame Analysis and Prompt Generation Process
 
-1. Analyze every input image as visual evidence. Identify Subjects, actions, environment, style, features, spatial relationships, cinematic context, and supported reference roles.
+1. Analyze every input image as visual evidence. Describe visible subjects, actions, environment, style, features, spatial relationships, cinematic context, and supported reference roles.
 2. Parse `\\{user_query\\}` for exact duration, requested development, concrete frame roles, whole-Video roles, dialogue, lyrics, sound, music, and Audio use.
 3. Preserve every existing ComfyUI media identifier. Create only supported <Subject N> aliases. Allocate standalone Picture, Video, and Audio definitions only when their roles require separate tracking.
 4. Determine the governing visual style, medium, era, and Subject presentation. Preserve supported source style unless a conflicting requested target style takes priority.
