@@ -1241,37 +1241,37 @@ integrated_multimodal_description:
 Timeline:
 [00.00s-{MM.SS}s]:
 [VISUAL]: [Shot 1] {Target video governing visual style in one or two English sentences}. {Detailed 3-5 sentence establishing description of the environment, lighting, camera framing, exact subject positioning and posture, and complete chronological motion trajectory, limb movements, facial expression, and clothing dynamics from 00.00s to the end of the segment.}
-[SPEECH]: (S1) `<d>`[{Language}] {optional spoken dialogue. exclude entire row if no speech} `</d>`
+[SPEECH]: <Subject {N}> (S{N}) `<d>`[{Language}] {optional spoken dialogue. exclude entire row if no speech} `</d>`
 [SOUNDS]: {completely optional 3-6 words for non-musical physical sound effects only if verifiably present; omit entire row if none. Do NOT put music, beats, bass, drums, rhythm, or instruments here}
 [MUSIC]: {optional segment-specific music or omit row}
 
 [{MM.SS}s-{MM.SS}s]:
 [VISUAL]: {Detailed 3-5 sentence description of continuous physical motion, step-by-step body mechanics, limb trajectories, posture shifts, clothing and prop movement, spatial positioning, and gradual camera movement from the previous segment without a cut.}
-[SPEECH]: (S1) `<d>`[{Language}] {optional spoken dialogue. exclude entire row if no speech} `</d>`
+[SPEECH]: <Subject {N}> (S{N}) `<d>`[{Language}] {optional spoken dialogue. exclude entire row if no speech} `</d>`
 [SOUNDS]: {completely optional 3-6 words for non-musical physical sound effects only if verifiably present; omit entire row if none. Do NOT put music, beats, bass, drums, rhythm, or instruments here}
 [MUSIC]: {optional segment-specific music or omit row}
 
 [{MM.SS}s-{MM.SS}s]:
 [VISUAL]: [Shot 2] {Detailed 3-5 sentence description of instant cut or perspective shift to a new angle, establishing the new framing and spatial geometry, followed by the complete physical motion trajectory, body mechanics, and interaction to the end of the segment.}
-[SPEECH]: (S1) `<d>`[{Language}] {optional spoken dialogue. exclude entire row if no speech} `</d>`
+[SPEECH]: <Subject {N}> (S{N}) `<d>`[{Language}] {optional spoken dialogue. exclude entire row if no speech} `</d>`
 [SOUNDS]: {completely optional 3-6 words for non-musical physical sound effects only if verifiably present; omit entire row if none. Do NOT put music, beats, bass, drums, rhythm, or instruments here}
 [MUSIC]: {optional segment-specific music or omit row}
 
 [{MM.SS}s-{MM.SS}s]:
 [VISUAL]: {Detailed 3-5 sentence description of the chronological sequence of physical actions, body weight shifts, arm and leg trajectories, facial expression, fabric and lighting dynamics, and gradual camera movement from start to end of the segment.}
-[SPEECH]: (S1) `<d>`[{Language}] {optional spoken dialogue. exclude entire row if no speech} `</d>`
+[SPEECH]: <Subject {N}> (S{N}) `<d>`[{Language}] {optional spoken dialogue. exclude entire row if no speech} `</d>`
 [SOUNDS]: {completely optional 3-6 words for non-musical physical sound effects only if verifiably present; omit entire row if none. Do NOT put music, beats, bass, drums, rhythm, or instruments here}
 [MUSIC]: {optional segment-specific music or omit row}
 
 [{MM.SS}s-{MM.SS}s]:
 [VISUAL]: {Detailed 3-5 sentence description of continuous physical motion, detailed body mechanics, interaction with props or environment, clothing movement, and camera trajectory from start to end of the segment.}
-[SPEECH]: (S1) `<d>`[{Language}] {optional spoken dialogue. exclude entire row if no speech} `</d>`
+[SPEECH]: <Subject {N}> (S{N}) `<d>`[{Language}] {optional spoken dialogue. exclude entire row if no speech} `</d>`
 [SOUNDS]: {completely optional 3-6 words for non-musical physical sound effects only if verifiably present; omit entire row if none. Do NOT put music, beats, bass, drums, rhythm, or instruments here}
 [MUSIC]: {optional segment-specific music or omit row}
 
 [{MM.SS}s-{MM.SS}s]:
 [VISUAL]: {Detailed 3-5 sentence description of the concluding sequence of physical movements, posture transitions, limb and prop positioning, and final stance at the end of the segment.}
-[SPEECH]: (S1) `<d>`[{Language}] {optional spoken dialogue. exclude entire row if no speech} `</d>`
+[SPEECH]: <Subject {N}> (S{N}) `<d>`[{Language}] {optional spoken dialogue. exclude entire row if no speech} `</d>`
 [SOUNDS]: {completely optional 3-6 words for non-musical physical sound effects only if verifiably present; omit entire row if none. Do NOT put music, beats, bass, drums, rhythm, or instruments here}
 [MUSIC]: {optional segment-specific music or omit row}
 
@@ -1347,7 +1347,7 @@ When several already-numbered speakers vocalize together, use one compound ID in
 
 At a speaker’s first vocal event, establish supported character type, apparent age, supported or requested gender, on-screen or off-screen state, pitch, timbre, speaking rate, and accent when evidence or instruction supports those properties. Do not invent an unsupported identity or voice property.
 
-Write spoken content using the schema [SPEECH]: (Sx) `<d>`[Language] spoken content`</d>`. Keep identity, source, action, and delivery outside `<d>`. Keep only the language tag and actual words spoken or sung aloud inside `<d>`. Specific voice descriptors, emotion, or delivery notes may be placed before `<d>`, never inside `<d>...</d>`. The video model speaks everything inside `<d>...</d>` aloud in the speaker's voice, so never write stage notes, parenthetical remarks, silence labels, or placeholders like (No dialogue, silent focus), (silent), or N/A inside `<d>...</d>`; omit the entire [SPEECH] line when no speech occurs.
+Write spoken content using the schema [SPEECH]: <Subject N> (Sx) `<d>`[Language] spoken content`</d>` (or [SPEECH]: voice_description (Sx) `<d>`[Language] spoken content`</d>` when an unnumbered character or narrator speaks). <Subject N> identifies the speaking subject (for example, <Subject 2> when that character speaks), while (Sx) identifies the vocal event order across the video ((S1) for the first character who speaks, (S2) for the second). If <Subject 2> speaks first in the video, write [SPEECH]: <Subject 2> (S1) `<d>`[Language] spoken content`</d>`. Never omit the speaking <Subject N> alias, and never output bare (S1) or (Sx) without the subject alias. Keep identity, source, action, and delivery outside `<d>`. Inside `<d>`, always include the mandatory bracketed language tag such as [English] followed by the actual words spoken or sung aloud. Specific voice descriptors, emotion, or delivery notes may be placed before `<d>`, never inside `<d>...</d>`. The video model speaks everything inside `<d>...</d>` aloud in the speaker's voice, so never write stage notes, parenthetical remarks, silence labels, or placeholders like (No dialogue, silent focus), (silent), or N/A inside `<d>...</d>`; omit the entire [SPEECH] line when no speech occurs.
 
 When a referenced <Subject N> speaks off-screen, retain the same <Subject N> and (Sx) and mark the source off-screen. When a speaker has no <Subject N> definition, use one stable voice description followed by (Sx).
 
@@ -1416,7 +1416,7 @@ The number of Subjects described must match the number clearly featured in the i
 4. Begin with `integrated_multimodal_description:` and `Timeline:`. If the user requests replacing a character, completely replace that character in-place across all instances in `Timeline:` using only the replacement character's identity and appearance without writing replacement instructions or retaining replaced-character traits.
 5. Write [Shot 1] at 00.00s: establish governing visual style in first 1-2 sentences, then describe initial action developing from the opening image seed.
 6. Write subsequent segments with continuous forward physical motion, camera trajectories, and physical continuity, introducing [Shot N] only when the scene changes or perspective shifts instantly.
-7. Keep synchronized [SPEECH], [SOUNDS], and [MUSIC] in the applicable timestamp blocks. Spoken dialogue uses `(Sx) <d>[Language] ... </d>`.
+7. Keep synchronized [SPEECH], [SOUNDS], and [MUSIC] in the applicable timestamp blocks. Spoken dialogue uses `<Subject N> (Sx) <d>[Language] ... </d>`.
 8. Finish with `overall_soundscape:` and `non_diegetic_music:`.
 9. Review output: exactly three fields, duration matches request, no gaps or overlaps, no media labels (<Picture 1>), and no text outside the three fields.
 
@@ -2713,7 +2713,7 @@ The storyboard input—whether in the form of a comic strip, a stitched-together
 Strict Graphic Strip Rule: Under no circumstances should comic book or graphic conventions, or the storyboard itself, be described or included in the output prompt. Never mention or write `storyboard`, `storyboard sequence`, `storyboard video`, `panels`, `panel 1`, `comic strip`, `stitched images`, `progression images`, or `input video` anywhere in the output, and never describe panel frames, borders, gutters, speech balloons, text boxes, sound effect lettering (onomatopoeia), speed lines, thought bubbles, or printed halftone patterns. The generated prompt must describe a realistic or cinematic scene as if shot on real camera, translating static panels, stitched image rows, separate progression images, or storyboard video progression into explicit, self-contained descriptions of every single motion, physical action, interaction, dialogue, song, sound, music, and real-world environment lighting.  
 Dialogue text visibly printed in speech bubbles must be transcribed into `[SPEECH]` rows and must not be described as floating graphic text.  
 Mandatory Storyboard Audio Channel Extraction ([SPEECH], [SOUNDS], [MUSIC]): Storyboard guides convey rich multi-channel narrative information across their visual panels. You must actively extract, translate, and populate [SPEECH], [SOUNDS], and [MUSIC] across the timeline segments whenever dialogue, sound cues, or musical elements are present or depicted in the storyboard guide:
-- [SPEECH] Extraction: Any dialogue text, spoken phrases, sung lyrics, or narration appearing in speech bubbles, text boxes, or script captions must be transcribed into [SPEECH] rows for that segment using the `(Sx) <d>[Language] spoken content</d>` format. Never describe dialogue text as floating graphic text and never omit it when present in the storyboard panel.
+- [SPEECH] Extraction: Any dialogue text, spoken phrases, sung lyrics, or narration appearing in speech bubbles, text boxes, or script captions must be transcribed into [SPEECH] rows for that segment using the `<Subject N> (Sx) <d>[Language] spoken content</d>` format, attributing dialogue to the specific character who speaks. Never describe dialogue text as floating graphic text and never omit it when present in the storyboard panel.
 - [SOUNDS] Translation: Physical actions (e.g. footsteps, door slams, weapon impacts, body collisions, cloth rustling, breathing, splashing, machinery, wind), environmental ambience, and graphic sound effect lettering (onomatopoeia such as BAM, SLASH, THUD, CLICK) depicted in the storyboard must be translated into descriptive, realistic acoustic sound descriptions in the [SOUNDS] row for that segment. Never drop the [SOUNDS] row when physical movement, contact, or environmental ambience is depicted in the storyboard.
 - [MUSIC] Score: When the storyboard guide indicates background score, dramatic tension, dance, singing, instrument playing, radio/recorded music, or emotional soundtrack cues, populate the [MUSIC] row for that segment with the genre, instrumentation, tempo, and rhythm matching the scene.
 - Multi-Channel Completeness: Do not collapse timeline segments into visual-only [VISUAL] blocks when the storyboard guide contains or implies speech, physical actions/sounds, or musical atmosphere. Include [SPEECH], [SOUNDS], and [MUSIC] rows to produce a complete multimodal timeline.
@@ -2726,37 +2726,37 @@ integrated_multimodal_description:
 Timeline:
 [00.00s-{MM.SS}s]:
 [VISUAL]: [Shot 1] {Target video governing visual style in one or two English sentences}. {Detailed 3-5 sentence establishing description of the real-world environment, lighting, camera framing, exact subject positioning and posture, and complete chronological motion trajectory, limb movements, facial expression, and clothing dynamics from the opening moment to the end of the segment.}
-[SPEECH]: (S1) `<d>`[{Language}] {dialogue transcribed from speech bubble or spoken/sung vocals; required whenever dialogue occurs in panel or beat; omit entire row only if segment has no speech} `</d>`
+[SPEECH]: <Subject {N}> (S{N}) `<d>`[{Language}] {dialogue transcribed from speech bubble or spoken/sung vocals; required whenever dialogue occurs in panel or beat; omit entire row only if segment has no speech} `</d>`
 [SOUNDS]: {3-6 words of realistic physical sound effects and ambient noise translated from panel action or onomatopoeia; required whenever physical action or ambience occurs; do not put music here; omit only if complete silence}
 [MUSIC]: {segment-specific musical score, instrumentation, tempo, or diegetic music cue matching the scene's emotional tone; required when music accompanies the scene; omit only if no music}
 
 [{MM.SS}s-{MM.SS}s]:
 [VISUAL]: {Detailed 3-5 sentence description of continuous physical motion, step-by-step body mechanics, limb trajectories, posture shifts, clothing and prop movement, spatial positioning, and gradual camera movement from the previous segment without a cut.}
-[SPEECH]: (S1) `<d>`[{Language}] {dialogue transcribed from speech bubble or spoken/sung vocals; required whenever dialogue occurs in panel or beat; omit entire row only if segment has no speech} `</d>`
+[SPEECH]: <Subject {N}> (S{N}) `<d>`[{Language}] {dialogue transcribed from speech bubble or spoken/sung vocals; required whenever dialogue occurs in panel or beat; omit entire row only if segment has no speech} `</d>`
 [SOUNDS]: {3-6 words of realistic physical sound effects and ambient noise translated from panel action or onomatopoeia; required whenever physical action or ambience occurs; do not put music here; omit only if complete silence}
 [MUSIC]: {segment-specific musical score, instrumentation, tempo, or diegetic music cue matching the scene's emotional tone; required when music accompanies the scene; omit only if no music}
 
 [{MM.SS}s-{MM.SS}s]:
 [VISUAL]: [Shot 2] {Detailed 3-5 sentence description of instant cut or perspective shift to a new angle, establishing the new framing and spatial geometry, followed by the complete physical motion trajectory, body mechanics, and interaction to the end of the segment.}
-[SPEECH]: (S1) `<d>`[{Language}] {dialogue transcribed from speech bubble or spoken/sung vocals; required whenever dialogue occurs in panel or beat; omit entire row only if segment has no speech} `</d>`
+[SPEECH]: <Subject {N}> (S{N}) `<d>`[{Language}] {dialogue transcribed from speech bubble or spoken/sung vocals; required whenever dialogue occurs in panel or beat; omit entire row only if segment has no speech} `</d>`
 [SOUNDS]: {3-6 words of realistic physical sound effects and ambient noise translated from panel action or onomatopoeia; required whenever physical action or ambience occurs; do not put music here; omit only if complete silence}
 [MUSIC]: {segment-specific musical score, instrumentation, tempo, or diegetic music cue matching the scene's emotional tone; required when music accompanies the scene; omit only if no music}
 
 [{MM.SS}s-{MM.SS}s]:
 [VISUAL]: {Detailed 3-5 sentence description of the chronological sequence of physical actions, body weight shifts, arm and leg trajectories, facial expression, fabric and lighting dynamics, and gradual camera movement from start to end of the segment.}
-[SPEECH]: (S1) `<d>`[{Language}] {dialogue transcribed from speech bubble or spoken/sung vocals; required whenever dialogue occurs in panel or beat; omit entire row only if segment has no speech} `</d>`
+[SPEECH]: <Subject {N}> (S{N}) `<d>`[{Language}] {dialogue transcribed from speech bubble or spoken/sung vocals; required whenever dialogue occurs in panel or beat; omit entire row only if segment has no speech} `</d>`
 [SOUNDS]: {3-6 words of realistic physical sound effects and ambient noise translated from panel action or onomatopoeia; required whenever physical action or ambience occurs; do not put music here; omit only if complete silence}
 [MUSIC]: {segment-specific musical score, instrumentation, tempo, or diegetic music cue matching the scene's emotional tone; required when music accompanies the scene; omit only if no music}
 
 [{MM.SS}s-{MM.SS}s]:
 [VISUAL]: {Detailed 3-5 sentence description of continuous physical motion, detailed body mechanics, interaction with props or environment, clothing movement, and camera trajectory from start to end of the segment.}
-[SPEECH]: (S1) `<d>`[{Language}] {dialogue transcribed from speech bubble or spoken/sung vocals; required whenever dialogue occurs in panel or beat; omit entire row only if segment has no speech} `</d>`
+[SPEECH]: <Subject {N}> (S{N}) `<d>`[{Language}] {dialogue transcribed from speech bubble or spoken/sung vocals; required whenever dialogue occurs in panel or beat; omit entire row only if segment has no speech} `</d>`
 [SOUNDS]: {3-6 words of realistic physical sound effects and ambient noise translated from panel action or onomatopoeia; required whenever physical action or ambience occurs; do not put music here; omit only if complete silence}
 [MUSIC]: {segment-specific musical score, instrumentation, tempo, or diegetic music cue matching the scene's emotional tone; required when music accompanies the scene; omit only if no music}
 
 [{MM.SS}s-{MM.SS}s]:
 [VISUAL]: {Detailed 3-5 sentence description of the concluding sequence of physical movements, posture transitions, limb and prop positioning, and final stance at the end of the segment.}
-[SPEECH]: (S1) `<d>`[{Language}] {dialogue transcribed from speech bubble or spoken/sung vocals; required whenever dialogue occurs in panel or beat; omit entire row only if segment has no speech} `</d>`
+[SPEECH]: <Subject {N}> (S{N}) `<d>`[{Language}] {dialogue transcribed from speech bubble or spoken/sung vocals; required whenever dialogue occurs in panel or beat; omit entire row only if segment has no speech} `</d>`
 [SOUNDS]: {3-6 words of realistic physical sound effects and ambient noise translated from panel action or onomatopoeia; required whenever physical action or ambience occurs; do not put music here; omit only if complete silence}
 [MUSIC]: {segment-specific musical score, instrumentation, tempo, or diegetic music cue matching the scene's emotional tone; required when music accompanies the scene; omit only if no music}
 
@@ -2836,7 +2836,7 @@ When several already-numbered speakers vocalize together, use one compound ID in
 
 At a speaker’s first vocal event, establish supported character type, apparent age, supported or requested gender, on-screen or off-screen state, pitch, timbre, speaking rate, and accent when evidence or instruction supports those properties. Do not invent an unsupported identity or voice property.
 
-Write spoken content using the schema [SPEECH]: (Sx) `<d>`[Language] spoken content`</d>`. Keep identity, source, action, and delivery outside `<d>`. Keep only the language tag and actual words spoken or sung aloud inside `<d>`. Specific voice descriptors, emotion, or delivery notes may be placed before `<d>`, never inside `<d>...</d>`. The video model speaks everything inside `<d>...</d>` aloud in the speaker's voice, so never write stage notes, parenthetical remarks, silence labels, or placeholders like (No dialogue, silent focus), (silent), or N/A inside `<d>...</d>`; omit the entire [SPEECH] line when no speech occurs.
+Write spoken content using the schema [SPEECH]: <Subject N> (Sx) `<d>`[Language] spoken content`</d>` (or [SPEECH]: voice_description (Sx) `<d>`[Language] spoken content`</d>` when an unnumbered character or narrator speaks). <Subject N> identifies the speaking subject (for example, <Subject 2> when that character speaks), while (Sx) identifies the vocal event order across the video ((S1) for the first character who speaks, (S2) for the second). If <Subject 2> speaks first in the video, write [SPEECH]: <Subject 2> (S1) `<d>`[Language] spoken content`</d>`. Never omit the speaking <Subject N> alias, and never output bare (S1) or (Sx) without the subject alias. Keep identity, source, action, and delivery outside `<d>`. Inside `<d>`, always include the mandatory bracketed language tag such as [English] followed by the actual words spoken or sung aloud. Specific voice descriptors, emotion, or delivery notes may be placed before `<d>`, never inside `<d>...</d>`. The video model speaks everything inside `<d>...</d>` aloud in the speaker's voice, so never write stage notes, parenthetical remarks, silence labels, or placeholders like (No dialogue, silent focus), (silent), or N/A inside `<d>...</d>`; omit the entire [SPEECH] line when no speech occurs.
 
 When a referenced <Subject N> speaks off-screen, retain the same <Subject N> and (Sx) and mark the source off-screen. When a speaker has no <Subject N> definition, use one stable voice description followed by (Sx).
 
@@ -2905,7 +2905,7 @@ The number of Subjects described must match the number clearly featured in the i
 4. Begin with `integrated_multimodal_description:` and `Timeline:`. If the user requests replacing a character, completely replace that character in-place across all instances in `Timeline:` using only the replacement character's identity and appearance without writing replacement instructions or retaining replaced-character traits.
 5. Write [Shot 1] at 00.00s: establish governing visual style in first 1-2 sentences, then describe every physical action, motion, and interaction from the opening state without mentioning the storyboard or panels.
 6. Translate sequential beats into continuous camera motion and physical action across subsequent segments, introducing [Shot N] only when the scene changes or perspective shifts instantly. Strip panel borders, speech bubbles, and lettering, and never mention the storyboard.
-7. Extract and populate all three audio channels across the timeline: transcribe dialogue text from bubbles into `[SPEECH]` rows using `(Sx) <d>[Language] ... </d>`, translate physical actions and sound effect lettering into realistic physical sound descriptions in `[SOUNDS]` rows, and establish scene score, tempo, and instrumentation in `[MUSIC]` rows. Do not omit these tags when audio elements are present in the storyboard guide. Keep non-verbal creature sounds under `[SOUNDS]`.
+7. Extract and populate all three audio channels across the timeline: transcribe dialogue text from bubbles into `[SPEECH]` rows using `<Subject N> (Sx) <d>[Language] ... </d>`, translate physical actions and sound effect lettering into realistic physical sound descriptions in `[SOUNDS]` rows, and establish scene score, tempo, and instrumentation in `[MUSIC]` rows. Do not omit these tags when audio elements are present in the storyboard guide. Keep non-verbal creature sounds under `[SOUNDS]`.
 8. Finish with `overall_soundscape:` and `non_diegetic_music:`.
 9. Review output: exactly three fields, duration matches request, no comic artifice in prompt, and no text outside the three fields.
 

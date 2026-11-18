@@ -1659,3 +1659,12 @@ def test_minimax_h3_audio_definition_vs_retention_and_multi_subject_attr_transfe
         assert "maps additional <Picture N> inputs to separate <Subject N> entities" in vlm_presets.system_query_additional_vlm[f"{query_key}_prefix"]
         assert "distinct spatial or choreographic role from <Video 1>" in vlm_presets.system_query_additional_vlm[f"{query_key}_suffix"]
         assert "distinct spatial or choreographic role from <Video 1>" in vlm_presets.system_query_raw_vlm[query_key]
+
+    for key in ("video_timeline_minimax_h3_scene_image_t2va_system_instruction", "video_timeline_minimax_h3_storyboard_t2va_system_instruction"):
+        for module in (vlm_presets, vlm_motion_presets):
+            collection = module.system_instructions_vlm if hasattr(module, "system_instructions_vlm") else module.motion_system_instructions_vlm
+            inst = collection[key]
+            assert "[SPEECH]: <Subject {N}> (S{N})" in inst, key
+            assert "[SPEECH]: (S1)" not in inst, key
+            assert "schema [SPEECH]: <Subject N> (Sx) `<d>`[Language]" in inst, key
+            assert "Never omit the speaking <Subject N> alias" in inst, key
