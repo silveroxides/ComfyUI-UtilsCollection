@@ -254,6 +254,8 @@ def generate_qwen3vl_video(clip, full_prompt, images, video_frames, fusion_confi
 def _strip_thinking_and_fences(text: str) -> str:
     cleaned = str(text or "")
     cleaned = re.sub(r"<think>[\s\S]*?</think>", "", cleaned, flags=re.IGNORECASE).strip()
+    if "</think>" in cleaned.lower():
+        cleaned = re.split(r"</think>", cleaned, maxsplit=1, flags=re.IGNORECASE)[1].strip()
     if "<think>" in cleaned.lower() and "</think>" not in cleaned.lower():
         cleaned = re.split(r"<think>", cleaned, flags=re.IGNORECASE)[0].strip()
     fence = re.search(r"```(?:json)?\s*([\s\S]*?)```", cleaned, flags=re.IGNORECASE)
@@ -482,8 +484,39 @@ def conform_and_validate_response_schema(text: str, response_schema: dict[str, A
     return serialized, valid
 
 
+def _resolve_eos_token_id(clip: Any, transformer: Any) -> int:
+    cfg = getattr(getattr(transformer, "model", None), "config", None)
+    stop_tokens = getattr(cfg, "stop_tokens", None)
+    if isinstance(stop_tokens, (list, tuple)):
+        int_stops = [int(tok) for tok in stop_tokens if isinstance(tok, int)]
+        if int_stops:
+            return int_stops[-1]
+
+    stage_tok = getattr(clip, "tokenizer", None)
+    inner_name = getattr(stage_tok, "clip", None) if stage_tok is not None else None
+    inner_tok = getattr(stage_tok, inner_name, None) if isinstance(inner_name, str) else None
+    for candidate in (inner_tok, stage_tok):
+        if candidate is None:
+            continue
+        hf_tok = getattr(candidate, "tokenizer", None)
+        if hf_tok is not None:
+            vocab = hf_tok.get_vocab() if callable(getattr(hf_tok, "get_vocab", None)) else None
+            if isinstance(vocab, dict):
+                for tok_text in ("<|im_end|>", "<|eot_id|>", "<end_of_turn>", "<|endoftext|>"):
+                    tok_val = vocab.get(tok_text)
+                    if isinstance(tok_val, int):
+                        return tok_val
+            eos_id = getattr(hf_tok, "eos_token_id", None)
+            if isinstance(eos_id, int):
+                return eos_id
+        end_tok = getattr(candidate, "end_token", None)
+        if isinstance(end_tok, int):
+            return end_tok
+    return 151645
+
+
 @contextmanager
-def schema_guided_generation_context(clip: Any, response_schema: dict[str, Any] | None, prefilled_open: str = ""):
+def schema_guided_generation_context(clip: Any, response_schema: dict[str, Any] | None, prefilled_open: str = "", thinking_prefilled: bool = False, mtp: Any = False):
     if not isinstance(response_schema, dict) or not response_schema:
         yield
         return
@@ -495,16 +528,14 @@ def schema_guided_generation_context(clip: Any, response_schema: dict[str, Any] 
         yield
         return
 
-    eos_token_id = 151645
-    stage_tok = getattr(clip, "tokenizer", None)
-    inner_name = getattr(stage_tok, "clip", None) if stage_tok is not None else None
-    inner_tok = getattr(stage_tok, inner_name, None) if isinstance(inner_name, str) else None
-    for candidate in (inner_tok, stage_tok):
-        if candidate is not None and hasattr(candidate, "end_token"):
-            end_tok = getattr(candidate, "end_token", None)
-            if isinstance(end_tok, int):
-                eos_token_id = end_tok
-                break
+    # Qwen3.5 speculative MTP drafts tokens without calling sample_token on accepted draft rows
+    # or when sampling is off, so per-token brace tracking via sample_token cannot mirror ids.
+    mtp_active = mtp not in (False, None, "off", 0) and getattr(transformer, "mtp", None) is not None
+    if mtp_active:
+        yield
+        return
+
+    eos_token_id = _resolve_eos_token_id(clip, transformer)
 
     history_ids: list[int] = []
     finished = False
@@ -544,13 +575,17 @@ def schema_guided_generation_context(clip: Any, response_schema: dict[str, Any] 
     def guided_sample_token(logits, *args, **kwargs):
         nonlocal finished
         if finished:
-            return torch.tensor([[eos_token_id]], dtype=torch.long, device=logits.device)
+            batch = int(logits.shape[0]) if getattr(logits, "ndim", 0) >= 2 else 1
+            return torch.full((batch, 1), eos_token_id, dtype=torch.long, device=logits.device)
         next_tok = orig_sample_token(logits, *args, **kwargs)
         tok_id = int(next_tok.reshape(-1)[0].item())
         history_ids.append(tok_id)
         try:
             decoded = prefilled_open + clip.decode(history_ids, skip_special_tokens=True)
-            if "</think>" in decoded or "<think>" not in decoded:
+            if "</think>" in decoded:
+                if _is_json_complete(decoded.partition("</think>")[2]):
+                    finished = True
+            elif not thinking_prefilled and "<think>" not in decoded:
                 if _is_json_complete(decoded):
                     finished = True
         except Exception:

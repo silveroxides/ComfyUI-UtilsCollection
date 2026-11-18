@@ -585,7 +585,7 @@ class UC_TextGenerate(io.ComfyNode):
                 used_seed = (int(resolved_seed) + attempt) & 0xFFFFFFFFFFFFFFFF
                 generation_args["seed"] = used_seed
 
-            with schema_guided_generation_context(clip, response_schema if schema_active else None, prefilled_open=prefill_open):
+            with schema_guided_generation_context(clip, response_schema if schema_active else None, prefilled_open=prefill_open, thinking_prefilled=(thinking and template_name == "qwen35"), mtp=mtp_val):
                 if video_frames is not None:
                     generated_ids = generate_qwen3vl_video(clip, full_prompt, images_vl, video_frames, visual_fusion_config if fusion_active else None, generation_args, thinking)
                 elif fusion_active:
@@ -603,6 +603,8 @@ class UC_TextGenerate(io.ComfyNode):
             thinking_text = reasoning.replace("<think>", "", 1).strip()
             generated_text = answer.strip()
             if schema_active:
+                if not generated_text and thinking_text:
+                    logging.warning("[UC_TextGenerate] Thinking exhausted max_length (%d) before closing </think>; response_schema output has no answer body.", max_length)
                 generated_text, schema_valid = conform_and_validate_response_schema(generated_text, response_schema)
                 if schema_valid and generated_text.strip():
                     break
@@ -719,7 +721,7 @@ class UC_TextGenerateQwen35SystemPrompt(io.ComfyNode):
         repetition_penalty = sampling_mode.get("repetition_penalty", 1.0)
         presence_penalty = sampling_mode.get("presence_penalty", 0.0)
 
-        with schema_guided_generation_context(clip, response_schema if schema_active else None, prefilled_open=prefill_open):
+        with schema_guided_generation_context(clip, response_schema if schema_active else None, prefilled_open=prefill_open, mtp=mtp_val):
             generated_ids = clip.generate(tokens, do_sample=do_sample, max_length=max_length, temperature=temperature, top_k=top_k, top_p=top_p, min_p=min_p, repetition_penalty=repetition_penalty, presence_penalty=presence_penalty, seed=seed, mtp=mtp_val)
 
         generated_text = prefill_open + clip.decode(generated_ids, skip_special_tokens=True)

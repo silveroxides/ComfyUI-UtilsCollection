@@ -717,6 +717,56 @@ def test_text_generate_response_schema_conformance_and_node_execution():
     assert out_obj["items"][0]["bbox"] == [100, 200, 300, 400]
 
 
+def test_schema_guided_context_skips_mtp_preserves_batch_shape_resolves_stop_tokens_and_guards_prefilled_thinking():
+    schema = {"type": "object", "properties": {"a": {"type": "integer"}}, "required": ["a"]}
+
+    def make_clip(mtp_obj=None, stop_tokens=None):
+
+        def orig_sample(logits, *args, **kwargs):
+            return torch.full((logits.shape[0], 1), 10, dtype=torch.long)
+
+        cfg = types.SimpleNamespace(stop_tokens=stop_tokens) if stop_tokens is not None else None
+        transformer = types.SimpleNamespace(sample_token=orig_sample, mtp=mtp_obj, model=types.SimpleNamespace(config=cfg))
+        inner_model = types.SimpleNamespace(process_tokens=lambda *a, **k: None, transformer=transformer)
+        stage = types.SimpleNamespace(clip="qwen35_9b", qwen35_9b=inner_model)
+        tok_map = {10: '{"a":', 11: "1}", 12: '{"draft":1}', 13: "</think>", 14: "{", 15: '"a":2}'}
+        clip = types.SimpleNamespace(cond_stage_model=stage, tokenizer=types.SimpleNamespace(clip="qwen35_9b", qwen35_9b=types.SimpleNamespace(end_token=None)), decode=lambda ids, **kwargs: "".join(tok_map.get(int(i), "") for i in ids))
+        return clip, transformer, orig_sample
+
+    # Active MTP skips wrapping sample_token so _generate_mtp never sees desynced row-0 tracking
+    mtp_clip, mtp_tr, mtp_orig = make_clip(mtp_obj=object(), stop_tokens=[248044, 248046])
+    with textgen_helpers.schema_guided_generation_context(mtp_clip, schema, prefilled_open="{", mtp=True):
+        assert mtp_tr.sample_token is mtp_orig
+
+    # Non-MTP wraps sample_token, resolves Qwen3.5 stop_tokens (248046), and preserves (batch, 1) shape on finished
+    seq_iter = iter([10, 11])
+    seq_clip, seq_tr, seq_orig = make_clip(mtp_obj=None, stop_tokens=[248044, 248046])
+    seq_tr.sample_token = lambda logits, *a, **kw: torch.full((logits.shape[0], 1), next(seq_iter), dtype=torch.long)
+    seq_wrapped_orig = seq_tr.sample_token
+    with textgen_helpers.schema_guided_generation_context(seq_clip, schema, prefilled_open="", mtp=False):
+        assert seq_tr.sample_token is not seq_wrapped_orig
+        first = seq_tr.sample_token(torch.zeros((1, 8)))
+        second = seq_tr.sample_token(torch.zeros((1, 8)))
+        eos_batch = seq_tr.sample_token(torch.zeros((8, 8)))
+        assert first.tolist() == [[10]]
+        assert second.tolist() == [[11]]
+        assert eos_batch.shape == (8, 1)
+        assert torch.all(eos_batch == 248046)
+
+    # Prefilled <think>\n must not trigger early stop on {...} inside thinking before </think>
+    think_iter = iter([12, 13, 14, 15])
+    think_clip, think_tr, _ = make_clip(mtp_obj=None, stop_tokens=[248044, 248046])
+    think_tr.sample_token = lambda logits, *a, **kw: torch.full((logits.shape[0], 1), next(think_iter), dtype=torch.long)
+    with textgen_helpers.schema_guided_generation_context(think_clip, schema, prefilled_open="", thinking_prefilled=True, mtp=False):
+        assert think_tr.sample_token(torch.zeros((1, 8))).item() == 12  # {"draft":1} inside <think>
+        assert think_tr.sample_token(torch.zeros((1, 8))).item() == 13  # </think>
+        assert think_tr.sample_token(torch.zeros((1, 8))).item() == 14  # {
+        assert think_tr.sample_token(torch.zeros((1, 8))).item() == 15  # "a":2}
+        assert think_tr.sample_token(torch.zeros((1, 8))).item() == 248046
+
+    assert textgen_helpers._strip_thinking_and_fences('reasoning {"x":1}</think>\n{"a":1}') == '{"a":1}'
+
+
 def test_text_generate_supports_gemma4_media_thinking_and_tree_mtp():
     clip = _GenerateClip("gemma4")
     clip.decode = lambda *args, **kwargs: "<think>\nStep one.\n</think>\nFinal answer"
