@@ -1635,3 +1635,27 @@ def test_minimax_h3_dialogue_tag_forbids_placeholders_and_stage_notes():
             assert "(No dialogue, silent focus)" in value, key
             assert "spoken or sung aloud" in value.lower() or "literally spoken aloud" in value.lower(), key
             assert "} /d>" not in value, key
+
+
+def test_minimax_h3_audio_definition_vs_retention_and_multi_subject_attr_transfer():
+    for module in (vlm_presets, vlm_motion_presets):
+        collection = module.system_instructions_vlm if hasattr(module, "system_instructions_vlm") else module.motion_system_instructions_vlm
+        for key in ("video_timeline_minimax_h3_scene_image_any2va_system_instruction", "video_timeline_minimax_h3_storyboard_any2va_system_instruction", "video_timeline_minimax_h3_ref2va_attr_transfer_audio_timbre"):
+            instruction = collection[key]
+            assert "for <Subject {N}> (S{N}) without audio signal copying." not in instruction, key
+            assert "for <Subject {N}> (S1) without audio signal copying." not in instruction, key
+            assert "for <Subject 1> (S1) without audio signal copying." not in instruction, key
+            assert "<Audio 1>: reference - vocal timbre and delivery guide speech" in instruction, key
+
+        for key in ("video_timeline_minimax_h3_ref2va_attr_transfer_audio_copy", "video_timeline_minimax_h3_ref2va_attr_transfer_audio_timbre", "video_timeline_minimax_h3_ref2va_attr_transfer_no_audio", "video_timeline_minimax_h3_ref2va_attribute_transfer"):
+            instruction = collection[key]
+            assert "unles " not in instruction, key
+            assert "short single sentence description" not in instruction, key
+            assert "completely optional 3-6 words for the sounds only if sounds effects are in video" not in instruction, key
+            if "attribute_transfer" not in key:
+                assert "bind each <Subject {N}> to its distinct spatial or choreographic role from <Video 1>" in instruction, key
+
+    for query_key in ("h3_ref2va_attr_transfer_audio_timbre", "h3_ref2va_attr_transfer_audio_copy", "h3_ref2va_attr_transfer_no_audio"):
+        assert "maps additional <Picture N> inputs to separate <Subject N> entities" in vlm_presets.system_query_additional_vlm[f"{query_key}_prefix"]
+        assert "distinct spatial or choreographic role from <Video 1>" in vlm_presets.system_query_additional_vlm[f"{query_key}_suffix"]
+        assert "distinct spatial or choreographic role from <Video 1>" in vlm_presets.system_query_raw_vlm[query_key]

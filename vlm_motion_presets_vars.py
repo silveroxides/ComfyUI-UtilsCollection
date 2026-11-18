@@ -438,37 +438,37 @@ Timeline:
 [00.00s-{MM.SS}s]:
 [VISUAL]: [Shot 1] {Composition Shot}. <Subject {N}> {establishing shot beginning directly from <Picture 1>.}
 [SPEECH]: <Subject {N}> (S{N}) `<d>`[{Language}] {optional spoken dialogue} `</d>`
-[SOUNDS]: {completely optional 3-6 words for the sounds only if sounds effects are in video. Do NOT put music or instruments here}
+[SOUNDS]: {optional concrete physical or ambient sound unique to this interval; omit entire [SOUNDS] line if none. Never put music or instruments here}
 [MUSIC]: {optional segment-specific music or omit row}
 
 [{MM.SS}s-{MM.SS}s]:
 [VISUAL]: <Subject {N}> {continuous physical action and gradual camera movement from previous segment without cut.}
 [SPEECH]: <Subject {N}> (S{N}) `<d>`[{Language}] {optional spoken dialogue} `</d>`
-[SOUNDS]: {completely optional 3-6 words for the sounds only if sounds effects are in video. Do NOT put music or instruments here}
+[SOUNDS]: {optional concrete physical or ambient sound unique to this interval; omit entire [SOUNDS] line if none. Never put music or instruments here}
 [MUSIC]: {optional segment-specific music or omit row}
 
 [{MM.SS}s-{MM.SS}s]:
 [VISUAL]: [Shot 2] <Subject {N}> {instant cut or perspective shift to new angle, then motion to end of segment.}
 [SPEECH]: <Subject {N}> (S{N}) `<d>`[{Language}] {optional spoken dialogue} `</d>`
-[SOUNDS]: {completely optional 3-6 words for the sounds only if sounds effects are in video. Do NOT put music or instruments here}
+[SOUNDS]: {optional concrete physical or ambient sound unique to this interval; omit entire [SOUNDS] line if none. Never put music or instruments here}
 [MUSIC]: {optional segment-specific music or omit row}
 
 [{MM.SS}s-{MM.SS}s]:
-[VISUAL]: <Subject {N}> {short single sentence description of motion and gradual camera shift from start to end of segment.}
+[VISUAL]: <Subject {N}> {3-5 concrete sentences describing full limb trajectories, clothing/hair response, and continuous camera shift from start to end of segment.}
 [SPEECH]: <Subject {N}> (S{N}) `<d>`[{Language}] {optional spoken dialogue} `</d>`
-[SOUNDS]: {completely optional 3-6 words for the sounds only if sounds effects are in video. Do NOT put music or instruments here}
+[SOUNDS]: {optional concrete physical or ambient sound unique to this interval; omit entire [SOUNDS] line if none. Never put music or instruments here}
 [MUSIC]: {optional segment-specific music or omit row}
 
 [{MM.SS}s-{MM.SS}s]:
-[VISUAL]: <Subject {N}> {short single sentence description of motion start to end of segment with continuous camera movement.}
+[VISUAL]: <Subject {N}> {3-5 concrete sentences describing full limb trajectories, clothing/hair response, and continuous camera movement from start to end of segment.}
 [SPEECH]: <Subject {N}> (S{N}) `<d>`[{Language}] {optional spoken dialogue} `</d>`
-[SOUNDS]: {completely optional 3-6 words for the sounds only if sounds effects are in video. Do NOT put music or instruments here}
+[SOUNDS]: {optional concrete physical or ambient sound unique to this interval; omit entire [SOUNDS] line if none. Never put music or instruments here}
 [MUSIC]: {optional segment-specific music or omit row}
 
 [{MM.SS}s-{MM.SS}s]:
 [VISUAL]: <Subject {N}> {final segment motion progressively converging on the exact composition and pose of <Picture 2>.}
 [SPEECH]: <Subject {N}> (S{N}) `<d>`[{Language}] {optional spoken dialogue} `</d>`
-[SOUNDS]: {completely optional 3-6 words for the sounds only if sounds effects are in video. Do NOT put music or instruments here}
+[SOUNDS]: {optional concrete physical or ambient sound unique to this interval; omit entire [SOUNDS] line if none. Never put music or instruments here}
 [MUSIC]: {optional segment-specific music or omit row}
 
 overall_soundscape:
@@ -885,7 +885,7 @@ Variant B — Vocal Timbre / Voice Reference Intent (when the user instruction i
 
 subject_definitions:
 <Subject {N}> is a {exhaustive head-to-toe visual description of the subject that will be used in the video}.
-<Audio 1> is the vocal-timbre reference providing pitch, tone, and delivery style for <Subject {N}> (S{N}) without audio signal copying.
+<Audio 1> is the vocal-timbre reference providing pitch, tone, and delivery style for <Subject {N}> (S{N}).
 
 summary:
 [reference generation + audio reference] The target video features <Subject {N}> {thorough multi-sentence overview of all concrete physical actions, motion progression, interactions, setting, and governing visual style}.
@@ -1546,7 +1546,7 @@ one to three English sentences or N/A
 
 Use the following template as guideline for constructing proper prompt and timeline and everything within curly brace `{}` contains elements to replace and `N` in `{N}` is replaced by corresponding number.  
 Number of timestamp segments in the Timeline must be adjusted for accurate syncronization to movement, actions and/or dialogue.  
-Original subjects from <Video 1> designated for replacement must NEVER be defined under `subject_definitions:`, nor described in summary or detailed description. <Subject {N}> represents target subjects in the video (including replacement subjects defined from matching <Picture {N}> and any non-replaced target subjects). Every other non-replaced subject present in <Video 1> must be defined as its own <Subject {N}> under `subject_definitions:` using its visible traits from <Video 1>. No visual traits of replaced video subjects may appear in summary or detailed description. All defined <Subject {N}> entities are present throughout from 00.00s to the final frame with zero reversion.  
+Original subjects from <Video 1> designated for replacement must NEVER be defined under `subject_definitions:`, nor described in summary or detailed description. <Subject {N}> represents target subjects in the video (including replacement subjects defined from matching <Picture {N}> and any non-replaced target subjects). Every other non-replaced subject present in <Video 1> must be defined as its own <Subject {N}> under `subject_definitions:` using its visible traits from <Video 1>. No visual traits of replaced video subjects may appear in summary or detailed description. All defined <Subject {N}> entities are present throughout from 00.00s to the final frame with zero reversion. When two or more <Picture {N}> inputs replace separate subjects in <Video 1>, bind each <Subject {N}> to its distinct spatial or choreographic role from <Video 1> (for example, foreground lead vs rear partner) in both `subject_definitions:` and `retention_analysis:` without naming superseded appearance traits from <Video 1>. Never divide the Timeline into equal fixed slices, never use vague `a person` labels without apparent gender and full outfit, never write `both`, and describe each <Subject {N}> in full head-to-toe detail on its first [VISUAL] appearance.  
 Do NOT include lyrics or dialogue as [SPEECH] unless an active <Subject {N}> is speaking. When other subjects in <Video 1> have dialogue, attribute their `[SPEECH]` lines to their own <Subject {N}> (S{N}) tag and never set their dialogue to be spoken by the reference-replaced subject.  
 Do NOT invent sounds. [SOUNDS] is not for music or instruments.  
 The number of segments presented in template is not an absolute maximum limit or absolute minimum limit. Number of segments depends scenes and actions in video.  
@@ -1555,13 +1555,13 @@ Template:
 
 subject_definitions:
 <Subject {N}> is a {visual description of the subject that will be used in the video}, referenced from <Picture {N}>.
-<Video 1> is the source video providing {list of visual elements} to be transferred onto defined <Subject {N}> entities.
+<Video 1> is the source video supplying {camera movement, choreography, timing, and scene progression} for the target edit.
 
 summary:
 [video editing + reference generation] The target video is an edited version of <Video 1> where on-screen subject(s) are replaced by defined <Subject {N}> entities from <Picture {N}> using full visual and motion transfer while maintaining complete {list of visual elements}.
 
 retention_analysis:
-<Subject {N}>: attribute_transfer - full visual identity, appearance, and styling transferred onto the {motion definition} of <Video 1>
+<Subject {N}>: attribute_transfer - full visual identity, appearance, and styling transferred onto the {distinct spatial or choreographic motion role, e.g. foreground lead vs partner motion} of <Video 1>
 <Video 1>: partially_preserved - retains full {list of visual elements} with source subjects replaced by defined <Subject {N}> entities
 
 detailed_description:
@@ -1569,32 +1569,32 @@ Timeline:
 [00.00s-{MM.SS}s]:
 [VISUAL]: [Shot 1] {Composition Shot}. <Subject {N}> {establishing shot and description of initial motion start to end of segment.}
 [SPEECH]: <Subject {N}> (S{N}) `<d>`[{Language}] {optional spoken dialogue. exclude entire row if no speech} `</d>`
-[SOUNDS]: {completely optional 3-6 words for the sounds only if sounds effects are in video. Do NOT put music or instruments here}
+[SOUNDS]: {optional concrete physical or ambient sound unique to this interval; omit entire [SOUNDS] line if none. Never put music or instruments here}
 
 [{MM.SS}s-{MM.SS}s]:
 [VISUAL]: <Subject {N}> {continuous physical action and gradual camera movement from previous segment without cut.}
 [SPEECH]: <Subject {N}> (S{N}) `<d>`[{Language}] {optional spoken dialogue. exclude entire row if no speech} `</d>`
-[SOUNDS]: {completely optional 3-6 words for the sounds only if sounds effects are in video. Do NOT put music or instruments here}
+[SOUNDS]: {optional concrete physical or ambient sound unique to this interval; omit entire [SOUNDS] line if none. Never put music or instruments here}
 
 [{MM.SS}s-{MM.SS}s]:
 [VISUAL]: [Shot 2] <Subject {N}> {instant cut or perspective shift to new angle, then motion to end of segment.}
 [SPEECH]: <Subject {N}> (S{N}) `<d>`[{Language}] {optional spoken dialogue. exclude entire row if no speech} `</d>`
-[SOUNDS]: {completely optional 3-6 words for the sounds only if sounds effects are in video. Do NOT put music or instruments here}
+[SOUNDS]: {optional concrete physical or ambient sound unique to this interval; omit entire [SOUNDS] line if none. Never put music or instruments here}
 
 [{MM.SS}s-{MM.SS}s]:
-[VISUAL]: <Subject {N}> {short single sentence description of motion and gradual camera shift from start to end of segment.}
+[VISUAL]: <Subject {N}> {3-5 concrete sentences describing full limb trajectories, clothing/hair response, and continuous camera shift from start to end of segment.}
 [SPEECH]: <Subject {N}> (S{N}) `<d>`[{Language}] {optional spoken dialogue. exclude entire row if no speech} `</d>`
-[SOUNDS]: {completely optional 3-6 words for the sounds only if sounds effects are in video. Do NOT put music or instruments here}
+[SOUNDS]: {optional concrete physical or ambient sound unique to this interval; omit entire [SOUNDS] line if none. Never put music or instruments here}
 
 [{MM.SS}s-{MM.SS}s]:
-[VISUAL]: <Subject {N}> {short single sentence description of motion start to end of segment with continuous camera movement.}
+[VISUAL]: <Subject {N}> {3-5 concrete sentences describing full limb trajectories, clothing/hair response, and continuous camera movement from start to end of segment.}
 [SPEECH]: <Subject {N}> (S{N}) `<d>`[{Language}] {optional spoken dialogue. exclude entire row if no speech} `</d>`
-[SOUNDS]: {completely optional 3-6 words for the sounds only if sounds effects are in video. Do NOT put music or instruments here}
+[SOUNDS]: {optional concrete physical or ambient sound unique to this interval; omit entire [SOUNDS] line if none. Never put music or instruments here}
 
 [{MM.SS}s-{MM.SS}s]:
-[VISUAL]: <Subject {N}> {short single sentence description of motion start to end of segment.}
+[VISUAL]: <Subject {N}> {3-5 concrete sentences describing full limb trajectories, clothing/hair response, and camera framing from start to end of segment.}
 [SPEECH]: <Subject {N}> (S{N}) `<d>`[{Language}] {optional spoken dialogue. exclude entire row if no speech} `</d>`
-[SOUNDS]: {completely optional 3-6 words for the sounds only if sounds effects are in video. Do NOT put music or instruments here}
+[SOUNDS]: {optional concrete physical or ambient sound unique to this interval; omit entire [SOUNDS] line if none. Never put music or instruments here}
 
 overall_soundscape:
 {Summarize ambient sound and physical action sounds across the complete duration.}
@@ -1904,7 +1904,7 @@ one to three English sentences or N/A
 
 Use the following template as guideline for constructing proper prompt and timeline and everything within curly brace `{}` contains elements to replace and `N` in `{N}` is replaced by corresponding number.  
 Number of timestamp segments in the Timeline must be adjusted for accurate syncronization to movement, actions and/or dialogue.  
-Original subjects from <Video 1> designated for replacement must NEVER be defined under `subject_definitions:`, nor described in summary or detailed description. <Subject {N}> represents target subjects in the video (including replacement subjects defined from matching <Picture {N}> and any non-replaced target subjects). Every other non-replaced subject present in <Video 1> must be defined as its own <Subject {N}> under `subject_definitions:` using its visible traits from <Video 1>. No visual traits of replaced video subjects may appear in summary or detailed description. All defined <Subject {N}> entities are present throughout from 00.00s to the final frame with zero reversion.  
+Original subjects from <Video 1> designated for replacement must NEVER be defined under `subject_definitions:`, nor described in summary or detailed description. <Subject {N}> represents target subjects in the video (including replacement subjects defined from matching <Picture {N}> and any non-replaced target subjects). Every other non-replaced subject present in <Video 1> must be defined as its own <Subject {N}> under `subject_definitions:` using its visible traits from <Video 1>. No visual traits of replaced video subjects may appear in summary or detailed description. All defined <Subject {N}> entities are present throughout from 00.00s to the final frame with zero reversion. When two or more <Picture {N}> inputs replace separate subjects in <Video 1>, bind each <Subject {N}> to its distinct spatial or choreographic role from <Video 1> (for example, foreground lead vs rear partner) in both `subject_definitions:` and `retention_analysis:` without naming superseded appearance traits from <Video 1>. Never divide the Timeline into equal fixed slices, never use vague `a person` labels without apparent gender and full outfit, never write `both`, and describe each <Subject {N}> in full head-to-toe detail on its first [VISUAL] appearance.  
 Do NOT include lyrics or dialogue as [SPEECH] unless an active <Subject {N}> is speaking. When other subjects in <Video 1> have dialogue, attribute their `[SPEECH]` lines to their own <Subject {N}> (S{N}) tag and never set their dialogue to be spoken by the reference-replaced subject.  
 Do NOT invent sounds. [SOUNDS] is not for music or instruments.  
 The number of segments presented in template is not an absolute maximum limit or absolute minimum limit. Number of segments depends scenes and actions in video.  
@@ -1913,14 +1913,14 @@ Template:
 
 subject_definitions:
 <Subject {N}> is a {visual description of the subject that will be used in the video}, referenced from <Picture {N}>.
-<Video 1> is the source video providing {list of visual elements} to be transferred onto defined <Subject {N}> entities.
-<Audio 1> is the vocal-timbre reference providing pitch, tone, and delivery style for <Subject {N}> (S1) without audio signal copying.
+<Video 1> is the source video supplying {camera movement, choreography, timing, and scene progression} for the target edit.
+<Audio 1> is the vocal-timbre reference providing pitch, tone, and delivery style for <Subject {N}> (S1).
 
 summary:
 [video editing + reference generation + audio reference] The target video is an edited version of <Video 1> where on-screen subject(s) are replaced by defined <Subject {N}> entities from <Picture {N}> using full visual and motion transfer while maintaining complete {list of visual elements}, referencing vocal timbre from <Audio 1>.
 
 retention_analysis:
-<Subject {N}>: attribute_transfer - full visual identity, appearance, and styling transferred onto the {motion definition} of <Video 1>
+<Subject {N}>: attribute_transfer - full visual identity, appearance, and styling transferred onto the {distinct spatial or choreographic motion role, e.g. foreground lead vs partner motion} of <Video 1>
 <Video 1>: partially_preserved - retains full {list of visual elements} with source subjects replaced by defined <Subject {N}> entities
 <Audio 1>: reference - vocal timbre and delivery guide speech of <Subject {N}> (S1) without copying audio signal
 
@@ -1929,37 +1929,37 @@ Timeline:
 [00.00s-{MM.SS}s]:
 [VISUAL]: [Shot 1] {Composition Shot}. <Subject {N}> {establishing shot and description of initial motion start to end of segment.}
 [SPEECH]: <Subject {N}> (S{N}) `<d>`[{Language}] {optional spoken dialogue. exclude entire row if no speech} `</d>`
-[SOUNDS]: {completely optional 3-6 words for the sounds only if sounds effects are in video. Do NOT put music or instruments here}
+[SOUNDS]: {optional concrete physical or ambient sound unique to this interval; omit entire [SOUNDS] line if none. Never put music or instruments here}
 [MUSIC]: {optional segment-specific music or omit row}
 
 [{MM.SS}s-{MM.SS}s]:
 [VISUAL]: <Subject {N}> {continuous physical action and gradual camera movement from previous segment without cut.}
 [SPEECH]: <Subject {N}> (S{N}) `<d>`[{Language}] {optional spoken dialogue. exclude entire row if no speech} `</d>`
-[SOUNDS]: {completely optional 3-6 words for the sounds only if sounds effects are in video. Do NOT put music or instruments here}
+[SOUNDS]: {optional concrete physical or ambient sound unique to this interval; omit entire [SOUNDS] line if none. Never put music or instruments here}
 [MUSIC]: {optional segment-specific music or omit row}
 
 [{MM.SS}s-{MM.SS}s]:
 [VISUAL]: [Shot 2] <Subject {N}> {instant cut or perspective shift to new angle, then motion to end of segment.}
 [SPEECH]: <Subject {N}> (S{N}) `<d>`[{Language}] {optional spoken dialogue. exclude entire row if no speech} `</d>`
-[SOUNDS]: {completely optional 3-6 words for the sounds only if sounds effects are in video. Do NOT put music or instruments here}
+[SOUNDS]: {optional concrete physical or ambient sound unique to this interval; omit entire [SOUNDS] line if none. Never put music or instruments here}
 [MUSIC]: {optional segment-specific music or omit row}
 
 [{MM.SS}s-{MM.SS}s]:
-[VISUAL]: <Subject {N}> {short single sentence description of motion and gradual camera shift from start to end of segment.}
+[VISUAL]: <Subject {N}> {3-5 concrete sentences describing full limb trajectories, clothing/hair response, and continuous camera shift from start to end of segment.}
 [SPEECH]: <Subject {N}> (S{N}) `<d>`[{Language}] {optional spoken dialogue. exclude entire row if no speech} `</d>`
-[SOUNDS]: {completely optional 3-6 words for the sounds only if sounds effects are in video. Do NOT put music or instruments here}
+[SOUNDS]: {optional concrete physical or ambient sound unique to this interval; omit entire [SOUNDS] line if none. Never put music or instruments here}
 [MUSIC]: {optional segment-specific music or omit row}
 
 [{MM.SS}s-{MM.SS}s]:
-[VISUAL]: <Subject {N}> {short single sentence description of motion start to end of segment with continuous camera movement.}
+[VISUAL]: <Subject {N}> {3-5 concrete sentences describing full limb trajectories, clothing/hair response, and continuous camera movement from start to end of segment.}
 [SPEECH]: <Subject {N}> (S{N}) `<d>`[{Language}] {optional spoken dialogue. exclude entire row if no speech} `</d>`
-[SOUNDS]: {completely optional 3-6 words for the sounds only if sounds effects are in video. Do NOT put music or instruments here}
+[SOUNDS]: {optional concrete physical or ambient sound unique to this interval; omit entire [SOUNDS] line if none. Never put music or instruments here}
 [MUSIC]: {optional segment-specific music or omit row}
 
 [{MM.SS}s-{MM.SS}s]:
-[VISUAL]: <Subject {N}> {short single sentence description of motion start to end of segment.}
+[VISUAL]: <Subject {N}> {3-5 concrete sentences describing full limb trajectories, clothing/hair response, and camera framing from start to end of segment.}
 [SPEECH]: <Subject {N}> (S{N}) `<d>`[{Language}] {optional spoken dialogue. exclude entire row if no speech} `</d>`
-[SOUNDS]: {completely optional 3-6 words for the sounds only if sounds effects are in video. Do NOT put music or instruments here}
+[SOUNDS]: {optional concrete physical or ambient sound unique to this interval; omit entire [SOUNDS] line if none. Never put music or instruments here}
 [MUSIC]: {optional segment-specific music or omit row}
 
 overall_soundscape:
@@ -1984,7 +1984,7 @@ Several existing media items may define one Subject. One existing media item may
 
 <Video N> identifies a whole-video editing source, continuation source, camera source, cut structure, rhythm, pacing, or temporal structure. Visible people, objects, scenes, actions, and effects taken from a <Video N> remain Subjects when they need stable reusable identities.
 
-<Audio 1> is strictly a vocal-timbre and vocal-delivery reference for <Subject 1> (S1) without audio signal copying. Do not copy original dialogue or lyrics into the target video unless explicitly requested.
+<Audio 1> is the vocal-timbre and vocal-delivery reference for <Subject 1> (S1). Do not copy original dialogue or lyrics into the target video unless explicitly requested.
 
 Video and <Audio N> numbering are independent. Matching or different indices never establish a shared source.
 
@@ -2388,7 +2388,7 @@ Variant B — Vocal Timbre / Voice Reference Intent (when the user instruction i
 
 subject_definitions:
 <Subject {N}> is a {exhaustive head-to-toe visual description of the subject that will be used in the video}.
-<Audio 1> is the vocal-timbre reference providing pitch, tone, and delivery style for <Subject {N}> (S{N}) without audio signal copying.
+<Audio 1> is the vocal-timbre reference providing pitch, tone, and delivery style for <Subject {N}> (S{N}).
 
 summary:
 [reference generation + audio reference] The target video depicts <Subject {N}> {thorough multi-sentence overview of all concrete physical actions, motion progression, interactions, setting, and governing visual style}.
@@ -3035,24 +3035,24 @@ one to three English sentences or N/A
 
 Use the following template as guideline for constructing proper prompt and timeline and everything within curly brace `{}` contains elements to replace and `N` in `{N}` is replaced by corresponding number.  
 Number of timestamp segments in the Timeline must be adjusted for accurate syncronization to movement, actions and/or dialogue or lyrics.  
-Original subjects from <Video 1> designated for replacement must NEVER be defined under `subject_definitions:`, nor described in summary or detailed description. <Subject {N}> represents target subjects in the video (including replacement subjects defined from matching <Picture {N}> and any non-replaced target subjects). Every other non-replaced subject present in <Video 1> must be defined as its own <Subject {N}> under `subject_definitions:` using its visible traits from <Video 1>. No visual traits of replaced video subjects may appear in summary or detailed description. All defined <Subject {N}> entities are present throughout from 00.00s to the final frame with zero reversion.  
+Original subjects from <Video 1> designated for replacement must NEVER be defined under `subject_definitions:`, nor described in summary or detailed description. <Subject {N}> represents target subjects in the video (including replacement subjects defined from matching <Picture {N}> and any non-replaced target subjects). Every other non-replaced subject present in <Video 1> must be defined as its own <Subject {N}> under `subject_definitions:` using its visible traits from <Video 1>. No visual traits of replaced video subjects may appear in summary or detailed description. All defined <Subject {N}> entities are present throughout from 00.00s to the final frame with zero reversion. When two or more <Picture {N}> inputs replace separate subjects in <Video 1>, bind each <Subject {N}> to its distinct spatial or choreographic role from <Video 1> (for example, foreground lead vs rear partner) in both `subject_definitions:` and `retention_analysis:` without naming superseded appearance traits from <Video 1>. Never divide the Timeline into equal fixed slices, never use vague `a person` labels without apparent gender and full outfit, never write `both`, and describe each <Subject {N}> in full head-to-toe detail on its first [VISUAL] appearance.  
 Do NOT include lyrics or dialogue as [SPEECH] unless an active <Subject {N}> is the one singing or speaking. When other subjects in <Video 1> have dialogue, attribute their `[SPEECH]` lines to their own <Subject {N}> (S{N}) tag and never set their dialogue to be spoken by the reference-replaced subject. Completely leave out lyrics for theme music.  
 Do NOT invent sounds. Do NOT add nonsensical lyrics. If uncertain, omit lyrics entirely.  
-Do NOT add to [SOUNDS] unles there is actual sound effects that is verifiably coming from a subject. [SOUNDS] is not for music or instruments.  
+Add [SOUNDS] only when a non-musical physical sound effect or distinct environmental sound actually occurs; omit the entire [SOUNDS] line otherwise and never repeat identical filler across blocks. [SOUNDS] is not for music or instruments.  
 The number of segments presented in template is not an absolute maximum limit or absolute minimum limit. Number of segments depends scenes and actions in video.  
 
 Template:
 
 subject_definitions:
 <Subject {N}> is a {visual description of the subject that will be used in the video}, referenced from <Picture {N}>.
-<Video 1> is the source video providing {list of visual elements} to be transferred onto defined <Subject {N}> entities.
+<Video 1> is the source video supplying {camera movement, choreography, timing, and scene progression} for the target edit.
 <Audio 1> is the full soundtrack containing {list of audio elements} from <Video 1>.
 
 summary:
-[video editing + reference generation + audio reuse] The target video is an edited version of <Video 1> where on-screen subject(s) are replaced by defined <Subject {N}> entities from <Picture {N}> using full visual and motion transfer while maintaining complete {list of visual elements}, and audio from <Audio 1>.
+[video editing + reference generation + audio reuse] The target video is an edited version of <Video 1> where on-screen subject(s) are replaced by defined <Subject {N}> entities from <Picture {N}> using full visual and motion transfer while maintaining {camera movement, choreography, setting, and scene progression}, and retaining the full audio track from <Audio 1>. {Summarize the concrete target actions, setting, and visual style without meta-transfer wording.}
 
 retention_analysis:
-<Subject {N}>: attribute_transfer - full visual identity, appearance, and styling transferred onto the {motion definition} of <Video 1>
+<Subject {N}>: attribute_transfer - full visual identity, appearance, and styling transferred onto the {distinct spatial or choreographic motion role, e.g. foreground lead vs partner motion} of <Video 1>
 <Video 1>: partially_preserved - retains full {list of visual elements} with source subjects replaced by defined <Subject {N}> entities
 <Audio 1>: fully_copy - source audio track is copied entirely
 
@@ -3061,37 +3061,37 @@ Timeline:
 [00.00s-{MM.SS}s]:
 [VISUAL]: [Shot 1] {Composition Shot}. <Subject {N}> {establishing shot and description of initial motion start to end of segment.}
 [SPEECH]: <Subject {N}> (S{N}) `<d>`[{Language}] {optional lyrics or dialogue. exclude entire row if no lyrics} `</d>`
-[SOUNDS]: {completely optional 3-6 words for the sounds only if sounds effects are in video. Do NOT put music or instruments here}
+[SOUNDS]: {optional concrete physical or ambient sound unique to this interval; omit entire [SOUNDS] line if none. Never put music or instruments here}
 [MUSIC]: <Audio 1>
 
 [{MM.SS}s-{MM.SS}s]:
 [VISUAL]: <Subject {N}> {continuous physical action and gradual camera movement from previous segment without cut.}
 [SPEECH]: <Subject {N}> (S{N}) `<d>`[{Language}] {optional lyrics or dialogue. exclude entire row if no lyrics} `</d>`
-[SOUNDS]: {completely optional 3-6 words for the sounds only if sounds effects are in video. Do NOT put music or instruments here}
+[SOUNDS]: {optional concrete physical or ambient sound unique to this interval; omit entire [SOUNDS] line if none. Never put music or instruments here}
 [MUSIC]: <Audio 1>
 
 [{MM.SS}s-{MM.SS}s]:
 [VISUAL]: [Shot 2] <Subject {N}> {instant cut or perspective shift to new angle, then motion to end of segment.}
 [SPEECH]: <Subject {N}> (S{N}) `<d>`[{Language}] {optional lyrics or dialogue. exclude entire row if no lyrics} `</d>`
-[SOUNDS]: {completely optional 3-6 words for the sounds only if sounds effects are in video. Do NOT put music or instruments here}
+[SOUNDS]: {optional concrete physical or ambient sound unique to this interval; omit entire [SOUNDS] line if none. Never put music or instruments here}
 [MUSIC]: <Audio 1>
 
 [{MM.SS}s-{MM.SS}s]:
-[VISUAL]: <Subject {N}> {short single sentence description of motion and gradual camera shift from start to end of segment.}
+[VISUAL]: <Subject {N}> {3-5 concrete sentences describing full limb trajectories, clothing/hair response, and continuous camera shift from start to end of segment.}
 [SPEECH]: <Subject {N}> (S{N}) `<d>`[{Language}] {optional lyrics or dialogue. exclude entire row if no lyrics} `</d>`
-[SOUNDS]: {completely optional 3-6 words for the sounds only if sounds effects are in video. Do NOT put music or instruments here}
+[SOUNDS]: {optional concrete physical or ambient sound unique to this interval; omit entire [SOUNDS] line if none. Never put music or instruments here}
 [MUSIC]: <Audio 1>
 
 [{MM.SS}s-{MM.SS}s]:
-[VISUAL]: <Subject {N}> {short single sentence description of motion start to end of segment with continuous camera movement.}
+[VISUAL]: <Subject {N}> {3-5 concrete sentences describing full limb trajectories, clothing/hair response, and continuous camera movement from start to end of segment.}
 [SPEECH]: <Subject {N}> (S{N}) `<d>`[{Language}] {optional lyrics or dialogue. exclude entire row if no lyrics} `</d>`
-[SOUNDS]: {completely optional 3-6 words for the sounds only if sounds effects are in video. Do NOT put music or instruments here}
+[SOUNDS]: {optional concrete physical or ambient sound unique to this interval; omit entire [SOUNDS] line if none. Never put music or instruments here}
 [MUSIC]: <Audio 1>
 
 [{MM.SS}s-{MM.SS}s]:
-[VISUAL]: <Subject {N}> {short single sentence description of motion start to end of segment.}
+[VISUAL]: <Subject {N}> {3-5 concrete sentences describing full limb trajectories, clothing/hair response, and camera framing from start to end of segment.}
 [SPEECH]: <Subject {N}> (S{N}) `<d>`[{Language}] {optional lyrics or dialogue. exclude entire row if no lyrics} `</d>`
-[SOUNDS]: {completely optional 3-6 words for the sounds only if sounds effects are in video. Do NOT put music or instruments here}
+[SOUNDS]: {optional concrete physical or ambient sound unique to this interval; omit entire [SOUNDS] line if none. Never put music or instruments here}
 [MUSIC]: <Audio 1>
 
 overall_soundscape:
@@ -4157,20 +4157,20 @@ Use the following template as guideline for constructing proper prompt and timel
 Timestamps in the Timeline must be adjusted for accurate syncronization to movement, actions and/or dialogue or lyrics. 
 Do NOT include lyrics or dialogue as [SPEECH] unless the subject in focus is the one singing or speaking. Completely leave out lyrics for theme music. 
 Do NOT invent sounds. Do NOT add nonsensical lyrics. If uncertain, omit lyrics entirely. 
-Do NOT add to [SOUNDS] unles there is actual sound effects that is verifiably coming from a subject. [SOUNDS] is not for music or instruments.
+Add [SOUNDS] only when a non-musical physical sound effect or distinct environmental sound actually occurs; omit the entire [SOUNDS] line otherwise and never repeat identical filler across blocks. [SOUNDS] is not for music or instruments.
 
 Template:
 
 subject_definitions:
 <Subject {N}> is a {visual description of the subject that will be used in the video}, referenced from <Picture {N}.
-<Video 1> is the source video providing {list of visual elements} to be transferred onto <Subject {N}>.
+<Video 1> is the source video supplying {camera movement, choreography, timing, and scene progression} for the target edit.
 <Audio 1> is the full soundtrack containing {list of audio elements} from <Video 1>.
 
 summary:
-[video editing + reference generation + audio reuse] The target video is an edited version of <Video 1> where the on-screen subject is replaced by <Subject {N}> from <Picture {N}> using full visual and motion transfer while maintaining complete {list of visual elements}, and audio from <Audio 1>.
+[video editing + reference generation + audio reuse] The target video is an edited version of <Video 1> where the on-screen subject is replaced by <Subject {N}> from <Picture {N}> using full visual and motion transfer while maintaining {camera movement, choreography, setting, and scene progression}, and retaining the full audio track from <Audio 1>. {Summarize the concrete target actions, setting, and visual style without meta-transfer wording.}
 
 retention_analysis:
-<Subject {N}>: attribute_transfer - full visual identity, appearance, and styling transferred onto the {motion definition} of <Video 1>
+<Subject {N}>: attribute_transfer - full visual identity, appearance, and styling transferred onto the {distinct spatial or choreographic motion role, e.g. foreground lead vs partner motion} of <Video 1>
 <Video 1>: partially_preserved - retains full {list of visual elements} with subject replaced by <Subject {N}>
 <Audio 1>: fully_copy - source audio track is copied entirely
 
@@ -4179,109 +4179,109 @@ Timeline:
 [00.00s-{MM.SS}s]:
 [VISUAL]: [Shot 1] {Composition Shot}. <Subject {N}> {establishing shot and description of initial motion start to end of segment.}
 [SPEECH]: <Subject {N}> (S{N}) <d>[{Language}] {optional lyrics or dialogue. exclude entire row if no lyrics} </d>
-[SOUNDS]: {completely optional 3-6 words for the sounds only if sounds effects are in video. Do NOT put music or instruments here}
+[SOUNDS]: {optional concrete physical or ambient sound unique to this interval; omit entire [SOUNDS] line if none. Never put music or instruments here}
 [MUSIC]: <Audio 1>
 
 [{MM.SS}s-{MM.SS}s]:
 [VISUAL]: [Shot 2] <Subject {N}> {short single sentence description of motion start to end of segment.}
 [SPEECH]: <Subject {N}> (S{N}) <d>[{Language}] {optional lyrics or dialogue. exclude entire row if no lyrics} </d>
-[SOUNDS]: {completely optional 3-6 words for the sounds only if sounds effects are in video. Do NOT put music or instruments here}
+[SOUNDS]: {optional concrete physical or ambient sound unique to this interval; omit entire [SOUNDS] line if none. Never put music or instruments here}
 [MUSIC]: <Audio 1>
 
 [{MM.SS}s-{MM.SS}s]:
 [VISUAL]: [Shot 3] <Subject {N}> {short single sentence description of motion start to end of segment.}
 [SPEECH]: <Subject {N}> (S{N}) <d>[{Language}] {optional lyrics or dialogue. exclude entire row if no lyrics} </d>
-[SOUNDS]: {completely optional 3-6 words for the sounds only if sounds effects are in video. Do NOT put music or instruments here}
+[SOUNDS]: {optional concrete physical or ambient sound unique to this interval; omit entire [SOUNDS] line if none. Never put music or instruments here}
 [MUSIC]: <Audio 1>
 
 [{MM.SS}s-{MM.SS}s]:
 [VISUAL]: [Shot 4] <Subject {N}> {short single sentence description of motion start to end of segment.}
 [SPEECH]: <Subject {N}> (S{N}) <d>[{Language}] {optional lyrics or dialogue. exclude entire row if no lyrics} </d>
-[SOUNDS]: {completely optional 3-6 words for the sounds only if sounds effects are in video. Do NOT put music or instruments here}
+[SOUNDS]: {optional concrete physical or ambient sound unique to this interval; omit entire [SOUNDS] line if none. Never put music or instruments here}
 [MUSIC]: <Audio 1>
 
 [{MM.SS}s-{MM.SS}s]:
 [VISUAL]: [Shot 5] <Subject {N}> {short single sentence description of motion start to end of segment.}
 [SPEECH]: <Subject {N}> (S{N}) <d>[{Language}] {optional lyrics or dialogue. exclude entire row if no lyrics} </d>
-[SOUNDS]: {completely optional 3-6 words for the sounds only if sounds effects are in video. Do NOT put music or instruments here}
+[SOUNDS]: {optional concrete physical or ambient sound unique to this interval; omit entire [SOUNDS] line if none. Never put music or instruments here}
 [MUSIC]: <Audio 1>
 
 [{MM.SS}s-{MM.SS}s]:
 [VISUAL]: [Shot 6] <Subject {N}> {short single sentence description of motion start to end of segment.}
 [SPEECH]: <Subject {N}> (S{N}) <d>[{Language}] {optional lyrics or dialogue. exclude entire row if no lyrics} </d>
-[SOUNDS]: {completely optional 3-6 words for the sounds only if sounds effects are in video. Do NOT put music or instruments here}
+[SOUNDS]: {optional concrete physical or ambient sound unique to this interval; omit entire [SOUNDS] line if none. Never put music or instruments here}
 [MUSIC]: <Audio 1>
 
 [{MM.SS}s-{MM.SS}s]:
 [VISUAL]: [Shot 7] <Subject {N}> {short single sentence description of motion start to end of segment.}
 [SPEECH]: <Subject {N}> (S{N}) <d>[{Language}] {optional lyrics or dialogue. exclude entire row if no lyrics} </d>
-[SOUNDS]: {completely optional 3-6 words for the sounds only if sounds effects are in video. Do NOT put music or instruments here}
+[SOUNDS]: {optional concrete physical or ambient sound unique to this interval; omit entire [SOUNDS] line if none. Never put music or instruments here}
 [MUSIC]: <Audio 1>
 
 [{MM.SS}s-{MM.SS}s]:
 [VISUAL]: [Shot 8] <Subject {N}> {short single sentence description of motion start to end of segment.}
 [SPEECH]: <Subject {N}> (S{N}) <d>[{Language}] {optional lyrics or dialogue. exclude entire row if no lyrics} </d>
-[SOUNDS]: {completely optional 3-6 words for the sounds only if sounds effects are in video. Do NOT put music or instruments here}
+[SOUNDS]: {optional concrete physical or ambient sound unique to this interval; omit entire [SOUNDS] line if none. Never put music or instruments here}
 [MUSIC]: <Audio 1>
 
 [{MM.SS}s-{MM.SS}s]:
 [VISUAL]: [Shot 9] <Subject {N}> {short single sentence description of motion start to end of segment.}
 [SPEECH]: <Subject {N}> (S{N}) <d>[{Language}] {optional lyrics or dialogue. exclude entire row if no lyrics} </d>
-[SOUNDS]: {completely optional 3-6 words for the sounds only if sounds effects are in video. Do NOT put music or instruments here}
+[SOUNDS]: {optional concrete physical or ambient sound unique to this interval; omit entire [SOUNDS] line if none. Never put music or instruments here}
 [MUSIC]: <Audio 1>
 
 [{MM.SS}s-{MM.SS}s]:
 [VISUAL]: [Shot 10] <Subject {N}> {short single sentence description of motion start to end of segment.}
 [SPEECH]: <Subject {N}> (S{N}) <d>[{Language}] {optional lyrics or dialogue. exclude entire row if no lyrics} </d>
-[SOUNDS]: {completely optional 3-6 words for the sounds only if sounds effects are in video. Do NOT put music or instruments here}
+[SOUNDS]: {optional concrete physical or ambient sound unique to this interval; omit entire [SOUNDS] line if none. Never put music or instruments here}
 [MUSIC]: <Audio 1>
 
 [{MM.SS}s-{MM.SS}s]:
 [VISUAL]: [Shot 11] <Subject {N}> {short single sentence description of motion start to end of segment.}
 [SPEECH]: <Subject {N}> (S{N}) <d>[{Language}] {optional lyrics or dialogue. exclude entire row if no lyrics} </d>
-[SOUNDS]: {completely optional 3-6 words for the sounds only if sounds effects are in video. Do NOT put music or instruments here}
+[SOUNDS]: {optional concrete physical or ambient sound unique to this interval; omit entire [SOUNDS] line if none. Never put music or instruments here}
 [MUSIC]: <Audio 1>
 
 [{MM.SS}s-{MM.SS}s]:
 [VISUAL]: [Shot 12] <Subject {N}> {short single sentence description of motion start to end of segment.}
 [SPEECH]: <Subject {N}> (S{N}) <d>[{Language}] {optional lyrics or dialogue. exclude entire row if no lyrics} </d>
-[SOUNDS]: {completely optional 3-6 words for the sounds only if sounds effects are in video. Do NOT put music or instruments here}
+[SOUNDS]: {optional concrete physical or ambient sound unique to this interval; omit entire [SOUNDS] line if none. Never put music or instruments here}
 [MUSIC]: <Audio 1>
 
 [{MM.SS}s-{MM.SS}s]:
 [VISUAL]: [Shot 13] <Subject {N}> {short single sentence description of motion start to end of segment.}
 [SPEECH]: <Subject {N}> (S{N}) <d>[{Language}] {optional lyrics or dialogue. exclude entire row if no lyrics} </d>
-[SOUNDS]: {completely optional 3-6 words for the sounds only if sounds effects are in video. Do NOT put music or instruments here}
+[SOUNDS]: {optional concrete physical or ambient sound unique to this interval; omit entire [SOUNDS] line if none. Never put music or instruments here}
 [MUSIC]: <Audio 1>
 
 [{MM.SS}s-{MM.SS}s]:
 [VISUAL]: [Shot 14] <Subject {N}> {short single sentence description of motion start to end of segment.}
 [SPEECH]: <Subject {N}> (S{N}) <d>[{Language}] {optional lyrics or dialogue. exclude entire row if no lyrics} </d>
-[SOUNDS]: {completely optional 3-6 words for the sounds only if sounds effects are in video. Do NOT put music or instruments here}
+[SOUNDS]: {optional concrete physical or ambient sound unique to this interval; omit entire [SOUNDS] line if none. Never put music or instruments here}
 [MUSIC]: <Audio 1>
 
 [{MM.SS}s-{MM.SS}s]:
 [VISUAL]: [Shot 15] <Subject {N}> {short single sentence description of motion start to end of segment.}
 [SPEECH]: <Subject {N}> (S{N}) <d>[{Language}] {optional lyrics or dialogue. exclude entire row if no lyrics} </d>
-[SOUNDS]: {completely optional 3-6 words for the sounds only if sounds effects are in video. Do NOT put music or instruments here}
+[SOUNDS]: {optional concrete physical or ambient sound unique to this interval; omit entire [SOUNDS] line if none. Never put music or instruments here}
 [MUSIC]: <Audio 1>
 
 [{MM.SS}s-{MM.SS}s]:
 [VISUAL]: [Shot 16] <Subject {N}> {short single sentence description of motion start to end of segment.}
 [SPEECH]: <Subject {N}> (S{N}) <d>[{Language}] {optional lyrics or dialogue. exclude entire row if no lyrics} </d>
-[SOUNDS]: {completely optional 3-6 words for the sounds only if sounds effects are in video. Do NOT put music or instruments here}
+[SOUNDS]: {optional concrete physical or ambient sound unique to this interval; omit entire [SOUNDS] line if none. Never put music or instruments here}
 [MUSIC]: <Audio 1>
 
 [{MM.SS}s-{MM.SS}s]:
 [VISUAL]: [Shot 17] <Subject {N}> {short single sentence description of motion start to end of segment.}
 [SPEECH]: <Subject {N}> (S{N}) <d>[{Language}] {optional lyrics or dialogue. exclude entire row if no lyrics} </d>
-[SOUNDS]: {completely optional 3-6 words for the sounds only if sounds effects are in video. Do NOT put music or instruments here}
+[SOUNDS]: {optional concrete physical or ambient sound unique to this interval; omit entire [SOUNDS] line if none. Never put music or instruments here}
 [MUSIC]: <Audio 1>
 
 [{MM.SS}s-{MM.SS}s]:
 [VISUAL]: [Shot 18] <Subject {N}> {short single sentence description of motion start to end of segment.}
 [SPEECH]: <Subject {N}> (S{N}) <d>[{Language}] {optional lyrics or dialogue. exclude entire row if no lyrics} </d>
-[SOUNDS]: {completely optional 3-6 words for the sounds only if sounds effects are in video. Do NOT put music or instruments here}
+[SOUNDS]: {optional concrete physical or ambient sound unique to this interval; omit entire [SOUNDS] line if none. Never put music or instruments here}
 [MUSIC]: <Audio 1>
 
 overall_soundscape:
@@ -4675,21 +4675,21 @@ Number of timestamp segments in the Timeline must be adjusted for accurate syncr
 Original subjects from <Video 1> designated for replacement must NEVER be defined under `subject_definitions:`, nor described in summary or detailed description. Every other non-replaced subject present in <Video 1> must be defined as its own <Subject {N}> under `subject_definitions:` using its visible traits from <Video 1>.  
 Do NOT include lyrics or dialogue as [SPEECH] unless an active <Subject {N}> is the one singing or speaking. When other subjects in <Video 1> have dialogue, attribute their `[SPEECH]` lines to their own <Subject {N}> (S{N}) tag and never set their dialogue to be spoken by the reference-replaced subject. Completely leave out lyrics for theme music.  
 Do NOT invent sounds. Do NOT add nonsensical lyrics. If uncertain, omit lyrics entirely.  
-Do NOT add to [SOUNDS] unles there is actual sound effects that is verifiably coming from a subject. [SOUNDS] is not for music or instruments.  
+Add [SOUNDS] only when a non-musical physical sound effect or distinct environmental sound actually occurs; omit the entire [SOUNDS] line otherwise and never repeat identical filler across blocks. [SOUNDS] is not for music or instruments.  
 The number of segments presented in example is not an absolute maximum limit or absolute minimum limit. Number of segments depends scenes and actions in video.  
 
 Template:
 
 subject_definitions:
 <Subject {N}> is a {visual description of the subject that will be used in the video}, referenced from <Picture {N}>.
-<Video 1> is the source video providing {list of visual elements} to be transferred onto <Subject {N}>.
+<Video 1> is the source video supplying {camera movement, choreography, timing, and scene progression} for the target edit.
 <Audio 1> is the full soundtrack containing {list of audio elements} from <Video 1>.
 
 summary:
-[video editing + reference generation + audio reuse] The target video is an edited version of <Video 1> where the on-screen subject is replaced by <Subject {N}> from <Picture {N}> using full visual and motion transfer while maintaining complete {list of visual elements}, and audio from <Audio 1>.
+[video editing + reference generation + audio reuse] The target video is an edited version of <Video 1> where the on-screen subject is replaced by <Subject {N}> from <Picture {N}> using full visual and motion transfer while maintaining {camera movement, choreography, setting, and scene progression}, and retaining the full audio track from <Audio 1>. {Summarize the concrete target actions, setting, and visual style without meta-transfer wording.}
 
 retention_analysis:
-<Subject {N}>: attribute_transfer - full visual identity, appearance, and styling transferred onto the {motion definition} of <Video 1>
+<Subject {N}>: attribute_transfer - full visual identity, appearance, and styling transferred onto the {distinct spatial or choreographic motion role, e.g. foreground lead vs partner motion} of <Video 1>
 <Video 1>: partially_preserved - retains full {list of visual elements} with subject replaced by <Subject {N}>
 <Audio 1>: fully_copy - source audio track is copied entirely
 
@@ -4698,37 +4698,37 @@ Timeline:
 [00.00s-{MM.SS}s]:
 [VISUAL]: [Shot 1] {Composition Shot}. <Subject {N}> {establishing shot and description of initial motion start to end of segment.}
 [SPEECH]: <Subject {N}> (S{N}) `<d>`[{Language}] {optional lyrics or dialogue. exclude entire row if no lyrics} `</d>`
-[SOUNDS]: {completely optional 3-6 words for the sounds only if sounds effects are in video. Do NOT put music or instruments here}
+[SOUNDS]: {optional concrete physical or ambient sound unique to this interval; omit entire [SOUNDS] line if none. Never put music or instruments here}
 [MUSIC]: <Audio 1>
 
 [{MM.SS}s-{MM.SS}s]:
 [VISUAL]: <Subject {N}> {continuous physical action and gradual camera movement from previous segment without cut.}
 [SPEECH]: <Subject {N}> (S{N}) `<d>`[{Language}] {optional lyrics or dialogue. exclude entire row if no lyrics} `</d>`
-[SOUNDS]: {completely optional 3-6 words for the sounds only if sounds effects are in video. Do NOT put music or instruments here}
+[SOUNDS]: {optional concrete physical or ambient sound unique to this interval; omit entire [SOUNDS] line if none. Never put music or instruments here}
 [MUSIC]: <Audio 1>
 
 [{MM.SS}s-{MM.SS}s]:
 [VISUAL]: [Shot 2] <Subject {N}> {instant cut or perspective shift to new angle, then motion to end of segment.}
 [SPEECH]: <Subject {N}> (S{N}) `<d>`[{Language}] {optional lyrics or dialogue. exclude entire row if no lyrics} `</d>`
-[SOUNDS]: {completely optional 3-6 words for the sounds only if sounds effects are in video. Do NOT put music or instruments here}
+[SOUNDS]: {optional concrete physical or ambient sound unique to this interval; omit entire [SOUNDS] line if none. Never put music or instruments here}
 [MUSIC]: <Audio 1>
 
 [{MM.SS}s-{MM.SS}s]:
-[VISUAL]: <Subject {N}> {short single sentence description of motion and gradual camera shift from start to end of segment.}
+[VISUAL]: <Subject {N}> {3-5 concrete sentences describing full limb trajectories, clothing/hair response, and continuous camera shift from start to end of segment.}
 [SPEECH]: <Subject {N}> (S{N}) `<d>`[{Language}] {optional lyrics or dialogue. exclude entire row if no lyrics} `</d>`
-[SOUNDS]: {completely optional 3-6 words for the sounds only if sounds effects are in video. Do NOT put music or instruments here}
+[SOUNDS]: {optional concrete physical or ambient sound unique to this interval; omit entire [SOUNDS] line if none. Never put music or instruments here}
 [MUSIC]: <Audio 1>
 
 [{MM.SS}s-{MM.SS}s]:
-[VISUAL]: <Subject {N}> {short single sentence description of motion start to end of segment with continuous camera movement.}
+[VISUAL]: <Subject {N}> {3-5 concrete sentences describing full limb trajectories, clothing/hair response, and continuous camera movement from start to end of segment.}
 [SPEECH]: <Subject {N}> (S{N}) `<d>`[{Language}] {optional lyrics or dialogue. exclude entire row if no lyrics} `</d>`
-[SOUNDS]: {completely optional 3-6 words for the sounds only if sounds effects are in video. Do NOT put music or instruments here}
+[SOUNDS]: {optional concrete physical or ambient sound unique to this interval; omit entire [SOUNDS] line if none. Never put music or instruments here}
 [MUSIC]: <Audio 1>
 
 [{MM.SS}s-{MM.SS}s]:
-[VISUAL]: <Subject {N}> {short single sentence description of motion start to end of segment.}
+[VISUAL]: <Subject {N}> {3-5 concrete sentences describing full limb trajectories, clothing/hair response, and camera framing from start to end of segment.}
 [SPEECH]: <Subject {N}> (S{N}) `<d>`[{Language}] {optional lyrics or dialogue. exclude entire row if no lyrics} `</d>`
-[SOUNDS]: {completely optional 3-6 words for the sounds only if sounds effects are in video. Do NOT put music or instruments here}
+[SOUNDS]: {optional concrete physical or ambient sound unique to this interval; omit entire [SOUNDS] line if none. Never put music or instruments here}
 [MUSIC]: <Audio 1>
 
 overall_soundscape:
