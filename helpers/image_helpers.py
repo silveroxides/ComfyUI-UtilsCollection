@@ -3414,6 +3414,43 @@ def stitch_image_grid(images: Sequence[torch.Tensor] | torch.Tensor, max_images_
     return grid
 
 
+def _as_option_list(value, default):
+    if isinstance(value, (list, tuple)):
+        return list(value) if value else [default]
+    return [value]
+
+
+def stitch_image_grid_inputs(
+    images: Sequence[torch.Tensor] | torch.Tensor, max_images_per_row: Sequence[int] | int = 4, max_rows: Sequence[int] | int = 0, match_image_size: Sequence[bool] | bool = True, spacing_width: Sequence[int] | int = 0, spacing_color: Sequence[str] | str = "white", as_list: Sequence[bool] | bool = False
+) -> list[torch.Tensor]:
+    combine_list = bool(as_list[0]) if isinstance(as_list, (list, tuple)) and as_list else (False if isinstance(as_list, (list, tuple)) else bool(as_list))
+    if combine_list:
+        return [stitch_image_grid(images=images, max_images_per_row=max_images_per_row, max_rows=max_rows, match_image_size=match_image_size, spacing_width=spacing_width, spacing_color=spacing_color)]
+
+    image_items = list(images) if isinstance(images, (list, tuple)) else ([] if images is None else [images])
+    if not image_items:
+        return [torch.zeros((1, 64, 64, 3), dtype=torch.float32)]
+
+    cols_list = _as_option_list(max_images_per_row, 4)
+    rows_list = _as_option_list(max_rows, 0)
+    match_list = _as_option_list(match_image_size, True)
+    width_list = _as_option_list(spacing_width, 0)
+    color_list = _as_option_list(spacing_color, "white")
+    max_len = max(len(image_items), len(cols_list), len(rows_list), len(match_list), len(width_list), len(color_list))
+
+    return [
+        stitch_image_grid(
+            images=image_items[i if len(image_items) > i else -1],
+            max_images_per_row=cols_list[i if len(cols_list) > i else -1],
+            max_rows=rows_list[i if len(rows_list) > i else -1],
+            match_image_size=match_list[i if len(match_list) > i else -1],
+            spacing_width=width_list[i if len(width_list) > i else -1],
+            spacing_color=color_list[i if len(color_list) > i else -1],
+        )
+        for i in range(max_len)
+    ]
+
+
 def split_image_batch_into_batches(images: torch.Tensor, batch_size: int) -> list[torch.Tensor]:
     """Split an image batch tensor into an ordered list of smaller image batch tensors."""
     if images is None or not torch.is_tensor(images):

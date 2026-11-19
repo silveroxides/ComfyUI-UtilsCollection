@@ -1,49 +1,50 @@
-import os
+import hashlib
 import json
-from ..helpers.model_helpers import register_openpose_paths, load_openpose_model, openpose_forward, load_dwpose_model, dwpose_forward, load_animal_pose_model, load_densepose_model, densepose_forward
+import os
+
+import cv2
+import folder_paths
+import kornia.morphology as morph
+import node_helpers
 import numpy as np
+import scipy
 import torch
 import torch.nn.functional as F
-import hashlib
-import scipy
-import cv2
-import nodes
-import folder_paths
+from comfy import model_management
+from comfy_api.latest import io
+from PIL import Image, ImageDraw, ImageFont, ImageOps, ImageSequence
 from tqdm import tqdm
-from PIL import Image, ImageOps, ImageSequence, ImageDraw, ImageFont
-import kornia.morphology as morph
-from ..helpers.helper_functions import pil2tensor, math_diag, pct_to_px, composite, fill_mask_from_edges, iterative_directional_stretch_fill, gaussian_blur_nchw, hex_to_rgb, string_to_color, resize_nchw, FLOW_PRESETS
-from ..helpers.tile_helpers import accumulate_tile_images, apply_tile_differential_diffusion, split_and_encode_tiles
+
+import nodes
+from nodes import MAX_RESOLUTION
+
 from ..helpers.color_palette_helpers import extract_prevalent_color_outputs
+from ..helpers.helper_functions import FLOW_PRESETS, composite, fill_mask_from_edges, gaussian_blur_nchw, hex_to_rgb, iterative_directional_stretch_fill, math_diag, pct_to_px, pil2tensor, resize_nchw, string_to_color
 from ..helpers.image_helpers import (
-    run_openpose_batch,
-    run_dwpose_batch,
-    run_densepose_batch,
-    pose_overlay_mask,
-    overlay_pose_keypoints,
     VIDEO_FRAME_SAMPLING_STRATEGIES,
-    VIDEO_FRAME_TIMESTAMP_FORMATS,
     VIDEO_FRAME_TIMELINE_STYLES,
+    VIDEO_FRAME_TIMESTAMP_FORMATS,
     VIDEO_STRUCTURED_TIMELINE_TEXT_STRUCTURE,
     VIDEO_TEXT_STRUCTURED_TIMELINE_TEXT_STRUCTURE,
     VIDEO_TEXT_TIMELINE_TEXT_STRUCTURE,
     VIDEO_TIMELINE_TEXT_STRUCTURE,
     downscale_nohalo_lohalo,
-    stitch_image_grid,
-    split_image_batch_into_batches,
     images_to_video_timeline,
     mask_to_bounding_box,
     match_image_properties,
+    overlay_pose_keypoints,
+    pose_overlay_mask,
     restore_image_color_properties,
+    run_densepose_batch,
+    run_dwpose_batch,
+    run_openpose_batch,
     sample_video_frames_as_images,
+    split_image_batch_into_batches,
+    stitch_image_grid_inputs,
     video_timeline_text,
 )
-
-
-from comfy_api.latest import io
-from comfy import model_management
-import node_helpers
-from nodes import MAX_RESOLUTION
+from ..helpers.model_helpers import densepose_forward, dwpose_forward, load_animal_pose_model, load_densepose_model, load_dwpose_model, load_openpose_model, openpose_forward, register_openpose_paths
+from ..helpers.tile_helpers import accumulate_tile_images, apply_tile_differential_diffusion, split_and_encode_tiles
 
 HighResolutionTileLayout = io.Custom("UC_HIGH_RES_TILE_LAYOUT")
 PoseKeypoint = io.Custom("POSE_KEYPOINT")
@@ -377,6 +378,7 @@ class UC_Image_Color_Noise(io.ComfyNode):
 
     @classmethod
     def generate_power_noise(cls, width, height, frequency, attenuation, noise_type, generator):
+
         def normalize_array(arr):
             return (255 * (arr - np.min(arr)) / (np.max(arr) - np.min(arr))).astype(np.uint8)
 
@@ -1073,7 +1075,7 @@ class UC_OpticalFlowComposite(io.ComfyNode):
 
         result, change_mask, stats = composite(orig_np, gen_np, delta_e_threshold=delta_e_threshold, flow_preset=FLOW_PRESETS[flow_quality], occlusion_threshold=occlusion_threshold, grow_px=grow_px, close_radius=close_px, min_region_px=min_px, feather_px=feather_px)
 
-        report_lines = ["=== Klein Edit Composite v2.2 (Global Align) ===", f"Resolution:       {stats['resolution']}  (diag {stats['diagonal_px']}px)", f""]
+        report_lines = ["=== Klein Edit Composite v2.2 (Global Align) ===", f"Resolution:       {stats['resolution']}  (diag {stats['diagonal_px']}px)", ""]
 
         if "auto_delta_e" in stats:
             report_lines.append(f"ΔE threshold:     AUTO → {stats['auto_delta_e']:.1f}")
@@ -1091,7 +1093,7 @@ class UC_OpticalFlowComposite(io.ComfyNode):
             f"Close radius:     {close_radius_pct:.1f}% → {close_px}px",
             f"Min region:       {min_region_pct:.2f}% → {min_px}px",
             f"Flow quality:     {flow_quality}",
-            f"",
+            "",
             f"Changed region:   {stats['changed_pct']:.1f}% of image",
             f"Occluded pixels:  {stats['occluded_px']:,}",
             f"Flow mean shift:  {stats['flow_mean_px']:.2f}px",
@@ -1521,8 +1523,17 @@ class UC_ImagePad(io.ComfyNode):
                 io.Int.Input("right", default=0, min=0, max=MAX_RESOLUTION, step=1, tooltip="Pixels added to the right when target dimensions are disconnected. When target dimensions are connected, weights horizontal padding direction; 0 centers unless other horizontal direction is set."),
                 io.Int.Input("top", default=0, min=0, max=MAX_RESOLUTION, step=1, tooltip="Pixels added above the image when target dimensions are disconnected. When target dimensions are connected, weights vertical padding direction; 0 centers unless other vertical direction is set."),
                 io.Int.Input("bottom", default=0, min=0, max=MAX_RESOLUTION, step=1, tooltip="Pixels added below the image when target dimensions are disconnected. When target dimensions are connected, weights vertical padding direction; 0 centers unless other vertical direction is set."),
-                io.Int.Input("extra_padding", default=0, min=0, max=MAX_RESOLUTION, step=1, tooltip="Additional padding on all sides when target dimensions are disconnected. When target dimensions are connected, adds extra padding in directions above 0 scaled relative to the maximum directional value, or expands existing target-padded axes if all directions are 0."),
-                io.Combo.Input("pad_mode", default="edge", options=["edge", "edge_pixel", "color", "pillarbox_blur"], tooltip="edge: Extend the edge pixels. edge_pixel: Extend the edge pixels but keep the original edge pixel color. color: Fill with a solid color. pillarbox_blur: Fill with a blurred version of the image."),
+                io.Int.Input(
+                    "extra_padding",
+                    default=0,
+                    min=0,
+                    max=MAX_RESOLUTION,
+                    step=1,
+                    tooltip="Additional padding on all sides when target dimensions are disconnected. When target dimensions are connected, adds extra padding in directions above 0 scaled relative to the maximum directional value, or expands existing target-padded axes if all directions are 0.",
+                ),
+                io.Combo.Input(
+                    "pad_mode", default="edge", options=["edge", "edge_pixel", "color", "pillarbox_blur"], tooltip="edge: Extend the edge pixels. edge_pixel: Extend the edge pixels but keep the original edge pixel color. color: Fill with a solid color. pillarbox_blur: Fill with a blurred version of the image."
+                ),
                 io.String.Input("color", multiline=False, default="0, 0, 0", tooltip="Color as RGB values in range 0-255 or 0.0-1.0, or color name or hex code"),
                 io.Mask.Input("mask", optional=True, tooltip="Optional source mask padded with value 1 outside the image; disconnected creates a mask for the added border."),
                 io.Int.Input("target_width", default=512, min=0, max=MAX_RESOLUTION, step=1, force_input=True, optional=True, tooltip="Optional final width. Connect both target dimensions to proportionally fit and center the image."),
@@ -1748,7 +1759,9 @@ class UC_HighResolutionTileSplit(io.ComfyNode):
                 io.Float.Input("feather_width", default=1.0, min=0.0, max=1.0, step=0.01, tooltip="Fraction of each overlap occupied by the mask transition."),
                 io.Float.Input("mask_strength", default=1.0, min=0.0, max=1.0, step=0.01, tooltip=("Overlap edge protection. 0 leaves the mask flat; 1 reaches zero at protected internal tile edges.")),
                 io.Combo.Input("differential_diffusion_mode", options=["off", "core", "advanced"], default="off", tooltip=("off leaves the model unchanged. core applies ComfyUI Core Differential Diffusion. advanced uses the threshold multiplier control.")),
-                io.Float.Input("differential_diffusion_value", default=1.0, min=-10.0, max=10.0, step=0.001, tooltip=("Mode-dependent value. Core: strength from 0 to 1, blending its progressive binary mask with the soft mask. Advanced: nonzero threshold divisor from -10 to 10, matching KJNodes Differential Diffusion Advanced.")),
+                io.Float.Input(
+                    "differential_diffusion_value", default=1.0, min=-10.0, max=10.0, step=0.001, tooltip=("Mode-dependent value. Core: strength from 0 to 1, blending its progressive binary mask with the soft mask. Advanced: nonzero threshold divisor from -10 to 10, matching KJNodes Differential Diffusion Advanced.")
+                ),
                 io.Image.Input("depth_map", optional=True, tooltip=("Optional grayscale depth image used to preserve structure across solid and feathered denoise-mask regions. It is converted to luminance and resized to the source image.")),
                 io.Float.Input("depth_influence", default=1.0, min=-1.0, max=1.0, step=0.01, tooltip=("Signed depth-mask influence. Positive values use the map as supplied, negative values use its inverse, and the magnitude controls the effect. 0 disables depth modulation.")),
             ],
@@ -1883,19 +1896,21 @@ class UC_StitchImageGrid(io.ComfyNode):
             node_id="UC_StitchImageGrid",
             display_name="Stitch Image Grid",
             category="advanced/image",
-            description="Stitches an image batch or list of images into a grid, row-by-row then vertically, using configurable spacing.",
+            description="Stitches image batches or an image list into grids, row-by-row then vertically, with configurable spacing.",
+            is_input_list=True,
             inputs=[
-                io.Image.Input("images", tooltip="Image batch or list of images to stitch into a grid."),
+                io.Image.Input("images", tooltip="Image batch or image list to stitch. With as_list off, each list entry becomes its own grid; with as_list on, all entries combine into one grid."),
                 io.Int.Input("max_images_per_row", default=4, min=1, max=128, step=1, tooltip="Maximum number of images per row."),
                 io.Int.Input("max_rows", default=0, min=0, max=128, step=1, tooltip="Maximum number of rows. Set to 0 for unlimited rows."),
                 io.Boolean.Input("match_image_size", default=True, tooltip="Match image sizes during stitching."),
                 io.Int.Input("spacing_width", default=0, min=0, max=1024, step=2, tooltip="Width of spacing between images in pixels."),
                 io.Combo.Input("spacing_color", options=["white", "black", "red", "green", "blue"], default="white", tooltip="Color of spacing between images."),
+                io.Boolean.Input("as_list", default=False, tooltip="Off by default: stitches each input image or batch separately. Turn on to combine every image in the connected list into a single grid."),
             ],
-            outputs=[io.Image.Output("image", display_name="IMAGE", tooltip="Stitched grid image.")],
+            outputs=[io.Image.Output("image", display_name="IMAGE", is_output_list=True, tooltip="Stitched grid image for each input batch, or one combined grid when as_list is enabled.")],
         )
 
     @classmethod
-    def execute(cls, images, max_images_per_row: int = 4, max_rows: int = 0, match_image_size: bool = True, spacing_width: int = 0, spacing_color: str = "white") -> io.NodeOutput:
-        result = stitch_image_grid(images=images, max_images_per_row=max_images_per_row, max_rows=max_rows, match_image_size=match_image_size, spacing_width=spacing_width, spacing_color=spacing_color)
+    def execute(cls, images, max_images_per_row: int = 4, max_rows: int = 0, match_image_size: bool = True, spacing_width: int = 0, spacing_color: str = "white", as_list: bool = False) -> io.NodeOutput:
+        result = stitch_image_grid_inputs(images=images, max_images_per_row=max_images_per_row, max_rows=max_rows, match_image_size=match_image_size, spacing_width=spacing_width, spacing_color=spacing_color, as_list=as_list)
         return io.NodeOutput(result)
