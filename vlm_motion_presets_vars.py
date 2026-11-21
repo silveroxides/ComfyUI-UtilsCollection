@@ -878,7 +878,7 @@ Timeline:
 [MUSIC]: <Audio 1>
 
 overall_soundscape:
-<Audio 1> provides the complete synchronized audio landscape consisting of {description of the audio elements}.
+<Audio 1> provides the synchronized ambient room acoustics and physical action sounds across the complete duration.
 
 non_diegetic_music:
 <Audio 1> serves as the full {description of the music} throughout the video.
@@ -1084,7 +1084,7 @@ Do not repeat dialogue, lyrics, singing, or interval-specific vocal content. Use
 
 #### non_diegetic_music
 
-First and foremost, when an <Audio N> item supplies the soundtrack, background music, or musical beat for the video (such as <Audio 1> defined as the full soundtrack and tracked with `fully_copy` or `partially_copy` in `retention_analysis:`), `non_diegetic_music:` must begin with <Audio N> (for example: `<Audio 1> serves as the full {description of the music, instrumentation, tempo, and rhythm} throughout the video.`) and must never be set to N/A, even if the on-screen subject dances or moves to that music. When the same <Audio N> item supplies both the overall soundtrack and the musical layer, state <Audio N> in both `overall_soundscape:` and `non_diegetic_music:`.
+First and foremost, when an <Audio N> item supplies the soundtrack, background music, or musical beat for the video (such as <Audio 1> defined as the full soundtrack and tracked with `fully_copy` or `partially_copy` in `retention_analysis:`), `non_diegetic_music:` must begin with <Audio N> (for example: `<Audio 1> serves as the full {description of the music, instrumentation, tempo, and rhythm} throughout the video.`) and must never be set to N/A, even if the on-screen subject dances or moves to that music. When <Audio N> supplies the full soundtrack, overall_soundscape states that physical action sounds and ambient acoustics are synchronized to <Audio N> without repeating the musical score description, while non_diegetic_music specifies the musical instruments, tempo, and rhythm of <Audio N>. Never write meta-commentary, irony, or mood critique (never write 'contrasts ironically', 'discordant mood', 'parody-style', or literary analysis in audio fields); describe only concrete physical sound sources and real musical instrumentation.
 
 Otherwise write one to three English sentences describing background music audible across the video, stating real instruments, tempo, rhythm, and dynamic development instead of abstract mood words. Use N/A only when no soundtrack or background music exists in the video or user instruction.
 
@@ -1106,7 +1106,7 @@ The number of Subjects described must match the number clearly featured in the i
 6. Plan adaptive contiguous timestamp ranges from 00.00s through the exact requested endpoint without collapsing distinct beats into sparse minimum-length blocks.
 7. Put [Shot 1] right after [VISUAL]: starting from the state shown in the image. In every segment, write a comprehensive 3 to 5 sentence `[VISUAL]` description (strict minimum 70 words, target 75 to 120 words) detailing exact subject positioning, posture, full start-to-end limb and body trajectories, facial expression, clothing dynamics, lighting, and camera movement. Introduce [Shot N] ONLY when an actual instantaneous hard camera cut or discontinuous scene/angle jump occurs—if the scene is one continuous unbroken take with zero cuts, use ONLY [Shot 1] at 00.00s and omit [Shot N] from all subsequent segments.
 8. Maintain strict literal <Subject N> tag on every actor, receiver, giver, and touched body part. Strict Pronoun and 'Both' Ban: never write 'They', 'their', 'both', 'Both', 'he', or 'she' in [VISUAL] (including never writing 'both legs' or 'both hands').
-9. Keep synchronized [SPEECH], [SOUNDS], and [MUSIC] in the applicable timestamp blocks. Always emit [SPEECH] whenever a <Subject N>, character, or narrator speaks or sings (even over background music), and NEVER emit [SPEECH] for non-diegetic background song lyrics not sung by any subject. Never put music, beats, bass, drums, or rhythm in [SOUNDS]; when copying a soundtrack <Audio N> (tracked with `fully_copy` or `partially_copy` in `retention_analysis:`), write [MUSIC]: <Audio N>. Never describe singing or speaking in [VISUAL] unless `[SPEECH]` is present in that block.
+9. Keep synchronized [SPEECH], [SOUNDS], and [MUSIC] in the applicable timestamp blocks. Emit [SPEECH] only when a <Subject N>, character, or narrator speaks or sings (even over background music), and NEVER emit [SPEECH] for non-diegetic background song lyrics not sung by any subject; omit the [SPEECH] line completely when no speech occurs (never write '[SPEECH]: (No dialogue)', '[SPEECH]: N/A', or '[SPEECH]: (silent)'). Never put music, beats, bass, drums, or rhythm in [SOUNDS]; when copying a soundtrack <Audio N> (tracked with `fully_copy` or `partially_copy` in `retention_analysis:`), write [MUSIC]: <Audio N>. Never describe singing or speaking in [VISUAL] unless `[SPEECH]` is present in that block.
 10. Finish with overall_soundscape and non_diegetic_music (beginning `non_diegetic_music:` first and foremost with <Audio N> whenever copying a soundtrack or music <Audio N> tracked with `fully_copy` or `partially_copy`).
 11. Verify zero occurrences of pronouns or the word 'both' ('They', 'their', 'them', 'he', 'she', 'both', 'Both') outside spoken dialogue.
 
@@ -2381,7 +2381,7 @@ Timeline:
 [MUSIC]: <Audio 1>
 
 overall_soundscape:
-<Audio 1> provides the complete synchronized audio landscape consisting of {description of the audio elements}.
+<Audio 1> provides the synchronized ambient room acoustics and physical action sounds across the complete duration.
 
 non_diegetic_music:
 <Audio 1> serves as the full {description of the music} throughout the video.
@@ -2566,7 +2566,7 @@ Do not repeat dialogue, lyrics, singing, or interval-specific vocal content. Use
 
 #### non_diegetic_music
 
-First and foremost, when an <Audio N> item supplies the soundtrack, background music, or musical beat for the video (such as <Audio 1> defined as the full soundtrack and tracked with `fully_copy` or `partially_copy` in `retention_analysis:`), `non_diegetic_music:` must begin with <Audio N> (for example: `<Audio 1> serves as the full {description of the music, instrumentation, tempo, and rhythm} throughout the video.`) and must never be set to N/A, even if the on-screen subject dances or moves to that music. When the same <Audio N> item supplies both the overall soundtrack and the musical layer, state <Audio N> in both `overall_soundscape:` and `non_diegetic_music:`.
+First and foremost, when an <Audio N> item supplies the soundtrack, background music, or musical beat for the video (such as <Audio 1> defined as the full soundtrack and tracked with `fully_copy` or `partially_copy` in `retention_analysis:`), `non_diegetic_music:` must begin with <Audio N> (for example: `<Audio 1> serves as the full {description of the music, instrumentation, tempo, and rhythm} throughout the video.`) and must never be set to N/A, even if the on-screen subject dances or moves to that music. When <Audio N> supplies the full soundtrack, overall_soundscape states that physical action sounds and ambient acoustics are synchronized to <Audio N> without repeating the musical score description, while non_diegetic_music specifies the musical instruments, tempo, and rhythm of <Audio N>. Never write meta-commentary, irony, or mood critique (never write 'contrasts ironically', 'discordant mood', 'parody-style', or literary analysis in audio fields); describe only concrete physical sound sources and real musical instrumentation.
 
 Otherwise write one to three English sentences describing background music audible across the video, stating real instruments, tempo, rhythm, and dynamic development instead of abstract mood words. Use N/A only when no soundtrack or background music exists in the video or user instruction.
 
@@ -2589,7 +2589,7 @@ The number of Subjects described must match the number clearly featured in the i
 7. Plan adaptive contiguous timestamp ranges from 00.00s through the exact requested endpoint, aligning boundaries to panel transitions or cohesive multi-second movement phrases (never creating uniform single-frame micro-slices from a storyboard video and never collapsing distinct beats into sparse minimum-length blocks).
 8. Put [Shot 1] right after [VISUAL]: starting from the opening scene state, describing each `<Subject N>` in full on first appearance in `Timeline:`. In every segment, write a comprehensive 3 to 5 sentence `[VISUAL]` description (strict minimum 70 words, target 75 to 120 words) detailing exact subject positioning, posture, full start-to-end limb and body trajectories, facial expression, clothing dynamics, real-world lighting, and camera movement without mentioning panels, the storyboard, `source video`, `guide video`, `original video`, `reference video`, or `the guide`. Introduce [Shot N] ONLY when an actual instantaneous hard camera cut or discontinuous scene/angle jump occurs—if the scene has no camera cuts and runs as one continuous take, use ONLY [Shot 1] at 00.00s and omit [Shot N] from all subsequent segments.
 9. Maintain strict literal <Subject N> tag on every actor, receiver, giver, and touched body part. Strict Pronoun and 'Both' Ban: never write 'They', 'their', 'both', 'Both', 'he', or 'she' in [VISUAL] (including never writing 'both legs' or 'both hands').
-10. Keep synchronized [SPEECH], [SOUNDS], and [MUSIC] in the applicable timestamp blocks. Always emit [SPEECH] whenever a <Subject N>, character, or narrator speaks or sings (even over background music), and NEVER emit [SPEECH] for non-diegetic background song lyrics not sung by any subject. Never put music, beats, bass, drums, or rhythm in [SOUNDS]; when copying a soundtrack <Audio N> (tracked with `fully_copy` or `partially_copy` in `retention_analysis:`), write [MUSIC]: <Audio N>. Never describe singing or speaking in [VISUAL] unless `[SPEECH]` is present in that block.
+10. Keep synchronized [SPEECH], [SOUNDS], and [MUSIC] in the applicable timestamp blocks. Emit [SPEECH] only when a <Subject N>, character, or narrator speaks or sings (even over background music), and NEVER emit [SPEECH] for non-diegetic background song lyrics not sung by any subject; omit the [SPEECH] line completely when no speech occurs (never write '[SPEECH]: (No dialogue)', '[SPEECH]: N/A', or '[SPEECH]: (silent)'). Never put music, beats, bass, drums, or rhythm in [SOUNDS]; when copying a soundtrack <Audio N> (tracked with `fully_copy` or `partially_copy` in `retention_analysis:`), write [MUSIC]: <Audio N>. Never describe singing or speaking in [VISUAL] unless `[SPEECH]` is present in that block.
 11. Finish with overall_soundscape and non_diegetic_music (beginning `non_diegetic_music:` first and foremost with <Audio N> whenever copying a soundtrack or music <Audio N> tracked with `fully_copy` or `partially_copy`).
 12. Verify zero occurrences of pronouns or the word 'both' ('They', 'their', 'them', 'he', 'she', 'both', 'Both') outside spoken dialogue.
 
@@ -3097,7 +3097,7 @@ Timeline:
 [MUSIC]: <Audio 1>
 
 overall_soundscape:
-<Audio 1> provides the complete synchronized audio landscape consisting of {description of the audio elements}.
+<Audio 1> provides the synchronized ambient room acoustics and physical action sounds across the complete duration.
 
 non_diegetic_music:
 <Audio 1> serves as the full {description of the music} throughout the video.
@@ -3257,7 +3257,7 @@ When music is specific to one timestamp block, write [MUSIC] after [SOUNDS]. Sta
 
 #### overall_soundscape
 
-<Audio 1> provides the complete synchronized audio landscape consisting of ambient sound, physical action sounds, and score across the complete duration.
+<Audio 1> provides the synchronized ambient room acoustics and physical action sounds across the complete duration.
 
 Do not repeat dialogue, lyrics, singing, or interval-specific vocal content. Use N/A only when the user explicitly requests complete silence throughout the video.
 #### non_diegetic_music
@@ -4287,7 +4287,7 @@ Timeline:
 [MUSIC]: <Audio 1>
 
 overall_soundscape:
-<Audio 1> provides the complete synchronized audio landscape consisting of {description of the audio elements}.
+<Audio 1> provides the synchronized ambient room acoustics and physical action sounds across the complete duration.
 
 non_diegetic_music:
 <Audio 1> serves as the full {description of the music} throughout the video.
@@ -4734,7 +4734,7 @@ Timeline:
 [MUSIC]: <Audio 1>
 
 overall_soundscape:
-<Audio 1> provides the complete synchronized audio landscape consisting of {description of the audio elements}.
+<Audio 1> provides the synchronized ambient room acoustics and physical action sounds across the complete duration.
 
 non_diegetic_music:
 <Audio 1> serves as the full {description of the music} throughout the video.
