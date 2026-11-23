@@ -3,6 +3,10 @@
 Read `AGENTS-LOCAL.md` when present. It contains machine-specific operating
 rules and must remain local only; do not stage or commit it.
 
+Use `$comfyui-custom-node-development` for all development, testing, review, and
+packaging work in this repository. If the skill is unavailable, stop and tell
+the user that it must be installed before continuing.
+
 ## Environment and verification
 
 - Use the Python environment belonging to the ComfyUI installation under test.
@@ -67,6 +71,10 @@ rules and must remain local only; do not stage or commit it.
   mirror constants, arithmetic, or obvious return structures without protecting
   a meaningful external contract. Reuse existing coverage; prefer one regression
   for the actual failure/interaction over tests for each helper return.
+- Strictly limit test additions to protect the test-to-code ratio: add AT MOST ONE
+  contract/integration test per new node verifying schema validity, tooltips,
+  execution, and output contracts. Never create separate test functions for internal
+  helpers, regex token variations, substring formatting, or arithmetic permutations.
 - A test must address an identifiable failure mode or uncertainty. Passing
   mocked tests establishes only their assertions, not model-generation behavior.
 - Reuse completed results. Rerun only when relevant behavior, dependencies, or
@@ -108,6 +116,34 @@ rules and must remain local only; do not stage or commit it.
   (`## Available nodes`), and any relevant guide node (`UC_*Guide`) in the same
   change before committing so separate documentation-audit passes are
   unnecessary.
+
+## First-principles node design and reference porting
+
+- Never copy external reference widgets, socket names, arbitrary constants, or
+  arithmetic hacks verbatim (e.g. toy sliders, arbitrary multipliers, or private
+  inter-node socket couplings like naming an audio output `guide`).
+- Every input and output must be derived from first principles: single responsibility,
+  purposeful naming (`audio_guide` or `conditioning`), and zero redundant parameters
+  (e.g., MiniMax H3 is strictly 24 fps and operates on the `17k + 5` frame grid; never
+  expose redundant `fps` or manual frame count calculations when they can be derived
+  from `latent` or standard `length`).
+- When porting external functionality, design the node to match established
+  repository conventions and ComfyUI architecture, not the source repository's
+  private internal coupling.
+- For autogrow inputs (`io.Autogrow.Input`), always normalize input keys across
+  `kwargs` and input dictionaries by stripping dot prefixes (`k.split(".")[-1]`) so
+  dynamic sockets passed by ComfyUI frontend (e.g., `reference_audios.reference_audio_1`)
+  are never silently dropped.
+
+## Diffusion conditioning schedule integrity
+
+- When modifying diffusion conditioning with step cutoffs (`until`, `end_percent`),
+  NEVER truncate positive conditioning to an early interval without keeping the positive
+  prompt active across the remainder of the sampling run (`[until, 1.0]`).
+- Always use `node_helpers.conditioning_set_values_with_timestep_range` to ensure the
+  prompt remains active across 100% of sampling steps while only the temporary guide or
+  control is dropped after `until`. Truncating positive conditioning without a continuation
+  stretch starves the sampler of positive guidance and destroys generation into pure noise.
 
 ## Managed VLM presets
 
@@ -159,5 +195,7 @@ rules and must remain local only; do not stage or commit it.
 - Keep responses terse, smart, and technical. Drop filler, pleasantries, and unnecessary words.
 - Bound lines to under 40 words per line to prevent narrow-column UI breakage.
 - Never output walls of nested lists or decorative text.
+- Use logic and execute directly: never ask speculative, arbitrary questions or offer unrequested meta-options when given a directive.
+- Avoid binary over-correction: process context and nuance before taking destructive actions.
 
 
