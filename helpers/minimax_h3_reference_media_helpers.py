@@ -1,29 +1,20 @@
 from __future__ import annotations
 
-from collections.abc import Mapping
-from fractions import Fraction
 import math
 import numbers
 import re
-from typing import Any
-
-import torch
-import torch.nn.functional as F
-import torchaudio
+from collections.abc import Mapping
+from fractions import Fraction
 
 import comfy.model_management
 import comfy.nested_tensor
 import comfy.utils
-from comfy.text_encoders.minimax import token_tags_from_embeds_info
 import node_helpers
+import torch
+import torch.nn.functional as F
+import torchaudio
+from comfy.text_encoders.minimax import token_tags_from_embeds_info
 
-from .minimax_h3_cache_helpers import H3EncoderCache, H3_CACHE_MODES, temporal_cache_settings
-from .minimax_h3_guide_helpers import LAYOUT_KEY, build_layout
-from .minimax_h3_temporal_helpers import (
-    encode_temporal_conditioning,
-    fuse_temporal_block,
-    minimax_h3_temporal_frame_pairs,
-)
 from .encoder_helpers import (
     _active_clip_model,
     _encode_preprocessed_clip_model,
@@ -36,6 +27,9 @@ from .encoder_helpers import (
     resolve_consensus_blend_settings,
     visual_fusion_grid,
 )
+from .minimax_h3_cache_helpers import H3EncoderCache, temporal_cache_settings
+from .minimax_h3_guide_helpers import LAYOUT_KEY, build_layout
+from .minimax_h3_temporal_helpers import encode_temporal_conditioning, fuse_temporal_block, minimax_h3_temporal_frame_pairs
 
 
 def is_minimax_h3_text_encoder(clip) -> bool:
@@ -182,20 +176,10 @@ def _encode_minimax_h3_audio_reference(audio, audio_vae, cache=None) -> dict | N
     latent = audio_vae.encode(samples) if cache is None else cache.encode_vae(audio_vae, samples, media="audio")
     if not torch.is_tensor(latent) or latent.ndim < 1 or latent.shape[-1] < 1:
         raise ValueError("MiniMax H3 audio VAE returned an invalid latent.")
-    return {
-        "kind": "audio",
-        "audio_latent": latent,
-        "ref_audio_t": latent.shape[-1],
-    }
+    return {"kind": "audio", "audio_latent": latent, "ref_audio_t": latent.shape[-1]}
 
 
-def prepare_minimax_h3_reference_video(
-    video: torch.Tensor,
-    vae,
-    frame_count: int,
-    encode_reference: bool = True,
-    cache=None,
-) -> tuple[torch.Tensor, dict | None]:
+def prepare_minimax_h3_reference_video(video: torch.Tensor, vae, frame_count: int, encode_reference: bool = True, cache=None) -> tuple[torch.Tensor, dict | None]:
     """Format and VAE-encode video frames into an H3 reference block."""
     if not torch.is_tensor(video) or video.ndim != 4 or video.shape[0] < 1:
         raise ValueError("MiniMax H3 video must contain at least one frame.")
@@ -250,15 +234,7 @@ def prepare_minimax_h3_reference_video(
                 latent = torch.cat([lat1, lat2[:, :, 2:]], dim=2)
             else:
                 raise
-        ref_dict = {
-            "kind": "video",
-            "latent": latent,
-            "latent_t": latent.shape[2],
-            "latent_h": latent.shape[3],
-            "latent_w": latent.shape[4],
-            "ref_audio_t": 0,
-            "audio_latent": None,
-        }
+        ref_dict = {"kind": "video", "latent": latent, "latent_t": latent.shape[2], "latent_h": latent.shape[3], "latent_w": latent.shape[4], "ref_audio_t": 0, "audio_latent": None}
     return frames, ref_dict
 
 
@@ -276,39 +252,40 @@ def extract_minimax_h3_reference_media(reference_media) -> tuple[list, list]:
     ref_video_audios = (reference_media or {}).get("reference_video_audios") or {}
     ref_audios = (reference_media or {}).get("reference_audios") or {}
 
-    valid_videos = {k: v for k, v in ref_videos.items() if v is not None}
-    valid_audios = {k: v for k, v in ref_audios.items() if v is not None}
+    valid_videos = {k.split(".")[-1]: v for k, v in ref_videos.items() if v is not None}
+    valid_video_audios = {k.split(".")[-1]: v for k, v in ref_video_audios.items() if v is not None}
+    valid_audios = {k.split(".")[-1]: v for k, v in ref_audios.items() if v is not None}
+
+    def get_ordinal(key):
+        digits = re.findall(r"\d+", key)
+        return int(digits[0]) if digits else 0
 
     parsed_videos = []
+    used_soundtracks = set()
     if valid_videos:
-        def get_ordinal(key):
-            digits = re.findall(r"\d+", key)
-            return int(digits[0]) if digits else 0
-
         sorted_video_keys = sorted(valid_videos.keys(), key=get_ordinal)
         for k in sorted_video_keys:
             vid = valid_videos[k]
-            digits = re.findall(r"\d+", k)
-            ordinal_str = digits[0] if digits else ""
+            v_ord = get_ordinal(k)
             soundtrack = None
-            if ordinal_str:
-                for a_key, a_val in ref_video_audios.items():
-                    if a_val is not None:
-                        a_digits = re.findall(r"\d+", a_key)
-                        if a_digits and a_digits[0] == ordinal_str:
-                            soundtrack = a_val
-                            break
+            if v_ord:
+                for a_key, a_val in valid_video_audios.items():
+                    if a_val is not None and get_ordinal(a_key) == v_ord:
+                        soundtrack = a_val
+                        used_soundtracks.add(a_key)
+                        break
             parsed_videos.append((vid, soundtrack))
 
     parsed_audios = []
-    if valid_audios:
-        def get_ordinal(key):
-            digits = re.findall(r"\d+", key)
-            return int(digits[0]) if digits else 0
+    all_standalone = dict(valid_audios)
+    for a_key, a_val in valid_video_audios.items():
+        if a_key not in used_soundtracks and a_val is not None:
+            all_standalone[a_key] = a_val
 
-        sorted_audio_keys = sorted(valid_audios.keys(), key=get_ordinal)
+    if all_standalone:
+        sorted_audio_keys = sorted(all_standalone.keys(), key=get_ordinal)
         for k in sorted_audio_keys:
-            parsed_audios.append(valid_audios[k])
+            parsed_audios.append(all_standalone[k])
 
     return parsed_videos, parsed_audios
 
@@ -369,39 +346,24 @@ def _minimax_h3_ref_media_stage1_vae(item: dict, cache) -> dict:
         video_latent_fps = float(media_config.get("video_latent_fps", 2.0))
         refine_steps = int(media_config.get("refine_steps", 100))
 
-    encode_reference = (
-        video_latent_mode in ("full video", "pooled", "refined")
-        and vae is not None
-    )
+    encode_reference = video_latent_mode in ("full video", "pooled", "refined") and vae is not None
 
     prepared_reference_videos = []
     if parsed_videos:
         for vid, soundtrack in parsed_videos:
-            v_frames, v_ref = prepare_minimax_h3_reference_video(
-                vid, vae, frame_count, encode_reference=encode_reference, cache=cache
-            )
+            v_frames, v_ref = prepare_minimax_h3_reference_video(vid, vae, frame_count, encode_reference=encode_reference, cache=cache)
             if encode_reference and video_latent_mode in ("pooled", "refined") and v_ref is not None:
                 source_latent_t = v_ref["latent"].shape[2]
-                target_latent_frames = max(
-                    1, min(source_latent_t, round(source_latent_t * (video_latent_fps / 24.0)))
-                )
+                target_latent_frames = max(1, min(source_latent_t, round(source_latent_t * (video_latent_fps / 24.0))))
                 target_h = max(2, (video_reference_resolution // 32) * 2)
                 target_w = max(2, (video_reference_resolution // 32) * 2)
                 target_shape = (target_latent_frames, target_h, target_w)
                 if target_shape == tuple(v_ref["latent"].shape[2:]):
                     pooled_latent = v_ref["latent"].clone()
                 else:
-                    pooled_latent = F.adaptive_avg_pool3d(
-                        v_ref["latent"].to(torch.float32), target_shape
-                    ).to(v_ref["latent"].dtype)
+                    pooled_latent = F.adaptive_avg_pool3d(v_ref["latent"].to(torch.float32), target_shape).to(v_ref["latent"].dtype)
                 final_latent = pooled_latent
-                v_ref = {
-                    **v_ref,
-                    "latent": final_latent,
-                    "latent_t": final_latent.shape[2],
-                    "latent_h": final_latent.shape[3],
-                    "latent_w": final_latent.shape[4],
-                }
+                v_ref = {**v_ref, "latent": final_latent, "latent_t": final_latent.shape[2], "latent_h": final_latent.shape[3], "latent_w": final_latent.shape[4]}
             if v_ref is not None:
                 v_ref["kind"] = "video"
                 v_ref["ref_audio_t"] = 0
@@ -411,6 +373,7 @@ def _minimax_h3_ref_media_stage1_vae(item: dict, cache) -> dict:
     flat_images = []
     if reference_images is not None:
         if isinstance(reference_images, dict):
+
             def get_num(k):
                 digits = re.findall(r"\d+", k)
                 return int(digits[0]) if digits else 0
@@ -420,7 +383,7 @@ def _minimax_h3_ref_media_stage1_vae(item: dict, cache) -> dict:
                 if torch.is_tensor(v):
                     if v.ndim == 4:
                         for i in range(v.shape[0]):
-                            flat_images.append(v[i:i+1])
+                            flat_images.append(v[i : i + 1])
                     else:
                         flat_images.append(v)
         elif isinstance(reference_images, (list, tuple)):
@@ -428,13 +391,13 @@ def _minimax_h3_ref_media_stage1_vae(item: dict, cache) -> dict:
                 if torch.is_tensor(v):
                     if v.ndim == 4:
                         for i in range(v.shape[0]):
-                            flat_images.append(v[i:i+1])
+                            flat_images.append(v[i : i + 1])
                     else:
                         flat_images.append(v)
         elif torch.is_tensor(reference_images):
             if reference_images.ndim == 4:
                 for i in range(reference_images.shape[0]):
-                    flat_images.append(reference_images[i:i+1])
+                    flat_images.append(reference_images[i : i + 1])
             else:
                 flat_images.append(reference_images)
 
@@ -472,12 +435,7 @@ def _minimax_h3_ref_media_stage1_vae(item: dict, cache) -> dict:
                 prepared_img = samples.movedim(1, -1)
 
             latent_img = vae.encode(prepared_img) if cache is None else cache.encode_vae(vae, prepared_img, media="image")
-            image_references.append({
-                "kind": "image",
-                "latent_h": th // 16,
-                "latent_w": tw // 16,
-                "latent": latent_img,
-            })
+            image_references.append({"kind": "image", "latent_h": th // 16, "latent_w": tw // 16, "latent": latent_img})
 
     return {
         "clip": clip,
@@ -519,12 +477,7 @@ def _minimax_h3_ref_media_stage2_audio_vae(item: dict, stage1_res: dict, cache) 
         if soundtrack is not None and audio_vae is not None:
             a_ref = _encode_minimax_h3_audio_reference(soundtrack, audio_vae, cache=cache)
         if v_ref is not None and a_ref is not None:
-            v_ref = {
-                **v_ref,
-                "kind": "video_audio",
-                "ref_audio_t": a_ref["ref_audio_t"],
-                "audio_latent": a_ref["audio_latent"],
-            }
+            v_ref = {**v_ref, "kind": "video_audio", "ref_audio_t": a_ref["ref_audio_t"], "audio_latent": a_ref["audio_latent"]}
             a_ref = None
         updated_reference_videos.append((v_frames, soundtrack, v_ref, a_ref))
 
@@ -583,18 +536,12 @@ def _minimax_h3_ref_media_stage3_clip(item: dict, stage1_res: dict, cache):
 
     for v_frames, _s_track, _v_ref, _a_ref in prepared_reference_videos:
         sample_indices = minimax_h3_video_sample_indices(v_frames.shape[0], video_fps)
-        vlm_frames = prepare_minimax_h3_vlm_video_frames(
-            v_frames[sample_indices], vlm_video_resolution
-        )
+        vlm_frames = prepare_minimax_h3_vlm_video_frames(v_frames[sample_indices], vlm_video_resolution)
         timestamps = [Fraction(index, 24) for index in sample_indices]
         if vlm_frames.shape[0] % 2 == 1:
             vlm_frames = torch.cat([vlm_frames, vlm_frames[-1:]], dim=0)
             timestamps.append(timestamps[-1])
-        reference_items.append({
-            "type": "video",
-            "data": vlm_frames,
-            "timestamps": timestamps,
-        })
+        reference_items.append({"type": "video", "data": vlm_frames, "timestamps": timestamps})
 
     for _v_frames, s_track, _v_ref, _a_ref in prepared_reference_videos:
         if s_track is not None:
@@ -611,10 +558,7 @@ def _minimax_h3_ref_media_stage3_clip(item: dict, stage1_res: dict, cache):
             raise ValueError("MiniMax H3 temporal density must be an integer from 1 to 24.")
         if method not in ("consensus", "spatial"):
             raise ValueError("Unsupported MiniMax H3 temporal fusion method.")
-        default_consensus = {
-            "blend_preset": "custom", "alignment_method": "index", "consensus_type": "median",
-            "power_alpha": 2.0, "diversity_beta": 0.0, "rescale_norm": True, "global_scale": 1.0,
-        }
+        default_consensus = {"blend_preset": "custom", "alignment_method": "index", "consensus_type": "median", "power_alpha": 2.0, "diversity_beta": 0.0, "rescale_norm": True, "global_scale": 1.0}
         settings = resolve_consensus_blend_settings(default_consensus if text_blend_config is None else text_blend_config)
         visual_config = visual_fusion_config or {}
         visual_method = visual_config.get("visual_fusion_method", "off")
@@ -629,32 +573,23 @@ def _minimax_h3_ref_media_stage3_clip(item: dict, stage1_res: dict, cache):
                     all_frame_pairs.append([(v_frames, pair) for pair in block])
 
             def fuse_video_block(sources, grids, deepstack):
+
                 def compute():
-                    return fuse_temporal_block(
-                        sources, method, settings, visual_config, grids,
-                        spatial_fuse_callback=fuse_visual_token_sources,
-                        position_score_callback=_position_biased_similarity_scores,
-                        deepstack_layers=deepstack,
-                    )
+                    return fuse_temporal_block(sources, method, settings, visual_config, grids, spatial_fuse_callback=fuse_visual_token_sources, position_score_callback=_position_biased_similarity_scores, deepstack_layers=deepstack)
+
                 if len(sources) == 1 or temporal_token_fusion:
                     return compute()
-                return cache.get_or_compute("encoded_section", {
-                    "sources": sources, "grids": grids, "deepstack": deepstack,
-                    "method": method, "settings": temporal_cache_settings(method, settings, visual_config),
-                    "section": "temporal_post_qwen", "device": str(sources[0].device),
-                }, compute)
+                return cache.get_or_compute("encoded_section", {"sources": sources, "grids": grids, "deepstack": deepstack, "method": method, "settings": temporal_cache_settings(method, settings, visual_config), "section": "temporal_post_qwen", "device": str(sources[0].device)}, compute)
 
             def temporal_encode(tokens, encode_tokens_callback=None):
                 return encode_temporal_conditioning(
-                    clip, tokens, all_frame_pairs,
-                    lambda pair_info: prepare_minimax_h3_vlm_video_frames(
-                        pair_info[0][list(pair_info[1])], vlm_video_resolution
-                    ),
+                    clip,
+                    tokens,
+                    all_frame_pairs,
+                    lambda pair_info: prepare_minimax_h3_vlm_video_frames(pair_info[0][list(pair_info[1])], vlm_video_resolution),
                     token_fusion=temporal_token_fusion,
                     fusion_callback=fuse_video_block,
-                    encode_tokens_callback=encode_tokens_callback or (
-                        lambda value: _encode_scheduled_with_visual_path(clip, value, "grid-deepstack", cache=cache)
-                    ),
+                    encode_tokens_callback=encode_tokens_callback or (lambda value: _encode_scheduled_with_visual_path(clip, value, "grid-deepstack", cache=cache)),
                     active_clip_model_callback=_active_clip_model,
                     encode_preprocessed_callback=_encode_preprocessed_clip_model,
                     visual_context_callback=lambda: qwen3vl_visual_encoder_path(clip, "grid-deepstack"),
@@ -664,14 +599,7 @@ def _minimax_h3_ref_media_stage3_clip(item: dict, stage1_res: dict, cache):
                 )
 
     tokenize_callback = lambda text: clip.tokenize(text, minimax_ref_items=reference_items)
-    conditioning = encode_embedding_classical_scaled_bias(
-        clip,
-        prompt,
-        tokenize_callback=tokenize_callback,
-        visual_encoder_path="grid-deepstack",
-        encode_callback=temporal_encode,
-        cache=cache,
-    )
+    conditioning = encode_embedding_classical_scaled_bias(clip, prompt, tokenize_callback=tokenize_callback, visual_encoder_path="grid-deepstack", encode_callback=temporal_encode, cache=cache)
 
     layout_conditioning = []
     for tensor, metadata in conditioning:
@@ -720,10 +648,7 @@ def _package_minimax_h3_ref_media_stage4(stage1_res: dict, conditioning):
     return conditioning, latent
 
 
-def execute_batch_minimax_h3_reference_media_image_to_video(
-    items: list[dict],
-    enable_caching: str = "all",
-) -> tuple[list, list]:
+def execute_batch_minimax_h3_reference_media_image_to_video(items: list[dict], enable_caching: str = "all") -> tuple[list, list]:
     """Execute MiniMax H3 Reference Media encoding across a list of entries in 4 type-ordered stages.
 
     Stages:
@@ -737,9 +662,7 @@ def execute_batch_minimax_h3_reference_media_image_to_video(
     for item in items:
         clip = _unwrap_single(item.get("clip"))
         if not is_minimax_h3_text_encoder(clip):
-            raise ValueError(
-                "Advanced MiniMax H3 Reference Media to Video requires the qwen3vl_32b text encoder."
-            )
+            raise ValueError("Advanced MiniMax H3 Reference Media to Video requires the qwen3vl_32b text encoder.")
 
     with H3EncoderCache(enable_caching) as cache:
         stage1_results = [_minimax_h3_ref_media_stage1_vae(item, cache) for item in items]
@@ -747,10 +670,7 @@ def execute_batch_minimax_h3_reference_media_image_to_video(
         for i, item in enumerate(items):
             _minimax_h3_ref_media_stage2_audio_vae(item, stage1_results[i], cache)
 
-        stage3_results = [
-            _minimax_h3_ref_media_stage3_clip(item, stage1_results[i], cache)
-            for i, item in enumerate(items)
-        ]
+        stage3_results = [_minimax_h3_ref_media_stage3_clip(item, stage1_results[i], cache) for i, item in enumerate(items)]
 
         all_conds = []
         all_latents = []
@@ -790,9 +710,7 @@ def execute_advanced_minimax_h3_reference_media_image_to_video(
     """Build coordinated Qwen conditioning, H3 controls, and AV latent strictly from reference_media."""
     clip = _unwrap_single(clip)
     if not is_minimax_h3_text_encoder(clip):
-        raise ValueError(
-            "Advanced MiniMax H3 Reference Media to Video requires the qwen3vl_32b text encoder."
-        )
+        raise ValueError("Advanced MiniMax H3 Reference Media to Video requires the qwen3vl_32b text encoder.")
     item = {
         "clip": clip,
         "vae": vae,
@@ -821,7 +739,5 @@ def execute_advanced_minimax_h3_reference_media_image_to_video(
         cond = _minimax_h3_ref_media_stage3_clip(item, stage1, cache)
         return _package_minimax_h3_ref_media_stage4(stage1, cond)
 
-    all_conds, all_latents = execute_batch_minimax_h3_reference_media_image_to_video(
-        [item], enable_caching=enable_caching
-    )
+    all_conds, all_latents = execute_batch_minimax_h3_reference_media_image_to_video([item], enable_caching=enable_caching)
     return all_conds[0], all_latents[0]

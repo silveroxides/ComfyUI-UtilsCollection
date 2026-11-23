@@ -1,81 +1,74 @@
-import sys
-import re
+import logging
 import math
 import os
-import gc
+import re
+import sys
 import types
-import logging
-import torch
-import torch.nn.functional as F
 
 import comfy
-import nodes
 import folder_paths
 import node_helpers
-from comfy_api.latest import ComfyExtension, io
-from ..helpers.helper_functions import get_token_count, get_token_count_scaled, resize_nchw
-from ..helpers.minimax_h3_cache_helpers import H3_CACHE_MODES
+import torch
+from comfy_api.latest import io
+
+import nodes
+
 from ..helpers.encoder_helpers import (
-    encode_embedding_scaled_bias,
-    is_image_token,
-    evaluate_formula,
-    evaluate_conditioning_formula,
-    evaluate_conditioning_consensus_blend,
-    save_source_visual_embeddings,
+    MINIMAX_H3_MEDIA_STRUCTURE,
+    VISION_BLOCK,
+    ImageInputMapping,
     blend_text_vectors,
-    find_visual_token_range,
+    build_context_attention_bias,
+    build_minimax_h3_media_config,
     build_token_to_conditioning_map,
     encode_embedding_classical_scaled_bias,
-    strip_contextual_weight_syntax,
-    load_vlm_image_tensor,
-    krea2_user_content_span,
-    krea2_token_ids,
-    find_subsequence,
-    krea2_attn_forward_weight,
-    ImageInputMapping,
-    VISION_BLOCK,
-    prepare_image_placeholder_prompt,
-    extract_and_flatten_images,
-    resolve_embedding_output_path,
-    save_uel_embedding_safetensors,
-    visual_fusion_grid,
-    prepare_vlm_image,
-    prepare_vae_reference_image,
-    qwen3vl_visual_encoder_path,
-    is_klein_vl_text_encoder,
-    is_flux3_text_encoder,
-    format_flux3_prompt,
-    is_moss_image_text_encoder,
-    format_moss_image_prompt,
-    is_qwen_image21_text_encoder,
-    format_qwen_image21_prompt,
-    prepare_qwen_image21_image,
-    is_minimax_h3_text_encoder,
-    tokenize_minimax_h3_prompt,
-    format_minimax_h3_prompt,
-    CONSENSUS_BLEND_PRESETS,
-    execute_advanced_visual_consensus,
+    encode_embedding_scaled_bias,
+    evaluate_conditioning_consensus_blend,
+    evaluate_conditioning_formula,
+    evaluate_formula,
     execute_advanced_minimax_h3_image_to_video,
+    execute_advanced_visual_consensus,
     execute_batch_minimax_h3_image_to_video,
-    execute_minimax_h3_vlm_guide,
     execute_minimax_h3_vlm_frame_guide,
-    build_minimax_h3_media_config,
-    MINIMAX_H3_MEDIA_STRUCTURE,
-    MINIMAX_H3_VIDEO_LATENT_MODES,
+    execute_minimax_h3_vlm_guide,
     execute_token_fusion_visual_conditioning,
-    build_context_attention_bias,
-    resolve_reference_latent_output,
+    extract_and_flatten_images,
+    find_subsequence,
+    find_visual_token_range,
+    format_flux3_prompt,
+    format_minimax_h3_prompt,
+    format_moss_image_prompt,
+    format_qwen_image21_prompt,
+    get_list_batch_size,
+    is_flux3_text_encoder,
+    is_klein_vl_text_encoder,
+    is_list_batch_call,
+    is_minimax_h3_text_encoder,
+    is_moss_image_text_encoder,
+    is_qwen_image21_text_encoder,
+    krea2_attn_forward_weight,
+    krea2_token_ids,
+    krea2_user_content_span,
+    load_vlm_image_tensor,
     normalize_h3_fusion_method,
     normalize_visual_fusion_method,
-    is_list_batch_call,
-    get_list_batch_size,
+    prepare_image_placeholder_prompt,
+    prepare_qwen_image21_image,
+    prepare_vae_reference_image,
+    prepare_vlm_image,
+    qwen3vl_visual_encoder_path,
+    resolve_embedding_output_path,
+    resolve_reference_latent_output,
+    save_source_visual_embeddings,
+    save_uel_embedding_safetensors,
     slice_item_inputs,
+    strip_contextual_weight_syntax,
+    tokenize_minimax_h3_prompt,
+    visual_fusion_grid,
 )
-from ..helpers.minimax_h3_reference_media_helpers import (
-    execute_advanced_minimax_h3_reference_media_image_to_video,
-    execute_batch_minimax_h3_reference_media_image_to_video,
-)
-from ..helpers.image_helpers import VIDEO_FRAME_TIMESTAMP_FORMATS
+from ..helpers.helper_functions import resize_nchw
+from ..helpers.minimax_h3_cache_helpers import H3_CACHE_MODES
+from ..helpers.minimax_h3_reference_media_helpers import execute_advanced_minimax_h3_reference_media_image_to_video, execute_batch_minimax_h3_reference_media_image_to_video
 
 
 def apply_parallel_ref_latents(clip, conditioning, ref_latents, ref_latent_mode):
@@ -405,19 +398,20 @@ class UC_MiniMaxH3ReferenceMedia(io.ComfyNode):
 
     @classmethod
     def execute(cls, reference_videos: io.Autogrow.Type = None, reference_video_audios: io.Autogrow.Type = None, reference_audios: io.Autogrow.Type = None, **kwargs) -> io.NodeOutput:
-        vids = dict(reference_videos) if isinstance(reference_videos, dict) else {}
-        vid_auds = dict(reference_video_audios) if isinstance(reference_video_audios, dict) else {}
-        auds = dict(reference_audios) if isinstance(reference_audios, dict) else {}
+        vids = {k.split(".")[-1]: v for k, v in dict(reference_videos).items() if v is not None} if isinstance(reference_videos, dict) else {}
+        vid_auds = {k.split(".")[-1]: v for k, v in dict(reference_video_audios).items() if v is not None} if isinstance(reference_video_audios, dict) else {}
+        auds = {k.split(".")[-1]: v for k, v in dict(reference_audios).items() if v is not None} if isinstance(reference_audios, dict) else {}
 
         for k, v in kwargs.items():
             if v is None:
                 continue
-            if k.startswith("reference_video_audio_"):
-                vid_auds[k] = v
-            elif k.startswith("reference_video_"):
-                vids[k] = v
-            elif k.startswith("reference_audio_"):
-                auds[k] = v
+            clean_k = k.split(".")[-1]
+            if clean_k.startswith("reference_video_audio_"):
+                vid_auds[clean_k] = v
+            elif clean_k.startswith("reference_video_"):
+                vids[clean_k] = v
+            elif clean_k.startswith("reference_audio_"):
+                auds[clean_k] = v
 
         return io.NodeOutput({"reference_videos": vids, "reference_video_audios": vid_auds, "reference_audios": auds})
 
@@ -727,7 +721,7 @@ class UC_ScaledBiasTextEncodeSystemPrompt(io.ComfyNode):
         if model_type == "klein" and len(thinking_content) > 0:
             # Klein with custom thinking content
             if len(system_prompt) > 0:
-                llama_template = f"<|im_start|>system\n{system_prompt}<|im_end|>\n" + f"<|im_start|>user\n{{}}<|im_end|>\n" + f"<|im_start|>assistant\n<think>\n{thinking_content}\n</think>\n\n"
+                llama_template = f"<|im_start|>system\n{system_prompt}<|im_end|>\n" + "<|im_start|>user\n{}<|im_end|>\n" + f"<|im_start|>assistant\n<think>\n{thinking_content}\n</think>\n\n"
             else:
                 llama_template = "<|im_start|>user\n{}<|im_end|>\n" + f"<|im_start|>assistant\n<think>\n{thinking_content}\n</think>\n\n"
             skip_template = True
@@ -994,7 +988,7 @@ class TextEncodeSystemEditPlusAdvanced(io.ComfyNode):
                 name = ImageInputMapping.get_display_name(num, is_zero_indexed)
                 processed_img = processed_images[name]
                 images_vl.append(processed_img)
-                image_prompt += f"<|vision_start|><|image_pad|><|vision_end|>"
+                image_prompt += "<|vision_start|><|image_pad|><|vision_end|>"
 
             modified_prompt = image_prompt + modified_prompt
 
@@ -1130,7 +1124,7 @@ class TextEncodeKrea2SystemEditPlusAdvanced(io.ComfyNode):
                 name = ImageInputMapping.get_display_name(num, is_zero_indexed)
                 processed_img = processed_images[name]
                 images_vl.append(processed_img)
-                image_prompt += f"<|vision_start|><|image_pad|><|vision_end|>"
+                image_prompt += "<|vision_start|><|image_pad|><|vision_end|>"
 
             modified_prompt = image_prompt + modified_prompt
 
@@ -1265,7 +1259,7 @@ class TextEncodeEditPlusAdvanced(io.ComfyNode):
                 name = ImageInputMapping.get_display_name(num, is_zero_indexed)
                 processed_img = processed_images[name]
                 images_vl.append(processed_img)
-                image_prompt += f"<|vision_start|><|image_pad|><|vision_end|>"
+                image_prompt += "<|vision_start|><|image_pad|><|vision_end|>"
 
             modified_prompt = image_prompt + modified_prompt
 
@@ -1349,7 +1343,7 @@ class TextEncodeGemmaSystemEditPlusAdvanced(io.ComfyNode):
                 img = raw_images[num]
                 images_vl_raw.append(img)
                 display_num = num + 1 if is_zero_indexed else num
-                image_prompt += f"<img><image_soft_token><end_of_image>"
+                image_prompt += "<img><image_soft_token><end_of_image>"
 
             modified_prompt = image_prompt + prompt
 
@@ -3626,8 +3620,9 @@ class UC_AdvancedMiniMaxH3RefMediaImageToVideo(io.ComfyNode):
             extra_kwargs = {k: v for k, v in raw_args.items() if k not in base_keys}
             ref_imgs = dict(reference_images) if isinstance(reference_images, dict) else {}
             for k, v in extra_kwargs.items():
-                if k.startswith("reference_image_") and v is not None:
-                    ref_imgs[k] = v
+                clean_k = k.split(".")[-1]
+                if clean_k.startswith("reference_image_") and v is not None:
+                    ref_imgs[clean_k] = v
             if not ref_imgs and not isinstance(reference_images, dict):
                 ref_imgs = reference_images
 
@@ -3799,12 +3794,7 @@ class UC_AdvMiniMaxH3RefMediaImageToVideoTemporalFusion(UC_AdvancedMiniMaxH3RefM
             return io.NodeOutput(conditioning, latent)
 
         batch_size = get_list_batch_size(raw_args)
-        base_keys = {
-            "clip", "vae", "prompt", "width", "height", "length", "first_frame", "last_frame",
-            "reference_media", "audio_vae", "multiplier", "ref_image_size", "vlm_resolution",
-            "vlm_video_resolution", "enable_caching", "media_config", "reference_images",
-            "visual_fusion_config", "text_blend_config", "fusion_method",
-        }
+        base_keys = {"clip", "vae", "prompt", "width", "height", "length", "first_frame", "last_frame", "reference_media", "audio_vae", "multiplier", "ref_image_size", "vlm_resolution", "vlm_video_resolution", "enable_caching", "media_config", "reference_images", "visual_fusion_config", "text_blend_config", "fusion_method"}
         items = []
         for entry_id in range(batch_size):
             item = slice_item_inputs(raw_args, entry_id)
