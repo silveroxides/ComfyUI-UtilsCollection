@@ -874,6 +874,7 @@ def test_ref_extract_keeps_old_inputs_and_attaches_optional_qwen(monkeypatch):
     monkeypatch.setattr(model_helpers, "encode_minimax_h3_ref_vlm", encode)
     monkeypatch.setattr(model_helpers, "fuse_minimax_h3_ref_vlm_images", lambda _clip, media, resolution, number: encode(_clip, "image", media, resolution, number))
     schema = model_nodes.UC_MiniMaxH3RefExtract.define_schema()
+    assert schema.is_input_list is True
     assert [item.id for item in schema.inputs[:4]] == ["images", "vae", "media_type", "description"]
     assert any(item.id == "clip" and item.optional for item in schema.inputs)
     assert any(item.id == "vlm_reference_start" for item in schema.inputs)
@@ -885,6 +886,18 @@ def test_ref_extract_keeps_old_inputs_and_attaches_optional_qwen(monkeypatch):
     assert calls == [(clip, "image", (2, 32, 64, 3), 512, 21)]
     assert refs[0]["metadata"]["vlm_reference_number"] == 21
     assert all("vlm_embedding" in ref and "vlm_tags" in ref for ref in refs)
+
+    # Test list of differently-sized images with fuse_images=False produces multiple separate refs
+    list_images = [torch.zeros((1, 32, 64, 3)), torch.zeros((1, 48, 48, 3))]
+    bundle_refs = model_nodes.UC_MiniMaxH3RefExtract.execute(list_images, _VisualVae(), media_type, clip=clip, vlm_resolution=512, vlm_reference_start=21, fuse_images=False)[0]
+    assert len(bundle_refs) == 2
+    assert bundle_refs[0]["metadata"]["vlm_reference_number"] == 21
+    assert bundle_refs[1]["metadata"]["vlm_reference_number"] == 22
+
+    # Test list of differently-sized images with fuse_images=True automatically resizes to match and fuses
+    fused_list_refs = model_nodes.UC_MiniMaxH3RefExtract.execute(list_images, _VisualVae(), media_type, clip=clip, vlm_resolution=512, vlm_reference_start=21, fuse_images=True)[0]
+    assert len(fused_list_refs) == 1
+    assert fused_list_refs[0]["metadata"]["source_images"] == 2
     video_type = {"media_type": "video", "compression": {"compression": "encode"}}
     video_ref = model_nodes.UC_MiniMaxH3RefExtract.execute(torch.zeros((22, 32, 64, 3)), _VisualVae(), video_type, clip=clip, vlm_resolution=512, vlm_reference_start=30)[0][0]
     assert calls[-1] == (clip, "video", (22, 32, 64, 3), 512, 30)

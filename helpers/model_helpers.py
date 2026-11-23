@@ -1913,41 +1913,90 @@ def _compress_minimax_h3_visual_ref(ref: dict, compression: str, grid_long_edge:
     return {**ref, "latent": latent, "metadata": metadata}
 
 
-def create_minimax_h3_image_refs(images: torch.Tensor, vae, compression: str = "encode", grid_long_edge: int = 16, refine_steps: int = 100, description: str = "", clip=None, vlm_resolution: int = 384, vlm_reference_start: int = 17, fuse_images: bool = True) -> list[dict]:
-    if not torch.is_tensor(images) or images.ndim != 4 or images.shape[0] < 1:
-        raise ValueError("MiniMax H3 Ref images must be a non-empty BHWC image batch.")
+def _flatten_image_inputs(images) -> list[torch.Tensor]:
+    flat = []
+    if isinstance(images, (list, tuple)):
+        for item in images:
+            flat.extend(_flatten_image_inputs(item))
+    elif torch.is_tensor(images):
+        if images.ndim == 4:
+            for b in range(images.shape[0]):
+                flat.append(images[b : b + 1])
+        elif images.ndim == 3:
+            flat.append(images.unsqueeze(0))
+    return flat
+
+
+def _unwrap_nested(val):
+    while isinstance(val, (list, tuple)):
+        val = val[0] if len(val) > 0 else None
+    if isinstance(val, dict):
+        return {k: _unwrap_nested(v) for k, v in val.items()}
+    return val
+
+
+def create_minimax_h3_image_refs(images, vae, compression: str = "encode", grid_long_edge: int = 16, refine_steps: int = 100, description: str = "", clip=None, vlm_resolution: int = 384, vlm_reference_start: int = 17, fuse_images: bool = True, target_resolution: int | None = None) -> list[dict]:
+    flat_images = _flatten_image_inputs(images)
+    if not flat_images:
+        raise ValueError("MiniMax H3 Ref images must contain at least one valid image.")
     if vae is None or not callable(getattr(vae, "encode", None)):
         raise ValueError("MiniMax H3 Ref images require a visual VAE input.")
+
+    # Rescale each image along longer edge to target_resolution (nearest multiple of 32), preserving aspect ratio
+    if target_resolution is not None and target_resolution >= 32:
+        tgt = max(32, round(target_resolution / 32) * 32)
+        prepared_sources = []
+        for img in flat_images:
+            h, w = img.shape[1:3]
+            scale = min(1.0, tgt / max(w, h))
+            new_w = max(32, round(w * scale / 32) * 32)
+            new_h = max(32, round(h * scale / 32) * 32)
+            if (w, h) != (new_w, new_h):
+                samples = img[..., :3].movedim(-1, 1)
+                img = comfy.utils.common_upscale(samples, new_w, new_h, "lanczos", "center").movedim(1, -1)
+            prepared_sources.append(img)
+        flat_images = prepared_sources
+
+    def _prepare_source(source):
+        if target_resolution is not None and target_resolution >= 32:
+            return source
+        return prepare_minimax_h3_reference_image(source, 2048, 2048, "max")
+
     if not fuse_images:
         refs = []
-        for index, image in enumerate(images):
-            source = image.unsqueeze(0)
-            prepared = prepare_minimax_h3_reference_image(source, 2048, 2048, "max")
+        for index, source in enumerate(flat_images):
+            prepared = _prepare_source(source)
             latent = _validate_visual_latent(vae.encode(prepared), "image")
             metadata = {"description": description, "source": "image"}
             ref = {"kind": "image", "latent": latent, "metadata": metadata}
             if clip is not None:
-                ref["vlm_embedding"], ref["vlm_tags"] = encode_minimax_h3_ref_vlm(clip, "image", source, vlm_resolution, vlm_reference_start + index)
+                ref["vlm_embedding"], ref["vlm_tags"] = encode_minimax_h3_ref_vlm(clip, "image", prepared, vlm_resolution, vlm_reference_start + index)
                 metadata.update({"vlm_presentation": "image_numbered", "vlm_resolution": vlm_resolution, "vlm_reference_number": vlm_reference_start + index})
             refs.append(_compress_minimax_h3_visual_ref(ref, compression, grid_long_edge, None, refine_steps))
         return refs
     fused = None
     output_dtype = None
-    for index, image in enumerate(images):
-        source = image.unsqueeze(0)
-        prepared = prepare_minimax_h3_reference_image(source, 2048, 2048, "max")
+    # For fusion, match subsequent image sizes to the first image if they differ
+    first_h, first_w = flat_images[0].shape[1:3]
+    for index, source in enumerate(flat_images):
+        if source.shape[1:3] != (first_h, first_w):
+            samples = source[..., :3].movedim(-1, 1)
+            samples = comfy.utils.common_upscale(samples, first_w, first_h, "lanczos", "center")
+            source = samples.movedim(1, -1)
+        prepared = _prepare_source(source)
         latent = _validate_visual_latent(vae.encode(prepared), "image")
         if fused is None:
             output_dtype = latent.dtype
-            fused = latent.to(device="cpu", dtype=torch.float32).clone() if images.shape[0] > 1 else latent
+            fused = latent.to(device="cpu", dtype=torch.float32).clone() if len(flat_images) > 1 else latent
         else:
             if latent.shape != fused.shape:
                 raise ValueError("MiniMax H3 Ref images must produce matching VAE latent shapes for fusion.")
             fused.lerp_(latent.to(device="cpu", dtype=torch.float32), 1.0 / (index + 1))
-    metadata = {"description": description, "source": "image", "source_images": int(images.shape[0])}
+    metadata = {"description": description, "source": "image", "source_images": len(flat_images)}
     ref = {"kind": "image", "latent": fused.to(output_dtype), "metadata": metadata}
     if clip is not None:
-        ref["vlm_embedding"], ref["vlm_tags"] = fuse_minimax_h3_ref_vlm_images(clip, images, vlm_resolution, vlm_reference_start)
+        matched_batch = torch.cat([_prepare_source(img if img.shape[1:3] == (first_h, first_w) else comfy.utils.common_upscale(img[..., :3].movedim(-1, 1), first_w, first_h, "lanczos", "center").movedim(1, -1)) for img in flat_images], dim=0)
+        ref["vlm_embedding"], ref["vlm_tags"] = fuse_minimax_h3_ref_vlm_images(clip, matched_batch, vlm_resolution, vlm_reference_start)
         metadata.update({"vlm_presentation": "image_numbered", "vlm_resolution": vlm_resolution, "vlm_reference_number": vlm_reference_start})
     return [_compress_minimax_h3_visual_ref(ref, compression, grid_long_edge, None, refine_steps)]
 

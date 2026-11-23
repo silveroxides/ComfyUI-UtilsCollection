@@ -1,5 +1,6 @@
 import json
 
+import torch
 from comfy_api.latest import io
 
 from nodes import MAX_RESOLUTION
@@ -176,6 +177,7 @@ class UC_MiniMaxH3RefExtract(io.ComfyNode):
             category="model/minimax_h3",
             description="Fuses an image batch into one reusable MiniMax H3 reference, or encodes one video clip.",
             search_aliases=["minimax", "h3", "reference", "ref", "image", "video"],
+            is_input_list=True,
             inputs=[
                 io.Image.Input("images", tooltip="Image mode fuses the batch into one reference. Video mode treats the batch as one 24 fps clip; provide at least five frames."),
                 io.Vae.Input("vae", display_name="visual vae", tooltip="Connect the MiniMax H3 video VAE for both images and video."),
@@ -191,14 +193,40 @@ class UC_MiniMaxH3RefExtract(io.ComfyNode):
 
     @classmethod
     def execute(cls, images, vae, media_type, description="", clip=None, vlm_resolution=384, vlm_reference_start=17, fuse_images=True) -> io.NodeOutput:
+        while isinstance(vae, (list, tuple)):
+            vae = vae[0] if len(vae) > 0 else None
+        while isinstance(media_type, (list, tuple)):
+            media_type = media_type[0] if len(media_type) > 0 else {}
+        while isinstance(description, (list, tuple)):
+            description = description[0] if len(description) > 0 else ""
+        while isinstance(clip, (list, tuple)):
+            clip = clip[0] if len(clip) > 0 else None
+        while isinstance(vlm_resolution, (list, tuple)):
+            vlm_resolution = vlm_resolution[0] if len(vlm_resolution) > 0 else 384
+        while isinstance(vlm_reference_start, (list, tuple)):
+            vlm_reference_start = vlm_reference_start[0] if len(vlm_reference_start) > 0 else 17
+        while isinstance(fuse_images, (list, tuple)):
+            fuse_images = fuse_images[0] if len(fuse_images) > 0 else True
+
+        # Unpack nested dynamic combo dictionaries when wrapped in lists by is_input_list
+        def _unwrap_scalar_dict(d):
+            if isinstance(d, dict):
+                return {k: _unwrap_scalar_dict(v) for k, v in d.items()}
+            while isinstance(d, (list, tuple)):
+                d = d[0] if len(d) > 0 else None
+            return d
+
+        media_type = _unwrap_scalar_dict(media_type) or {}
         kind = media_type.get("media_type")
         compression = media_type.get("compression", {})
         mode = compression.get("compression")
-        grid_long_edge = minimax_h3_ref_resolution_grid(compression["reference_resolution"]) if mode != "encode" else 16
+        ref_res = compression.get("reference_resolution")
+        grid_long_edge = minimax_h3_ref_resolution_grid(ref_res) if mode != "encode" and ref_res is not None else 16
         if kind == "image":
-            refs = create_minimax_h3_image_refs(images, vae, mode, grid_long_edge, compression.get("refine_steps", 100), description, clip, vlm_resolution, vlm_reference_start, fuse_images=fuse_images)
+            refs = create_minimax_h3_image_refs(images, vae, mode, grid_long_edge, compression.get("refine_steps", 100), description, clip, vlm_resolution, vlm_reference_start, fuse_images=fuse_images, target_resolution=ref_res)
         else:
-            refs = [create_minimax_h3_video_ref(images, vae, mode, grid_long_edge, compression.get("temporal_density", 16), compression.get("refine_steps", 100), description, clip, vlm_resolution, vlm_reference_start)]
+            video_frames = torch.cat(images, dim=0) if isinstance(images, (list, tuple)) and all(torch.is_tensor(t) for t in images) else images
+            refs = [create_minimax_h3_video_ref(video_frames, vae, mode, grid_long_edge, compression.get("temporal_density", 16), compression.get("refine_steps", 100), description, clip, vlm_resolution, vlm_reference_start)]
         return io.NodeOutput(refs, format_minimax_h3_ref_info(refs))
 
 
