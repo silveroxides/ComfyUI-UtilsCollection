@@ -732,17 +732,16 @@ def test_minimax_h3_timeline_presets_require_segment_music_contract():
     for name in H3_CAMERA_CONTINUITY_PRESETS:
         instruction = vlm_presets.system_instructions_vlm[name]
 
-        assert "[VISUAL], optional [SPEECH], [SOUNDS], and optional [MUSIC]" in instruction
-        assert "Omit [MUSIC] from segments with no music specific to them." in instruction or "Omit the complete [MUSIC] line when no segment-specific music occurs." in instruction
-        assert "When music is specific to a timestamp block, write [MUSIC] after [SOUNDS]." in instruction or "When music is specific to one timestamp block, write [MUSIC] after [SOUNDS]." in instruction
-        assert "State the type of music for that segment." in instruction or "State its audible type." in instruction
-        assert (
-            "Mention <Subject N> in [MUSIC] only when that actual subject is playing the music; otherwise state only the music type." in instruction
-            or "Mention <Subject N> in [MUSIC] only when that actual Subject is playing the music." in instruction
-            or "Mention <Subject N> in [MUSIC] only when that actual <Subject N> is playing the music." in instruction
-        )
-        assert "as the whole-video summary of music specified in the timeline." in instruction or "background music audible only to the audience" in instruction or "background music, theme score, or suspense music" in instruction
-        assert "Do not introduce music absent from the timeline." in instruction or "Do not introduce music absent from the Timeline." in instruction
+        assert "[VISUAL], optional [SPEECH], optional [SOUNDS], and optional [MUSIC]" in instruction
+        assert "Omit [SOUNDS]" in instruction or "Omit the complete [SOUNDS] line" in instruction
+        assert "Omit [MUSIC]" in instruction or "Omit the complete [MUSIC] line" in instruction
+        assert "Include [MUSIC] in a Timeline block only when music is visibly performed/produced in-frame" in instruction
+        assert "State the type of music for that segment" in instruction or "state its audible type" in instruction or "state the type of music for that segment" in instruction
+        assert "mention <Subject N> in [MUSIC] only when that actual subject is playing the music; otherwise state only the music type." in instruction or "mention <Subject N> in [MUSIC] only when that actual <Subject N> is playing the music." in instruction
+        assert "Continuous audience-only background score belongs exclusively in non_diegetic_music:" in instruction
+        assert "Continuous background score lives here without requiring timeline [MUSIC] entries." in instruction
+        assert "Do not introduce music absent from the timeline." not in instruction
+        assert "Do not introduce music absent from the Timeline." not in instruction
 
 
 def test_stable_timeline_presets_require_zero_padded_two_decimal_seconds():
@@ -1668,3 +1667,10 @@ def test_minimax_h3_audio_definition_vs_retention_and_multi_subject_attr_transfe
             assert "[SPEECH]: (S1)" not in inst, key
             assert "schema [SPEECH]: <Subject N> (Sx) `<d>`[Language]" in inst, key
             assert "Never omit the speaking <Subject N> alias" in inst, key
+
+    for module in (vlm_presets, vlm_motion_presets):
+        collection = module.system_instructions_vlm if hasattr(module, "system_instructions_vlm") else module.motion_system_instructions_vlm
+        for key in H3_CAMERA_CONTINUITY_PRESETS:
+            inst = collection[key]
+            assert "opera, operatic arias" in inst, key
+            assert "never misclassified as instrumental music" in inst, key
