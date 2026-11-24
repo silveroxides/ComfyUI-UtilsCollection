@@ -949,6 +949,41 @@ def test_minimax_h3_reference_media_schema_and_execution():
     }
 
 
+def test_reference_media_list_batch_detection_and_slicing():
+    from utils_collection_encoder_test.helpers import encoder_helpers
+
+    ref_media_with_audio_list = {
+        "reference_videos": {},
+        "reference_video_audios": {},
+        "reference_audios": {
+            "reference_audio_1": ["aud0", "aud1", "aud2"],
+            "reference_audio_2": ["aud_fixed"],
+        },
+    }
+    args = {"reference_media": ref_media_with_audio_list}
+    assert encoder_helpers.is_list_batch_call(args) is True
+    assert encoder_helpers.get_list_batch_size(args) == 3
+
+    sliced_0 = encoder_helpers.slice_item_inputs(args, 0)["reference_media"]
+    assert sliced_0["reference_audios"]["reference_audio_1"] == "aud0"
+    assert sliced_0["reference_audios"]["reference_audio_2"] == "aud_fixed"
+
+    sliced_1 = encoder_helpers.slice_item_inputs(args, 1)["reference_media"]
+    assert sliced_1["reference_audios"]["reference_audio_1"] == "aud1"
+    assert sliced_1["reference_audios"]["reference_audio_2"] == "aud_fixed"
+
+    sliced_2 = encoder_helpers.slice_item_inputs(args, 2)["reference_media"]
+    assert sliced_2["reference_audios"]["reference_audio_1"] == "aud2"
+    assert sliced_2["reference_audios"]["reference_audio_2"] == "aud_fixed"
+
+    direct_ref_media = {"reference_video_1": ["vid0", "vid1"]}
+    direct_args = {"reference_media": direct_ref_media}
+    assert encoder_helpers.is_list_batch_call(direct_args) is True
+    assert encoder_helpers.get_list_batch_size(direct_args) == 2
+    assert encoder_helpers.slice_item_inputs(direct_args, 0)["reference_media"]["reference_video_1"] == "vid0"
+    assert encoder_helpers.slice_item_inputs(direct_args, 1)["reference_media"]["reference_video_1"] == "vid1"
+
+
 def test_advanced_minimax_h3_ref_media_node_schema():
     schema = UC_AdvancedMiniMaxH3RefMediaImageToVideo.define_schema()
     inputs = {value.id: value for value in schema.inputs}

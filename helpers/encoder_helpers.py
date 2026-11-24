@@ -538,6 +538,20 @@ def normalize_visual_fusion_method(method, default="conds_fusion"):
 _NON_SLICED_DICT_KEYS = frozenset({"media_config", "reference_media", "continuation_media", "audio", "visual_fusion_config", "text_blend_config"})
 
 
+def _get_reference_media_list_len(ref_media) -> int:
+    if not isinstance(ref_media, dict):
+        return 0
+    max_len = 0
+    for v in ref_media.values():
+        if isinstance(v, (list, tuple)):
+            max_len = max(max_len, len(v))
+        elif isinstance(v, dict):
+            for sub_v in v.values():
+                if isinstance(sub_v, (list, tuple)):
+                    max_len = max(max_len, len(sub_v))
+    return max_len
+
+
 def is_list_batch_call(args_dict: dict) -> bool:
     for k in (
         "clip",
@@ -574,6 +588,8 @@ def is_list_batch_call(args_dict: dict) -> bool:
         d = args_dict.get(dict_key)
         if isinstance(d, dict) and any(isinstance(sub_v, (list, tuple)) for sub_v in d.values()):
             return True
+    if _get_reference_media_list_len(args_dict.get("reference_media")) > 0:
+        return True
     return False
 
 
@@ -588,6 +604,9 @@ def get_list_batch_size(args_dict: dict) -> int:
             for sub_k, sub_v in v.items():
                 if isinstance(sub_v, (list, tuple)) and len(sub_v) > 0:
                     batch_size = max(batch_size, len(sub_v))
+    ref_media_len = _get_reference_media_list_len(args_dict.get("reference_media"))
+    if ref_media_len > 0:
+        batch_size = max(batch_size, ref_media_len)
     return batch_size
 
 
@@ -598,6 +617,22 @@ def slice_item_inputs(args_dict: dict, index: int) -> dict:
             continue
         if isinstance(v, (list, tuple)):
             sliced[k] = None if len(v) == 0 else v[min(index, len(v) - 1)]
+        elif k == "reference_media" and isinstance(v, dict):
+            sliced_ref_media = {}
+            for sub_k, sub_v in v.items():
+                if isinstance(sub_v, dict):
+                    inner_sliced = {}
+                    for ik, iv in sub_v.items():
+                        if isinstance(iv, (list, tuple)):
+                            inner_sliced[ik] = None if len(iv) == 0 else iv[min(index, len(iv) - 1)]
+                        else:
+                            inner_sliced[ik] = iv
+                    sliced_ref_media[sub_k] = inner_sliced
+                elif isinstance(sub_v, (list, tuple)):
+                    sliced_ref_media[sub_k] = None if len(sub_v) == 0 else sub_v[min(index, len(sub_v) - 1)]
+                else:
+                    sliced_ref_media[sub_k] = sub_v
+            sliced[k] = sliced_ref_media
         elif isinstance(v, dict) and k not in _NON_SLICED_DICT_KEYS:
             sliced_dict = {}
             for sub_k, sub_v in v.items():
