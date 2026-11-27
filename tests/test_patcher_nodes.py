@@ -4,11 +4,10 @@ import pathlib
 import sys
 import types
 
+import comfy.ldm.modules.attention
+import comfy.model_patcher
 import pytest
 import torch
-
-import comfy.model_patcher
-
 
 CUSTOM_NODE_ROOT = pathlib.Path(__file__).parents[1]
 PACKAGE_NAME = "utils_collection_patcher_test"
@@ -17,8 +16,8 @@ package.__path__ = [str(CUSTOM_NODE_ROOT)]
 sys.modules.setdefault(PACKAGE_NAME, package)
 
 from utils_collection_patcher_test.helpers import patcher_helpers
-from utils_collection_patcher_test.nodes import patcher_nodes
 from utils_collection_patcher_test.helpers.minimax_h3_cache_helpers import H3EncoderCache, clip_description
+from utils_collection_patcher_test.nodes import patcher_nodes
 
 
 def test_unified_attention_schema_keeps_mode_settings_separate():
@@ -30,19 +29,8 @@ def test_unified_attention_schema_keeps_mode_settings_separate():
     assert schema.node_id == "UC_UnifiedAttentionPatcher"
     assert [option.key for option in attention_mode.options] == ["disabled", "FlashAttention", "SageAttention", "Sparse / MiniMax H3 SLA"]
     assert [value.id for value in options["FlashAttention"].inputs] == ["allow_compile"]
-    assert [value.id for value in options["SageAttention"].inputs] == [
-        "sage_mode",
-        "allow_compile",
-        "h3_memory_optimizations",
-    ]
-    assert [value.id for value in options["Sparse / MiniMax H3 SLA"].inputs] == [
-        "sparsity",
-        "block_size",
-        "dense_tail_steps",
-        "protect_reference_media",
-        "dense_backend",
-        "minimax_h3_sla_config",
-    ]
+    assert [value.id for value in options["SageAttention"].inputs] == ["sage_mode", "allow_compile", "h3_memory_optimizations"]
+    assert [value.id for value in options["Sparse / MiniMax H3 SLA"].inputs] == ["sparsity", "block_size", "dense_tail_steps", "protect_reference_media", "dense_backend", "minimax_h3_sla_config"]
     assert options["Sparse / MiniMax H3 SLA"].inputs[-1].optional
     sla_inputs = {value.id: value for value in options["Sparse / MiniMax H3 SLA"].inputs}
     assert sla_inputs["sparsity"].default == 0.9
@@ -58,11 +46,7 @@ def test_unified_attention_schema_keeps_mode_settings_separate():
 
 
 def test_minimax_h3_projection_schema_exposes_clip_contract(monkeypatch):
-    monkeypatch.setattr(
-        patcher_nodes,
-        "list_minimax_h3_projections",
-        lambda: ["mmh3-4b.safetensors"],
-    )
+    monkeypatch.setattr(patcher_nodes, "list_minimax_h3_projections", lambda: ["mmh3-4b.safetensors"])
 
     schema = patcher_nodes.UC_MiniMaxH3ClipProjectionPatcher.define_schema()
 
@@ -86,26 +70,14 @@ def test_minimax_h3_sla_config_returns_typed_runtime_value():
     config = patcher_nodes.UC_MiniMaxH3SlaAttentionConfig.execute(4096, "0,2-3", False, False, True).result[0]
 
     assert isinstance(config, patcher_helpers.MiniMaxH3SlaAttentionConfig)
-    assert config == patcher_helpers.MiniMaxH3SlaAttentionConfig(
-        minimum_sequence_length=4096,
-        dense_steps="0,2-3",
-        protect_audio=False,
-        disable_fp16_accumulation=False,
-        stabilize_routing=True,
-    )
+    assert config == patcher_helpers.MiniMaxH3SlaAttentionConfig(minimum_sequence_length=4096, dense_steps="0,2-3", protect_audio=False, disable_fp16_accumulation=False, stabilize_routing=True)
 
 
 def test_minimax_h3_sla_config_schema_owns_only_config_controls():
     schema = patcher_nodes.UC_MiniMaxH3SlaAttentionConfig.define_schema()
     inputs = {value.id: value for value in schema.inputs}
 
-    assert list(inputs) == [
-        "minimum_sequence_length",
-        "dense_steps",
-        "protect_audio",
-        "disable_fp16_accumulation",
-        "stabilize_routing",
-    ]
+    assert list(inputs) == ["minimum_sequence_length", "dense_steps", "protect_audio", "disable_fp16_accumulation", "stabilize_routing"]
     assert inputs["minimum_sequence_length"].default == 8192
     assert inputs["dense_steps"].default == "0"
     assert inputs["protect_audio"].default is True
@@ -117,31 +89,9 @@ def test_unified_h3_sla_combines_main_and_typed_controls(monkeypatch):
     typed_config = patcher_nodes.UC_MiniMaxH3SlaAttentionConfig.execute(4096, "1-2", False, False, True).result[0]
     monkeypatch.setattr(patcher_helpers, "_patch_h3_sla_attention", lambda _model, config: config)
 
-    config = patcher_helpers.patch_unified_attention_model(
-        object(),
-        {
-            "attention_mode": "Sparse / MiniMax H3 SLA",
-            "sparsity": 0.85,
-            "block_size": 128,
-            "dense_tail_steps": 2,
-            "protect_reference_media": "Heavy Enforcement",
-            "dense_backend": "pytorch",
-            "minimax_h3_sla_config": typed_config,
-        },
-    )
+    config = patcher_helpers.patch_unified_attention_model(object(), {"attention_mode": "Sparse / MiniMax H3 SLA", "sparsity": 0.85, "block_size": 128, "dense_tail_steps": 2, "protect_reference_media": "Heavy Enforcement", "dense_backend": "pytorch", "minimax_h3_sla_config": typed_config})
 
-    assert config == patcher_helpers.MiniMaxH3SlaAttentionConfig(
-        sparsity=0.85,
-        block_size=128,
-        dense_tail_steps=2,
-        protect_reference_media="Heavy Enforcement",
-        dense_backend="pytorch",
-        minimum_sequence_length=4096,
-        dense_steps="1-2",
-        protect_audio=False,
-        disable_fp16_accumulation=False,
-        stabilize_routing=True,
-    )
+    assert config == patcher_helpers.MiniMaxH3SlaAttentionConfig(sparsity=0.85, block_size=128, dense_tail_steps=2, protect_reference_media="Heavy Enforcement", dense_backend="pytorch", minimum_sequence_length=4096, dense_steps="1-2", protect_audio=False, disable_fp16_accumulation=False, stabilize_routing=True)
 
 
 def test_h3_sla_parses_dense_steps_and_rejects_invalid_public_values(caplog):
@@ -174,6 +124,7 @@ def test_unified_attention_disabled_returns_original_model():
 
 
 def test_unified_h3_radial_uses_clone_scoped_wrapper_and_block_patches(monkeypatch):
+
     class FakeAttention:
         head_dim = 128
 
@@ -216,21 +167,16 @@ def test_unified_h3_radial_uses_clone_scoped_wrapper_and_block_patches(monkeypat
 
     original = FakePatcher(FakeH3())
     config = patcher_helpers.MiniMaxH3RadialAttentionConfig(dense_blocks=1)
-    patched = patcher_helpers.patch_unified_attention_model(
-        original,
-        {"attention_mode": "Sparse / MiniMax H3 Radial", "minimax_h3_radial_config": config},
-    )
+    patched = patcher_helpers.patch_unified_attention_model(original, {"attention_mode": "Sparse / MiniMax H3 Radial", "minimax_h3_radial_config": config})
 
     assert original.object_patches == {}
-    assert sorted(patched.object_patches) == [
-        "diffusion_model.blocks.1.attn.forward",
-        "diffusion_model.blocks.2.attn.forward",
-    ]
+    assert sorted(patched.object_patches) == ["diffusion_model.blocks.1.attn.forward", "diffusion_model.blocks.2.attn.forward"]
     wrappers = patched.wrappers[patcher_helpers.comfy.patcher_extension.WrappersMP.DIFFUSION_MODEL]
     assert patcher_helpers.MINIMAX_H3_RADIAL_WRAPPER_KEY in wrappers
 
 
 def test_unified_h3_sla_uses_clone_scoped_override_and_wrapper(monkeypatch):
+
     class FakeAttention:
         head_dim = 128
 
@@ -263,10 +209,7 @@ def test_unified_h3_sla_uses_clone_scoped_override_and_wrapper(monkeypatch):
             self.wrappers.setdefault(wrapper_type, {})[key] = [wrapper]
 
     original = FakePatcher(FakeH3())
-    patched = patcher_helpers.patch_unified_attention_model(
-        original,
-        {"attention_mode": "Sparse / MiniMax H3 SLA", "dense_backend": "auto"},
-    )
+    patched = patcher_helpers.patch_unified_attention_model(original, {"attention_mode": "Sparse / MiniMax H3 SLA", "dense_backend": "auto"})
 
     assert patched is not original
     assert "optimized_attention_override" not in original.model_options["transformer_options"]
@@ -284,21 +227,14 @@ def test_unified_h3_sla_uses_clone_scoped_override_and_wrapper(monkeypatch):
 
 def test_h3_sla_dense_fallback_and_protected_block_selection(caplog):
     config = patcher_helpers.MiniMaxH3SlaAttentionConfig(sparsity=0.5, block_size=64, minimum_sequence_length=0)
-    q = torch.randn((1, 128, 1, 128))
-    k = torch.randn((1, 128, 1, 128))
+    q = torch.randn((1, 1, 128, 128))
+    k = torch.randn((1, 1, 128, 128))
     selected, count, _history = patcher_helpers._sla_select_blocks(q, k, config, ((0, 64),), (), None)
 
     assert count == 2
     assert torch.all((selected == 0).any(dim=-1))
 
-    bf16_selected, bf16_count, _history = patcher_helpers._sla_select_blocks(
-        q.to(torch.bfloat16),
-        k.to(torch.bfloat16),
-        config,
-        ((0, 64),),
-        (),
-        None,
-    )
+    bf16_selected, bf16_count, _history = patcher_helpers._sla_select_blocks(q.to(torch.bfloat16), k.to(torch.bfloat16), config, ((0, 64),), (), None)
     assert bf16_count == 2
     assert torch.all((bf16_selected == 0).any(dim=-1))
 
@@ -306,20 +242,16 @@ def test_h3_sla_dense_fallback_and_protected_block_selection(caplog):
     override = patcher_helpers._make_h3_sla_override(config, state)
     dense_state = {patcher_helpers.MINIMAX_H3_SLA_STATE_KEY: {"dense": True}}
     with caplog.at_level(logging.INFO, logger=patcher_helpers.__name__):
-        result = override(lambda q, *_args, **_kwargs: q, q.transpose(1, 2), k.transpose(1, 2), k.transpose(1, 2), 1, skip_reshape=True, transformer_options=dense_state)
+        result = override(lambda q, *_args, **_kwargs: q, q, k, k, 1, skip_reshape=True, transformer_options=dense_state)
     assert result.shape == (1, 1, 128, 128)
     assert "MiniMax H3 SLA using dense attention" in caplog.text
 
 
 @pytest.mark.parametrize("block_size", [32, 64, 128])
 def test_h3_sla_selects_each_exposed_block_size(block_size):
-    config = patcher_helpers.MiniMaxH3SlaAttentionConfig(
-        block_size=block_size,
-        sparsity=0.5,
-        minimum_sequence_length=0,
-    )
-    q = torch.randn((1, 256, 1, 128))
-    k = torch.randn((1, 256, 1, 128))
+    config = patcher_helpers.MiniMaxH3SlaAttentionConfig(block_size=block_size, sparsity=0.5, minimum_sequence_length=0)
+    q = torch.randn((1, 1, 256, 128))
+    k = torch.randn((1, 1, 256, 128))
 
     selected, count, _history = patcher_helpers._sla_select_blocks(q, k, config, (), (), None)
 
@@ -329,28 +261,17 @@ def test_h3_sla_selects_each_exposed_block_size(block_size):
 
 
 def test_h3_sla_reference_protection_modes_add_reference_quota():
-    q = torch.randn((1, 128, 1, 128))
-    k = torch.randn((1, 128, 1, 128))
+    q = torch.randn((1, 1, 128, 128))
+    k = torch.randn((1, 1, 128, 128))
     counts = {}
     for mode in patcher_helpers.SLA_REFERENCE_PROTECTION_MODES:
-        _selected, counts[mode], _history = patcher_helpers._sla_select_blocks(
-            q,
-            k,
-            patcher_helpers.MiniMaxH3SlaAttentionConfig(
-                sparsity=0.5,
-                block_size=32,
-                minimum_sequence_length=0,
-                protect_reference_media=mode,
-            ),
-            (),
-            ((0, 128),),
-            None,
-        )
+        _selected, counts[mode], _history = patcher_helpers._sla_select_blocks(q, k, patcher_helpers.MiniMaxH3SlaAttentionConfig(sparsity=0.5, block_size=32, minimum_sequence_length=0, protect_reference_media=mode), (), ((0, 128),), None)
 
     assert counts == {"Off": 2, "Light": 3, "Heavy Enforcement": 4}
 
 
 def test_h3_sla_triton_launch_ladder_retries_and_caches_success(monkeypatch):
+
     class OutOfResources(RuntimeError):
         pass
 
@@ -358,6 +279,7 @@ def test_h3_sla_triton_launch_ladder_retries_and_caches_success(monkeypatch):
 
     class FakeKernel:
         def __getitem__(self, _grid):
+
             def launch(*_args, **kwargs):
                 calls.append((kwargs["num_warps"], kwargs["num_stages"]))
                 if len(calls) == 1:
@@ -365,53 +287,70 @@ def test_h3_sla_triton_launch_ladder_retries_and_caches_success(monkeypatch):
 
             return launch
 
-    monkeypatch.setattr(
-        patcher_helpers,
-        "triton",
-        types.SimpleNamespace(
-            cdiv=lambda value, block: (value + block - 1) // block,
-            runtime=types.SimpleNamespace(errors=types.SimpleNamespace(OutOfResources=OutOfResources)),
-        ),
-    )
+    monkeypatch.setattr(patcher_helpers, "triton", types.SimpleNamespace(cdiv=lambda value, block: (value + block - 1) // block, runtime=types.SimpleNamespace(errors=types.SimpleNamespace(OutOfResources=OutOfResources))))
     monkeypatch.setattr(patcher_helpers, "_sla_attention_kernel", FakeKernel())
     patcher_helpers._SLA_TRITON_CHOSEN.clear()
-    q = torch.zeros((1, 32, 1, 128))
+    q = torch.zeros((1, 1, 32, 128))
 
-    output = patcher_helpers._sla_sparse_attention(
-        q,
-        q,
-        q,
-        torch.zeros((1, 1, 1, 1), dtype=torch.int32),
-        1,
-        patcher_helpers.MiniMaxH3SlaAttentionConfig(block_size=32),
-    )
+    output = patcher_helpers._sla_sparse_attention(q, q, q, torch.zeros((1, 1, 1, 1), dtype=torch.int32), 1, patcher_helpers.MiniMaxH3SlaAttentionConfig(block_size=32))
 
-    assert output.shape == q.shape
+    assert output.shape == (1, 32, 1, 128)
     assert calls == list(patcher_helpers.SLA_TRITON_LAUNCH_LADDER[(32, 32)][:2])
     assert patcher_helpers._SLA_TRITON_CHOSEN[(32, 32, 128)] == calls[-1]
 
 
 def test_h3_sla_dense_step_selection_unions_explicit_and_tail_steps():
     config = patcher_helpers.MiniMaxH3SlaAttentionConfig(dense_steps="0,2-3", dense_tail_steps=1)
-    options = {"sample_sigmas": torch.tensor([4.0, 3.0, 2.0, 1.0, 0.0])}
+    sample_sigmas = torch.tensor([1.0, 0.75, 0.5, 0.25, 0.0])
 
-    assert patcher_helpers._sla_dense_step(options, torch.tensor([4.0]), config) == "sampling step 0 is configured dense"
-    assert patcher_helpers._sla_dense_step(options, torch.tensor([2.0]), config) == "sampling step 2 is configured dense"
-    assert patcher_helpers._sla_dense_step(options, torch.tensor([1.0]), config) == "sampling step 3 is configured dense"
+    def at(sigma):
+        return {"sample_sigmas": sample_sigmas, "sigmas": torch.tensor([sigma])}
+
+    assert patcher_helpers._sla_dense_step(at(1.0), config) == "sampling step 0 is configured dense"
+    assert patcher_helpers._sla_dense_step(at(0.75), config) is None
+    assert patcher_helpers._sla_dense_step(at(0.5), config) == "sampling step 2 is configured dense"
+    assert patcher_helpers._sla_dense_step(at(0.25), config) == "sampling step 3 is configured dense"
     tail_config = patcher_helpers.MiniMaxH3SlaAttentionConfig(dense_steps="", dense_tail_steps=1)
-    assert patcher_helpers._sla_dense_step(options, torch.tensor([1.0]), tail_config) == "one of the final 1 sampler steps is configured dense"
+    assert patcher_helpers._sla_dense_step(at(0.75), tail_config) is None
+    assert patcher_helpers._sla_dense_step(at(0.25), tail_config) == "one of the final 1 sampler steps is configured dense"
+
+
+@pytest.mark.skipif(not torch.cuda.is_available() or patcher_helpers.triton is None, reason="MiniMax H3 SLA runs on CUDA with Triton.")
+@pytest.mark.parametrize("block_size", [32, 128])
+def test_h3_sla_runs_sparse_on_core_attention_inputs_without_payload_layout(block_size):
+    # Spatial tiles and keyframe context windows drop the payload layout; the model still publishes its own per forward.
+    layout = patcher_helpers.minimax_model.PackedLayout(77, 3, 32, 40, 25)
+    heads, sequence = 4, layout.seq_len
+    config = patcher_helpers.MiniMaxH3SlaAttentionConfig(sparsity=0.5, block_size=block_size, minimum_sequence_length=0, dense_steps="", dense_tail_steps=0)
+
+    def dense_backend(*_args, **_kwargs):
+        raise AssertionError(f"SLA fell back to dense attention: {state['reported_fallbacks'] or state['sparse_disabled_reason']}")
+
+    state = {"history": {}, "reported_fallbacks": set(), "sparse_disabled_reason": None, "dense_backend": dense_backend}
+    qkv = torch.randn((sequence, 3 * heads * 128), device="cuda", dtype=torch.bfloat16)
+    q, k, v = (part.view(sequence, heads, 128).transpose(0, 1).unsqueeze(0) for part in qkv.split(heads * 128, dim=-1))
+
+    def executor(_x, _timestep, _context, options, **_kwargs):
+        options["minimax_h3_layout"] = layout
+        containers = (comfy.ldm.modules.attention.AttentionTensorContainer(value) for value in (q, k, v))
+        return comfy.ldm.modules.attention.optimized_attention(*containers, heads, mask=None, skip_reshape=True, transformer_options=options)
+
+    options = {"optimized_attention_override": patcher_helpers._make_h3_sla_override(config, state), "sample_sigmas": torch.tensor([1.0, 0.5, 0.0]), "sigmas": torch.tensor([0.5])}
+    output = patcher_helpers._make_h3_sla_wrapper(config, state)(executor, None, torch.tensor([500.0]), None, options, minimax_payload={})
+
+    # Reference: dense attention restricted to the key blocks routing selected for each query block.
+    lookup, _count, _history = patcher_helpers._sla_select_blocks(q, k, config, *patcher_helpers._sla_layout_ranges(layout, config), None)
+    key_block = 64 if block_size == 128 else block_size
+    selected = torch.zeros((*lookup.shape[:3], -(-sequence // key_block)), dtype=torch.bool, device="cuda").scatter_(-1, lookup.long(), True)
+    allowed = selected.repeat_interleave(block_size, dim=2)[:, :, :sequence].repeat_interleave(key_block, dim=3)[..., :sequence]
+    expected = torch.nn.functional.scaled_dot_product_attention(q.float(), k.float(), v.float(), attn_mask=allowed).transpose(1, 2).reshape(1, sequence, heads * 128)
+    assert output.shape == expected.shape
+    torch.testing.assert_close(output.float(), expected, atol=2e-2, rtol=2e-2)
 
 
 def test_h3_sla_sampling_scope_reports_each_run(caplog):
-    state = {
-        "history": {0: torch.ones((1, 1, 1, 1), dtype=torch.int32)},
-        "reported_fallbacks": {"stale reason"},
-        "sparse_disabled_reason": "stale failure",
-    }
-    scope = patcher_helpers.MiniMaxH3SlaSamplingScope(
-        state,
-        patcher_helpers.MiniMaxH3SlaAttentionConfig(disable_fp16_accumulation=False),
-    )
+    state = {"history": {0: torch.ones((1, 1, 1, 1), dtype=torch.int32)}, "reported_fallbacks": {"stale reason"}, "sparse_disabled_reason": "stale failure"}
+    scope = patcher_helpers.MiniMaxH3SlaSamplingScope(state, patcher_helpers.MiniMaxH3SlaAttentionConfig(disable_fp16_accumulation=False))
 
     def sample():
         assert state["history"] == {}
@@ -430,11 +369,7 @@ def test_h3_sla_sampling_scope_reports_each_run(caplog):
 
 def test_h3_sla_sampling_scope_restores_reduced_precision_accumulation():
     backend = torch.backends.cuda.matmul
-    attributes = [
-        name
-        for name in ("allow_fp16_reduced_precision_reduction", "allow_bf16_reduced_precision_reduction")
-        if hasattr(backend, name)
-    ]
+    attributes = [name for name in ("allow_fp16_reduced_precision_reduction", "allow_bf16_reduced_precision_reduction") if hasattr(backend, name)]
     if not attributes:
         pytest.skip("PyTorch build has no reduced-precision accumulation controls.")
     original = {name: getattr(backend, name) for name in attributes}
@@ -457,16 +392,14 @@ def test_h3_sla_sampling_scope_restores_reduced_precision_accumulation():
 
 
 def test_unified_h3_memory_optimizations_use_clone_scoped_block_patches(monkeypatch):
+
     class FakeAttention:
         def forward(self, x, rope_freqs=None, transformer_options=None):
             return x
 
     class FakeH3:
         def __init__(self):
-            self.blocks = [
-                types.SimpleNamespace(attn=FakeAttention()),
-                types.SimpleNamespace(attn=FakeAttention()),
-            ]
+            self.blocks = [types.SimpleNamespace(attn=FakeAttention()), types.SimpleNamespace(attn=FakeAttention())]
 
     monkeypatch.setattr(patcher_helpers.minimax_model, "MiniMaxH3Model", FakeH3)
     monkeypatch.setattr(patcher_helpers, "_make_sage_backend", lambda *_args: lambda *args, **_kwargs: args[2])
@@ -493,31 +426,14 @@ def test_unified_h3_memory_optimizations_use_clone_scoped_block_patches(monkeypa
         def add_wrapper_with_key(self, wrapper_type, key, wrapper):
             self.wrappers.setdefault(wrapper_type, {})[key] = wrapper
 
-    patched = patcher_helpers.patch_unified_attention_model(
-        FakePatcher(FakeH3()),
-        {
-            "attention_mode": "SageAttention",
-            "sage_mode": "auto",
-            "h3_memory_optimizations": True,
-        },
-    )
+    patched = patcher_helpers.patch_unified_attention_model(FakePatcher(FakeH3()), {"attention_mode": "SageAttention", "sage_mode": "auto", "h3_memory_optimizations": True})
 
-    assert sorted(patched.object_patches) == [
-        "diffusion_model.blocks.0.attn.forward",
-        "diffusion_model.blocks.1.attn.forward",
-    ]
+    assert sorted(patched.object_patches) == ["diffusion_model.blocks.0.attn.forward", "diffusion_model.blocks.1.attn.forward"]
 
 
 def test_h3_radial_block_mask_keeps_cross_segment_blocks_dense():
     config = patcher_helpers.MiniMaxH3RadialAttentionConfig(block_size=64)
-    state = {
-        "config": config,
-        "sequence_length": 256,
-        "video_start": 128,
-        "video_end": 256,
-        "frame_count": 2,
-        "tokens_per_frame": 64,
-    }
+    state = {"config": config, "sequence_length": 256, "video_start": 128, "video_end": 256, "frame_count": 2, "tokens_per_frame": 64}
     mask = patcher_helpers._h3_radial_block_mask(state, torch.device("cpu"))
 
     assert mask.shape == (4, 4)
@@ -535,34 +451,14 @@ def test_h3_radial_maps_adjusted_sigma_to_its_schedule_step():
     assert not patcher_helpers._h3_sparse_step(transformer_options, torch.tensor([0.0]), config)
 
 
-def _cache(
-    *,
-    threshold=0.1,
-    start=0.0,
-    end=1.0,
-    max_steps=2,
-    device="auto",
-    verbose=False,
-):
-    cache = patcher_helpers.MiniMaxH3Cache(
-        reuse_threshold=threshold,
-        start_percent=start,
-        end_percent=end,
-        max_steps=max_steps,
-        device=device,
-        verbose=verbose,
-    )
+def _cache(*, threshold=0.1, start=0.0, end=1.0, max_steps=2, device="auto", verbose=False):
+    cache = patcher_helpers.MiniMaxH3Cache(reuse_threshold=threshold, start_percent=start, end_percent=end, max_steps=max_steps, device=device, verbose=verbose)
     cache.begin(10)
     return cache
 
 
 def _cache_args(image, timestep, cache_ranges=((0, 4),)):
-    return {
-        "img": image,
-        "timestep": torch.tensor([timestep]),
-        "cache_ranges": cache_ranges,
-        "block_count": 2,
-    }
+    return {"img": image, "timestep": torch.tensor([timestep]), "cache_ranges": cache_ranges, "block_count": 2}
 
 
 def test_schema_exposes_stable_cache_controls():
@@ -571,15 +467,7 @@ def test_schema_exposes_stable_cache_controls():
 
     assert schema.node_id == "UC_MiniMaxH3Cache"
     assert not schema.is_experimental
-    assert [value.id for value in schema.inputs] == [
-        "model",
-        "reuse_threshold",
-        "start_percent",
-        "end_percent",
-        "max_steps",
-        "device",
-        "verbose",
-    ]
+    assert [value.id for value in schema.inputs] == ["model", "reuse_threshold", "start_percent", "end_percent", "max_steps", "device", "verbose"]
     assert inputs["reuse_threshold"].default == 0.05
     assert inputs["start_percent"].default == 0.15
     assert inputs["end_percent"].default == 0.9
@@ -596,10 +484,7 @@ def test_cache_reuses_residual_then_honors_maximum_skip_count():
         return {"img": args["img"] + 2.0}
 
     first = torch.ones((4, 8))
-    assert torch.equal(
-        cache(_cache_args(first, 1000.0), {"original_block": original})["img"],
-        first + 2.0,
-    )
+    assert torch.equal(cache(_cache_args(first, 1000.0), {"original_block": original})["img"], first + 2.0)
 
     second = first + 0.001
     skipped = cache(_cache_args(second, 900.0), {"original_block": original})["img"]
@@ -624,22 +509,13 @@ def test_cache_recomputes_for_threshold_range_and_layout_changes():
     assert len(calls) == 2
 
     range_cache = _cache(start=0.5)
-    range_cache(
-        _cache_args(torch.ones((4, 8)), 1000.0), {"original_block": original}
-    )
-    range_cache(
-        _cache_args(torch.ones((4, 8)), 900.0), {"original_block": original}
-    )
+    range_cache(_cache_args(torch.ones((4, 8)), 1000.0), {"original_block": original})
+    range_cache(_cache_args(torch.ones((4, 8)), 900.0), {"original_block": original})
     assert len(calls) == 4
 
     layout_cache = _cache()
-    layout_cache(
-        _cache_args(torch.ones((4, 8)), 1000.0), {"original_block": original}
-    )
-    layout_cache(
-        _cache_args(torch.ones((4, 8)), 900.0, ((1, 4),)),
-        {"original_block": original},
-    )
+    layout_cache(_cache_args(torch.ones((4, 8)), 1000.0), {"original_block": original})
+    layout_cache(_cache_args(torch.ones((4, 8)), 900.0, ((1, 4),)), {"original_block": original})
     assert len(calls) == 6
 
 
@@ -651,9 +527,7 @@ def test_cpu_cache_preserves_output_shape_and_dtype():
 
     image = torch.ones((4, 8), dtype=torch.float32)
     cache(_cache_args(image, 1000.0), {"original_block": original})
-    output = cache(
-        _cache_args(image + 0.001, 900.0), {"original_block": original}
-    )["img"]
+    output = cache(_cache_args(image + 0.001, 900.0), {"original_block": original})["img"]
 
     assert cache.cached_residual.device.type == "cpu"
     assert output.shape == image.shape
@@ -702,57 +576,21 @@ def test_cache_isolates_and_skips_across_context_windows():
 
     # Step 0 (t = 1000): both windows run and cache their own delta
     img_a0 = torch.full((1, 8), 1.0)
-    res_a0 = cache(
-        {
-            "img": img_a0,
-            "timestep": torch.tensor([1000.0]),
-            "cache_ranges": ((0, 4),),
-            "block_count": 2,
-            "transformer_options": {"context_window": win_a},
-        },
-        {"original_block": original},
-    )["img"]
+    res_a0 = cache({"img": img_a0, "timestep": torch.tensor([1000.0]), "cache_ranges": ((0, 4),), "block_count": 2, "transformer_options": {"context_window": win_a}}, {"original_block": original})["img"]
     assert torch.allclose(res_a0, torch.full((1, 8), 11.0))
 
     img_b0 = torch.full((1, 8), 2.0)
-    res_b0 = cache(
-        {
-            "img": img_b0,
-            "timestep": torch.tensor([1000.0]),
-            "cache_ranges": ((0, 4),),
-            "block_count": 2,
-            "transformer_options": {"context_window": win_b},
-        },
-        {"original_block": original},
-    )["img"]
+    res_b0 = cache({"img": img_b0, "timestep": torch.tensor([1000.0]), "cache_ranges": ((0, 4),), "block_count": 2, "transformer_options": {"context_window": win_b}}, {"original_block": original})["img"]
     assert torch.allclose(res_b0, torch.full((1, 8), 22.0))
     assert len(calls) == 2
 
     # Step 1 (t = 900): both windows skip and reuse their own isolated residual
     img_a1 = img_a0 + 0.001
-    res_a1 = cache(
-        {
-            "img": img_a1,
-            "timestep": torch.tensor([900.0]),
-            "cache_ranges": ((0, 4),),
-            "block_count": 2,
-            "transformer_options": {"context_window": win_a},
-        },
-        {"original_block": original},
-    )["img"]
+    res_a1 = cache({"img": img_a1, "timestep": torch.tensor([900.0]), "cache_ranges": ((0, 4),), "block_count": 2, "transformer_options": {"context_window": win_a}}, {"original_block": original})["img"]
     assert torch.allclose(res_a1, torch.full((1, 8), 11.001), atol=1e-4)
 
     img_b1 = img_b0 + 0.001
-    res_b1 = cache(
-        {
-            "img": img_b1,
-            "timestep": torch.tensor([900.0]),
-            "cache_ranges": ((0, 4),),
-            "block_count": 2,
-            "transformer_options": {"context_window": win_b},
-        },
-        {"original_block": original},
-    )["img"]
+    res_b1 = cache({"img": img_b1, "timestep": torch.tensor([900.0]), "cache_ranges": ((0, 4),), "block_count": 2, "transformer_options": {"context_window": win_b}}, {"original_block": original})["img"]
     assert torch.allclose(res_b1, torch.full((1, 8), 22.001), atol=1e-4)
 
     # Zero additional calls to original block on step 1 (both skipped!)
@@ -767,16 +605,7 @@ def test_diffusion_cache_schema_exposes_physical_controls():
 
     assert schema.node_id == "UC_MiniMaxH3DiffusionCache"
     assert not schema.is_experimental
-    assert [value.id for value in schema.inputs] == [
-        "model",
-        "preset",
-        "composition_cutoff",
-        "detail_protection",
-        "drift_tolerance",
-        "max_noise_span",
-        "device",
-        "verbose",
-    ]
+    assert [value.id for value in schema.inputs] == ["model", "preset", "composition_cutoff", "detail_protection", "drift_tolerance", "max_noise_span", "device", "verbose"]
     assert inputs["preset"].default == "balanced"
     assert inputs["preset"].options == ["balanced", "high_fidelity", "high_speed", "custom"]
     assert inputs["composition_cutoff"].default == 0.75
@@ -805,18 +634,14 @@ def test_diffusion_cache_presets_and_custom_validation():
     assert high_speed.reuse_threshold == pytest.approx(0.08 * 1.5)
     assert high_speed.max_noise_span == 0.30
 
-    custom = patcher_helpers.MiniMaxH3DiffusionCache(
-        preset="custom", composition_cutoff=0.80, detail_protection=0.20, drift_tolerance=2.0, max_noise_span=0.25
-    )
+    custom = patcher_helpers.MiniMaxH3DiffusionCache(preset="custom", composition_cutoff=0.80, detail_protection=0.20, drift_tolerance=2.0, max_noise_span=0.25)
     assert custom.composition_cutoff == 0.80
     assert custom.detail_protection == 0.20
     assert custom.reuse_threshold == pytest.approx(0.10)
     assert custom.max_noise_span == 0.25
 
     with pytest.raises(ValueError, match="Composition cutoff noise level"):
-        patcher_helpers.patch_minimax_h3_diffusion_cache_model(
-            None, preset="custom", composition_cutoff=0.10, detail_protection=0.80
-        )
+        patcher_helpers.patch_minimax_h3_diffusion_cache_model(None, preset="custom", composition_cutoff=0.10, detail_protection=0.80)
 
 
 def test_diffusion_cache_phase_gating_and_span_limits():
@@ -878,16 +703,8 @@ def test_diffusion_cache_sampling_scope_resets_on_error():
 
 def test_block_runner_preserves_double_block_replacements(monkeypatch):
     prefetch_events = []
-    monkeypatch.setattr(
-        patcher_helpers.comfy.model_prefetch,
-        "make_prefetch_queue",
-        lambda blocks, device, options: "queue",
-    )
-    monkeypatch.setattr(
-        patcher_helpers.comfy.model_prefetch,
-        "prefetch_queue_pop",
-        lambda queue, device, block, malloc_scope=None: prefetch_events.append((block, malloc_scope)),
-    )
+    monkeypatch.setattr(patcher_helpers.comfy.model_prefetch, "make_prefetch_queue", lambda blocks, device, options: "queue")
+    monkeypatch.setattr(patcher_helpers.comfy.model_prefetch, "prefetch_queue_pop", lambda queue, device, block, malloc_scope=None: prefetch_events.append((block, malloc_scope)))
 
     class Block:
         def __call__(self, image, *args, **kwargs):
@@ -900,40 +717,20 @@ def test_block_runner_preserves_double_block_replacements(monkeypatch):
         result = extra_options["original_block"](args)
         return {"img": result["img"] + 10.0}
 
-    output = patcher_helpers.run_minimax_h3_blocks(
-        model,
-        torch.zeros((2, 4)),
-        torch.zeros((1, 4)),
-        [],
-        torch.zeros((1, 4)),
-        {"patches_replace": {"dit": {("double_block", 0): replacement}}},
-    )
+    output = patcher_helpers.run_minimax_h3_blocks(model, torch.zeros((2, 4)), torch.zeros((1, 4)), [], torch.zeros((1, 4)), {"patches_replace": {"dit": {("double_block", 0): replacement}}})
 
     assert torch.equal(output, torch.full((2, 4), 12.0))
     assert prefetch_events == [(blocks[0], "block"), (blocks[1], "block"), (None, "block")]
 
 
 def test_cached_forward_matches_current_core_audio_output_contract(monkeypatch):
-    layout = types.SimpleNamespace(
-        signature=(1, 1, 2, 2, 1),
-        segments=[(0, 1, "text"), (1, 3, "audio"), (3, 4, "video")],
-        img_update=torch.ones(1, dtype=torch.bool),
-        audio_update=torch.ones(2, dtype=torch.bool),
-        seq_len=4,
-        position_ids=torch.zeros((4, 3)),
-    )
+    layout = types.SimpleNamespace(signature=(1, 1, 2, 2, 1), segments=[(0, 1, "text"), (1, 3, "audio"), (3, 4, "video")], img_update=torch.ones(1, dtype=torch.bool), audio_update=torch.ones(2, dtype=torch.bool), seq_len=4, position_ids=torch.zeros((4, 3)))
     video_result = torch.tensor([[1.0, 2.0, 3.0, 4.0]])
     audio_result = torch.arange(1.0, 9.0).reshape(2, 4)
     final_layer_args = {}
 
-    def final_layer(
-        hidden, t_emb, video_seg, audio_seg, sigma, sample_sigmas, shifts
-    ):
-        final_layer_args.update(
-            sigma=sigma,
-            sample_sigmas=sample_sigmas,
-            shifts=shifts,
-        )
+    def final_layer(hidden, t_emb, video_seg, audio_seg, sigma, sample_sigmas, shifts):
+        final_layer_args.update(sigma=sigma, sample_sigmas=sample_sigmas, shifts=shifts)
         return video_result, audio_result
 
     model = types.SimpleNamespace(
@@ -952,11 +749,7 @@ def test_cached_forward_matches_current_core_audio_output_contract(monkeypatch):
         rope_freqs=lambda position_ids, device: torch.zeros((1, 1)),
         final_layer=final_layer,
     )
-    monkeypatch.setattr(
-        patcher_helpers.minimax_model,
-        "rope_rotation_table",
-        lambda frequencies, dtype: frequencies,
-    )
+    monkeypatch.setattr(patcher_helpers.minimax_model, "rope_rotation_table", lambda frequencies, dtype: frequencies)
 
     video = torch.zeros((1, 1, 1, 2, 2), dtype=torch.float16)
     audio = torch.zeros((1, 4, 2, 1), dtype=torch.float16)
@@ -964,25 +757,10 @@ def test_cached_forward_matches_current_core_audio_output_contract(monkeypatch):
     sample_sigmas = torch.tensor([1.0, 0.5, 0.0])
 
     assert not hasattr(patcher_helpers.minimax_model, "time_shift_slope")
-    output = patcher_helpers.minimax_h3_block_patch_forward(
-        model,
-        [video, audio],
-        torch.tensor([500.0]),
-        context,
-        transformer_options={
-            "sample_sigmas": sample_sigmas,
-            "minimax_h3_sigma_shift_video": 1.25,
-            "minimax_h3_sigma_shift_audio": 0.75,
-        },
-        minimax_payload={"layout": layout},
-    )
+    output = patcher_helpers.minimax_h3_block_patch_forward(model, [video, audio], torch.tensor([500.0]), context, transformer_options={"sample_sigmas": sample_sigmas, "minimax_h3_sigma_shift_video": 1.25, "minimax_h3_sigma_shift_audio": 0.75}, minimax_payload={"layout": layout})
 
-    expected_video = -patcher_helpers.minimax_model.unpatchify_video(
-        video_result, 1, 1, 1, 1, (1, 2, 2)
-    ).to(video.dtype)
-    expected_audio = -patcher_helpers.minimax_model.unpack_audio(audio_result).to(
-        audio.dtype
-    )
+    expected_video = -patcher_helpers.minimax_model.unpatchify_video(video_result, 1, 1, 1, 1, (1, 2, 2)).to(video.dtype)
+    expected_audio = -patcher_helpers.minimax_model.unpack_audio(audio_result).to(audio.dtype)
     assert torch.equal(output[0], expected_video)
     assert torch.equal(output[1], expected_audio)
     assert final_layer_args["sigma"].item() == pytest.approx(0.5)
@@ -991,19 +769,7 @@ def test_cached_forward_matches_current_core_audio_output_contract(monkeypatch):
 
 
 def test_cached_forward_supports_core_cond_audio_segments(monkeypatch):
-    layout = types.SimpleNamespace(
-        signature=(1, 1, 2, 2, 1),
-        segments=[
-            (0, 1, "text"),
-            (1, 3, "cond_audio"),
-            (3, 5, "audio"),
-            (5, 6, "video"),
-        ],
-        img_update=torch.ones(1, dtype=torch.bool),
-        audio_update=torch.tensor([False, False, True, True]),
-        seq_len=6,
-        position_ids=torch.zeros((6, 3)),
-    )
+    layout = types.SimpleNamespace(signature=(1, 1, 2, 2, 1), segments=[(0, 1, "text"), (1, 3, "cond_audio"), (3, 5, "audio"), (5, 6, "video")], img_update=torch.ones(1, dtype=torch.bool), audio_update=torch.tensor([False, False, True, True]), seq_len=6, position_ids=torch.zeros((6, 3)))
     model = types.SimpleNamespace(
         patch_size=(1, 2, 2),
         sigma_shift_video=1.0,
@@ -1020,28 +786,15 @@ def test_cached_forward_supports_core_cond_audio_segments(monkeypatch):
         rope_freqs=lambda position_ids, device: torch.zeros((1, 1)),
         final_layer=lambda *args: (torch.ones((1, 4)), torch.ones((2, 4))),
     )
-    monkeypatch.setattr(
-        patcher_helpers.minimax_model,
-        "rope_rotation_table",
-        lambda frequencies, dtype: frequencies,
-    )
+    monkeypatch.setattr(patcher_helpers.minimax_model, "rope_rotation_table", lambda frequencies, dtype: frequencies)
 
-    output = patcher_helpers.minimax_h3_block_patch_forward(
-        model,
-        [
-            torch.zeros((1, 1, 1, 2, 2), dtype=torch.float16),
-            torch.zeros((1, 4, 2, 1), dtype=torch.float16),
-        ],
-        torch.tensor([500.0]),
-        torch.zeros((1, 1, 4), dtype=torch.float32),
-        transformer_options={},
-        minimax_payload={"layout": layout},
-    )
+    output = patcher_helpers.minimax_h3_block_patch_forward(model, [torch.zeros((1, 1, 1, 2, 2), dtype=torch.float16), torch.zeros((1, 4, 2, 1), dtype=torch.float16)], torch.tensor([500.0]), torch.zeros((1, 1, 4), dtype=torch.float32), transformer_options={}, minimax_payload={"layout": layout})
 
     assert len(output) == 2
 
 
 def test_model_helper_adds_only_reversible_instance_patch(monkeypatch):
+
     class FakeH3:
         def _forward(self):
             return "original"
@@ -1070,9 +823,7 @@ def test_model_helper_adds_only_reversible_instance_patch(monkeypatch):
 
     original = FakePatcher(diffusion_model)
     original_class_forward = FakeH3.__dict__["_forward"]
-    patched = patcher_helpers.patch_minimax_h3_cache_model(
-        original, 0.1, 0.15, 0.9, 2, "auto", False
-    )
+    patched = patcher_helpers.patch_minimax_h3_cache_model(original, 0.1, 0.15, 0.9, 2, "auto", False)
 
     assert original.object_patches == {}
     assert set(patched.object_patches) == {"diffusion_model._forward"}
@@ -1083,6 +834,7 @@ def test_model_helper_adds_only_reversible_instance_patch(monkeypatch):
 
 
 def test_h3_sla_and_cache_preserve_both_model_patcher_contracts(monkeypatch):
+
     class FakeAttention:
         head_dim = 128
 
@@ -1100,18 +852,10 @@ def test_h3_sla_and_cache_preserve_both_model_patcher_contracts(monkeypatch):
             self.model_options = dict(model_options or {})
             self.object_patches = dict(object_patches or {})
             self.replacements = dict(replacements or {})
-            self.wrappers = {
-                wrapper_type: dict(entries) for wrapper_type, entries in (wrappers or {}).items()
-            }
+            self.wrappers = {wrapper_type: dict(entries) for wrapper_type, entries in (wrappers or {}).items()}
 
         def clone(self):
-            return FakePatcher(
-                self.model.diffusion_model,
-                self.model_options,
-                self.object_patches,
-                self.replacements,
-                self.wrappers,
-            )
+            return FakePatcher(self.model.diffusion_model, self.model_options, self.object_patches, self.replacements, self.wrappers)
 
         def get_model_object(self, _name):
             return self.model.diffusion_model
@@ -1138,36 +882,21 @@ def test_h3_sla_and_cache_preserve_both_model_patcher_contracts(monkeypatch):
         assert "diffusion_model._forward" in patched.object_patches
         assert ("dit", "block_loop", 0) in patched.replacements
         assert "optimized_attention_override" in patched.model_options["transformer_options"]
-        assert patcher_helpers.MINIMAX_H3_SLA_WRAPPER_KEY in patched.wrappers[
-            patcher_helpers.comfy.patcher_extension.WrappersMP.DIFFUSION_MODEL
-        ]
+        assert patcher_helpers.MINIMAX_H3_SLA_WRAPPER_KEY in patched.wrappers[patcher_helpers.comfy.patcher_extension.WrappersMP.DIFFUSION_MODEL]
         outer = patched.wrappers[patcher_helpers.comfy.patcher_extension.WrappersMP.OUTER_SAMPLE]
         assert patcher_helpers.MINIMAX_H3_SLA_SAMPLING_SCOPE_KEY in outer
         assert any(key.startswith("plain-") for key in outer)
 
     original = FakePatcher(FakeH3())
-    cached_then_sla = patcher_helpers.patch_unified_attention_model(
-        patcher_helpers.patch_minimax_h3_cache_model(original, 0.1, 0.1, 0.9, 2, "auto", False),
-        {"attention_mode": "Sparse / MiniMax H3 SLA", "minimax_h3_sla_config": config},
-    )
+    cached_then_sla = patcher_helpers.patch_unified_attention_model(patcher_helpers.patch_minimax_h3_cache_model(original, 0.1, 0.1, 0.9, 2, "auto", False), {"attention_mode": "Sparse / MiniMax H3 SLA", "minimax_h3_sla_config": config})
     assert_combined(cached_then_sla)
 
-    sla_then_cached = patcher_helpers.patch_minimax_h3_cache_model(
-        patcher_helpers.patch_unified_attention_model(
-            original,
-            {"attention_mode": "Sparse / MiniMax H3 SLA", "minimax_h3_sla_config": config},
-        ),
-        0.1,
-        0.1,
-        0.9,
-        2,
-        "auto",
-        False,
-    )
+    sla_then_cached = patcher_helpers.patch_minimax_h3_cache_model(patcher_helpers.patch_unified_attention_model(original, {"attention_mode": "Sparse / MiniMax H3 SLA", "minimax_h3_sla_config": config}), 0.1, 0.1, 0.9, 2, "auto", False)
     assert_combined(sla_then_cached)
 
 
 def test_model_helper_rejects_invalid_inputs(monkeypatch):
+
     class FakeH3:
         pass
 
@@ -1181,16 +910,13 @@ def test_model_helper_rejects_invalid_inputs(monkeypatch):
             return self
 
     with pytest.raises(ValueError, match="start percent"):
-        patcher_helpers.patch_minimax_h3_cache_model(
-            FakePatcher(), 0.1, 0.9, 0.1, 2, "auto", False
-        )
+        patcher_helpers.patch_minimax_h3_cache_model(FakePatcher(), 0.1, 0.9, 0.1, 2, "auto", False)
     with pytest.raises(ValueError, match="requires a MiniMax H3"):
-        patcher_helpers.patch_minimax_h3_cache_model(
-            FakePatcher(), 0.1, 0.1, 0.9, 2, "auto", False
-        )
+        patcher_helpers.patch_minimax_h3_cache_model(FakePatcher(), 0.1, 0.1, 0.9, 2, "auto", False)
 
 
 def test_core_object_patch_restores_original_bound_method():
+
     class Diffusion:
         def _forward(self):
             return "original"
@@ -1202,20 +928,12 @@ def test_core_object_patch_restores_original_bound_method():
             self.diffusion_model = Diffusion()
 
     tiny_model = TinyModel()
-    patcher = comfy.model_patcher.ModelPatcher(
-        tiny_model,
-        load_device=torch.device("cpu"),
-        offload_device=torch.device("cpu"),
-        size=1,
-    )
+    patcher = comfy.model_patcher.ModelPatcher(tiny_model, load_device=torch.device("cpu"), offload_device=torch.device("cpu"), size=1)
 
     def replacement(self):
         return "patched"
 
-    patcher.add_object_patch(
-        "diffusion_model._forward",
-        types.MethodType(replacement, tiny_model.diffusion_model),
-    )
+    patcher.add_object_patch("diffusion_model._forward", types.MethodType(replacement, tiny_model.diffusion_model))
     patcher.patch_model(load_weights=False)
     assert tiny_model.diffusion_model._forward() == "patched"
 
@@ -1224,14 +942,7 @@ def test_core_object_patch_restores_original_bound_method():
 
 
 def _projection_data(d_in=2, d_out=3):
-    return {
-        "W": torch.arange(d_in * d_out, dtype=torch.float32).reshape(d_in, d_out),
-        "mean_in": torch.tensor([1.0, 2.0]),
-        "std_in": torch.tensor([2.0, 4.0]),
-        "mean_out": torch.tensor([0.5, 1.0, 1.5]),
-        "std_out": torch.tensor([1.0, 2.0, 3.0]),
-        "sink_out": torch.tensor([9.0, 8.0, 7.0]),
-    }
+    return {"W": torch.arange(d_in * d_out, dtype=torch.float32).reshape(d_in, d_out), "mean_in": torch.tensor([1.0, 2.0]), "std_in": torch.tensor([2.0, 4.0]), "mean_out": torch.tensor([0.5, 1.0, 1.5]), "std_out": torch.tensor([1.0, 2.0, 3.0]), "sink_out": torch.tensor([9.0, 8.0, 7.0])}
 
 
 def test_minimax_h3_projection_model_matches_checkpoint_formula_and_sink():
@@ -1266,20 +977,15 @@ def test_minimax_h3_projection_model_supports_residual_only():
 
 
 def test_minimax_h3_projected_tokenizer_uses_h3_key_and_video_blocks():
+
     class RawTokenizer:
         def tokenize_with_weights(self, text, **_kwargs):
             return [[(ord(character), 1.0) for character in text]]
 
-    tokenizer = patcher_helpers._MiniMaxH3ProjectedTokenizer(
-        types.SimpleNamespace(qwen3vl_4b=RawTokenizer()),
-        "qwen3vl_4b",
-    )
+    tokenizer = patcher_helpers._MiniMaxH3ProjectedTokenizer(types.SimpleNamespace(qwen3vl_4b=RawTokenizer()), "qwen3vl_4b")
     frames = torch.zeros((3, 2, 2, 3))
 
-    tokens = tokenizer.tokenize_with_weights(
-        "go",
-        minimax_ref_items=[{"type": "video", "data": frames}],
-    )
+    tokens = tokenizer.tokenize_with_weights("go", minimax_ref_items=[{"type": "video", "data": frames}])
     entries = tokens["qwen3vl_32b"][0]
     video_entries = [entry[0] for entry in entries if isinstance(entry[0], dict)]
 
@@ -1290,6 +996,7 @@ def test_minimax_h3_projected_tokenizer_uses_h3_key_and_video_blocks():
 
 
 def test_minimax_h3_projected_clip_is_clone_scoped_and_returns_tags(monkeypatch, tmp_path):
+
     class RawTokenizer:
         def tokenize_with_weights(self, text, **_kwargs):
             return [[(ord(character), 1.0) for character in text]]
@@ -1306,11 +1013,7 @@ def test_minimax_h3_projected_clip_is_clone_scoped_and_returns_tags(monkeypatch,
         clip = "qwen3vl_4b"
 
         def __init__(self):
-            source_type = type(
-                "GenericQwen3VL",
-                (),
-                {"__module__": "comfy.text_encoders.qwen3vl"},
-            )
+            source_type = type("GenericQwen3VL", (), {"__module__": "comfy.text_encoders.qwen3vl"})
             self.qwen3vl_4b = source_type()
             self.qwen3vl_4b.transformer = Transformer()
 
@@ -1362,38 +1065,20 @@ def test_minimax_h3_projected_clip_is_clone_scoped_and_returns_tags(monkeypatch,
         def encode_from_tokens(self, tokens, **_kwargs):
             assert list(tokens) == ["qwen3vl_4b"]
             hidden = torch.tensor([[[1.0, 2.0], [3.0, 6.0], [1.0, 2.0]]])
-            self.patcher.object_patches["qwen3vl_4b.transformer.forward"](
-                embeds=hidden,
-                embeds_info=[{"type": "image", "index": 1, "size": 1}],
-            )
+            self.patcher.object_patches["qwen3vl_4b.transformer.forward"](embeds=hidden, embeds_info=[{"type": "image", "index": 1, "size": 1}])
             return {"cond": hidden, "pooled_output": None}
 
     original = FakeClip()
     cloned = FakeClip()
     projection = patcher_helpers.MiniMaxH3ProjectionModel(_projection_data(), tap=7)
-    projected = patcher_helpers.MiniMaxH3ProjectedCLIP(
-        cloned,
-        "projection.safetensors",
-        projection_model=projection,
-        projection_patcher=FakeProjectionPatcher(),
-    )
+    projected = patcher_helpers.MiniMaxH3ProjectedCLIP(cloned, "projection.safetensors", projection_model=projection, projection_patcher=FakeProjectionPatcher())
     monkeypatch.setattr(patcher_helpers.comfy.model_management, "load_models_gpu", lambda _models: None)
-    monkeypatch.setattr(
-        patcher_helpers.comfy.model_management,
-        "intermediate_device",
-        lambda: torch.device("cpu"),
-    )
+    monkeypatch.setattr(patcher_helpers.comfy.model_management, "intermediate_device", lambda: torch.device("cpu"))
 
-    output = projected.encode_from_tokens(
-        {"qwen3vl_32b": [[(1, 1.0)]]},
-        return_dict=True,
-    )
+    output = projected.encode_from_tokens({"qwen3vl_32b": [[(1, 1.0)]]}, return_dict=True)
 
     assert original.patcher.object_patches == {}
-    assert set(cloned.patcher.object_patches) == {
-        "qwen3vl_4b.transformer.preprocess_embed",
-        "qwen3vl_4b.transformer.forward",
-    }
+    assert set(cloned.patcher.object_patches) == {"qwen3vl_4b.transformer.preprocess_embed", "qwen3vl_4b.transformer.forward"}
     assert cloned.layer_idx == 7
     assert output["cond"].shape == (1, 3, 3)
     assert torch.equal(output["minimax_token_tags"], torch.tensor([0, 0, 0]))
@@ -1417,6 +1102,7 @@ def _ideogram4_directions():
 
 
 def _ideogram4_patcher(monkeypatch):
+
     class Block:
         def forward(self, x, attn_mask, freqs_cis, adaln_input, transformer_options={}):
             return x
@@ -1501,10 +1187,7 @@ def test_ideogram4_debanner_wrapper_and_block_forward_preserve_text_and_norm(mon
     output = torch.ones(1, 6, 4608)
     corrected = patched.object_patches["diffusion_model.layers.25.forward"](output, None, None, None, state_options)
     assert torch.equal(corrected[:, :2], output[:, :2])
-    assert torch.allclose(
-        torch.linalg.vector_norm(corrected[:, 2:], dim=-1),
-        torch.linalg.vector_norm(output[:, 2:], dim=-1),
-    )
+    assert torch.allclose(torch.linalg.vector_norm(corrected[:, 2:], dim=-1), torch.linalg.vector_norm(output[:, 2:], dim=-1))
     assert not torch.equal(corrected[:, 2:], output[:, 2:])
 
     unconditional_options = wrapper(Executor(), torch.zeros(1, 128, 3, 1), torch.tensor([1.0]), None, None, {})
@@ -1513,25 +1196,13 @@ def test_ideogram4_debanner_wrapper_and_block_forward_preserve_text_and_norm(mon
 
 
 def test_minimax_h3_pdd_schema_uses_existing_lora_category(monkeypatch):
-    monkeypatch.setattr(
-        patcher_nodes.folder_paths,
-        "get_filename_list",
-        lambda category: ["minimax_h3_pdd.safetensors"] if category == "loras" else [],
-    )
+    monkeypatch.setattr(patcher_nodes.folder_paths, "get_filename_list", lambda category: ["minimax_h3_pdd.safetensors"] if category == "loras" else [])
 
     schema = patcher_nodes.UC_MiniMaxH3PDDAcc.define_schema()
 
     assert schema.node_id == "UC_MiniMaxH3PDDAcc"
     assert schema.is_experimental
-    assert [value.id for value in schema.inputs] == [
-        "model",
-        "pdd_lora",
-        "nfe",
-        "partition",
-        "lora_strength",
-        "head_strength",
-        "on_off_grid",
-    ]
+    assert [value.id for value in schema.inputs] == ["model", "pdd_lora", "nfe", "partition", "lora_strength", "head_strength", "on_off_grid"]
     assert schema.inputs[1].options == ["minimax_h3_pdd.safetensors"]
     assert schema.inputs[2].options == ["8", "7", "6", "5", "4"]
     assert [value.id for value in schema.outputs] == ["model", "sigmas"]
@@ -1571,25 +1242,11 @@ def test_minimax_h3_pdd_wrapper_resets_context_after_failure():
 
 
 def test_minimax_h3_pdd_head_bank_is_core_modelpatcher_managed():
-    bank = patcher_helpers.MiniMaxH3PDDHeadBank(
-        torch.ones(2, 3, 4),
-        torch.zeros(2, 3),
-        torch.ones(2, 2, 4),
-        torch.zeros(2, 2),
-    )
-    patcher = comfy.model_patcher.ModelPatcher(
-        bank,
-        load_device=torch.device("cpu"),
-        offload_device=torch.device("cpu"),
-    )
+    bank = patcher_helpers.MiniMaxH3PDDHeadBank(torch.ones(2, 3, 4), torch.zeros(2, 3), torch.ones(2, 2, 4), torch.zeros(2, 2))
+    patcher = comfy.model_patcher.ModelPatcher(bank, load_device=torch.device("cpu"), offload_device=torch.device("cpu"))
     video, audio = bank.project(torch.ones(1, 4), torch.ones(1, 4), 1)
 
-    assert set(bank.state_dict()) == {
-        "video_weight",
-        "video_bias",
-        "audio_weight",
-        "audio_bias",
-    }
+    assert set(bank.state_dict()) == {"video_weight", "video_bias", "audio_weight", "audio_bias"}
     assert patcher.model_size() == sum(tensor.nbytes for tensor in bank.state_dict().values())
     assert video.shape == (1, 3)
     assert audio.shape == (1, 2)
@@ -1623,19 +1280,13 @@ def test_krea2_nag_schema_and_formula_contract(monkeypatch):
     expected = 0.25 * (z_pos * 5.0 - z_neg * 4.0) * (15.0 / 46.0) + 0.75 * z_pos
     actual = patcher_helpers.apply_nag_guidance(z_pos, z_neg, nag_scale=5.0, nag_tau=2.5, nag_alpha=0.25)
     assert torch.allclose(actual, expected, atol=1e-6)
-    assert torch.allclose(
-        patcher_helpers.apply_nag_guidance(z_pos, z_pos, nag_scale=5.0, nag_tau=2.5, nag_alpha=0.25),
-        z_pos,
-        atol=1e-6,
-    )
+    assert torch.allclose(patcher_helpers.apply_nag_guidance(z_pos, z_pos, nag_scale=5.0, nag_tau=2.5, nag_alpha=0.25), z_pos, atol=1e-6)
 
     # Per-head L1 normalization preserves spatial RoPE heads (head 0: z_pos == z_neg)
     # when semantic text heads (head 1: z_neg == -z_pos) exceed nag_tau.
     two_head_pos = torch.cat((torch.ones(1, 4, 4), torch.ones(1, 4, 4)), dim=-1)
     two_head_neg = torch.cat((torch.ones(1, 4, 4), -torch.ones(1, 4, 4)), dim=-1)
-    guided_two_head = patcher_helpers.apply_nag_guidance(
-        two_head_pos, two_head_neg, nag_scale=5.0, nag_tau=2.5, nag_alpha=0.5, heads=2
-    )
+    guided_two_head = patcher_helpers.apply_nag_guidance(two_head_pos, two_head_neg, nag_scale=5.0, nag_tau=2.5, nag_alpha=0.5, heads=2)
     assert torch.allclose(guided_two_head[..., :4], torch.ones(1, 4, 4), atol=1e-6)
     assert not torch.allclose(guided_two_head[..., 4:], torch.ones(1, 4, 4), atol=1e-6)
 
@@ -1645,24 +1296,7 @@ def test_krea2_nag_end_to_end_variable_length_and_ref_latents():
     from comfy.ldm.krea2.model import SingleStreamDiT
 
     torch.manual_seed(42)
-    dit = SingleStreamDiT(
-        features=32,
-        tdim=16,
-        txtdim=16,
-        heads=2,
-        kvheads=1,
-        multiplier=1,
-        layers=2,
-        patch=2,
-        channels=4,
-        txtlayers=2,
-        txtheads=2,
-        txtkvheads=1,
-        default_ref_method="index_timestep_zero",
-        device=torch.device("cpu"),
-        dtype=torch.float32,
-        operations=comfy.ops.manual_cast,
-    )
+    dit = SingleStreamDiT(features=32, tdim=16, txtdim=16, heads=2, kvheads=1, multiplier=1, layers=2, patch=2, channels=4, txtlayers=2, txtheads=2, txtkvheads=1, default_ref_method="index_timestep_zero", device=torch.device("cpu"), dtype=torch.float32, operations=comfy.ops.manual_cast)
     with torch.no_grad():
         for name, param in dit.named_parameters():
             if "scale" in name or "lin" in name:
@@ -1726,14 +1360,7 @@ def test_krea2_nag_end_to_end_variable_length_and_ref_latents():
 
     baseline_out = dit(x, timesteps, pos_context, ref_latents=[ref_latent], transformer_options={})
 
-    patched = patcher_helpers.patch_krea2_nag_model(
-        base_patcher,
-        nag_scale=5.0,
-        nag_tau=2.5,
-        nag_alpha=0.25,
-        start_percent=0.0,
-        end_percent=0.8,
-    )
+    patched = patcher_helpers.patch_krea2_nag_model(base_patcher, nag_scale=5.0, nag_tau=2.5, nag_alpha=0.25, start_percent=0.0, end_percent=0.8)
     assert patched.model_options.get("disable_cfg1_optimization") is True
 
     for index, block in enumerate(dit.blocks):
@@ -1771,12 +1398,8 @@ def test_krea2_nag_end_to_end_variable_length_and_ref_latents():
         calls.append((conds, model_options))
         return [torch.ones_like(x_in), torch.zeros_like(x_in)]
 
-    calc_wrapper = patched.model_options["wrappers"][comfy.patcher_extension.WrappersMP.CALC_COND_BATCH][
-        patcher_helpers.KREA2_NAG_CALC_COND_WRAPPER_KEY
-    ][0]
-    predict_wrapper = patched.model_options["wrappers"][comfy.patcher_extension.WrappersMP.PREDICT_NOISE][
-        patcher_helpers.KREA2_NAG_PREDICT_NOISE_WRAPPER_KEY
-    ][0]
+    calc_wrapper = patched.model_options["wrappers"][comfy.patcher_extension.WrappersMP.CALC_COND_BATCH][patcher_helpers.KREA2_NAG_CALC_COND_WRAPPER_KEY][0]
+    predict_wrapper = patched.model_options["wrappers"][comfy.patcher_extension.WrappersMP.PREDICT_NOISE][patcher_helpers.KREA2_NAG_PREDICT_NOISE_WRAPPER_KEY][0]
 
     class FakeGuiderExec:
         class_obj = types.SimpleNamespace(cfg=1.0)
@@ -1809,43 +1432,17 @@ def test_moss_image_edit_patcher_end_to_end():
     assert lp.shape == raw_flux2.shape
     assert float(lp.std()) <= float(raw_flux2.std())
 
-    ids_aligned = patcher_helpers.build_moss_reference_rope_ids(
-        target_h=4,
-        target_w=6,
-        ref_h=4,
-        ref_w=6,
-        text_len=5,
-        ref_index=1,
-        rope_mode="spatial_aligned",
-    )
+    ids_aligned = patcher_helpers.build_moss_reference_rope_ids(target_h=4, target_w=6, ref_h=4, ref_w=6, text_len=5, ref_index=1, rope_mode="spatial_aligned")
     assert ids_aligned.shape == (24, 4)
     assert torch.all(ids_aligned[:, 0] == 0.0)
     assert torch.all(ids_aligned[:, 1] == 5.0)
 
-    ids_ref_axis = patcher_helpers.build_moss_reference_rope_ids(
-        target_h=4,
-        target_w=6,
-        ref_h=3,
-        ref_w=3,
-        text_len=5,
-        ref_index=2,
-        rope_mode="reference_axis",
-    )
+    ids_ref_axis = patcher_helpers.build_moss_reference_rope_ids(target_h=4, target_w=6, ref_h=3, ref_w=3, text_len=5, ref_index=2, rope_mode="reference_axis")
     assert ids_ref_axis.shape == (9, 4)
     assert torch.all(ids_ref_axis[:, 0] == 2.0)
     assert torch.all(ids_ref_axis[:, 1] == 7.0)
 
-    dit = moss_model.MOSSImage(
-        dim=64,
-        ffn_dim=128,
-        num_heads=2,
-        num_layers=2,
-        text_dim=32,
-        latent_channels=16,
-        dtype=torch.float32,
-        device="cpu",
-        operations=torch.nn,
-    ).train(False)
+    dit = moss_model.MOSSImage(dim=64, ffn_dim=128, num_heads=2, num_layers=2, text_dim=32, latent_channels=16, dtype=torch.float32, device="cpu", operations=torch.nn).train(False)
 
     class FakeModelSampling:
         def percent_to_sigma(self, percent: float) -> float:
@@ -1902,34 +1499,9 @@ def test_moss_image_edit_patcher_end_to_end():
     mask_tensor = torch.zeros(1, 4, 4)
     mask_tensor[:, :2, :2] = 1.0  # Edit top-left 2x2, preserve rest
 
-    (patched_edit,) = patcher_nodes.UC_MOSSImageEditPatcher.execute(
-        base_patcher,
-        preset="balanced_edit",
-        strength=0.75,
-        structure_retention=0.60,
-        uncond_skip_layer_22=False,
-        reference_latent={"samples": ref_tensor},
-        mask=mask_tensor,
-        uncond_skip_layer=1,
-        start_percent=0.0,
-        end_percent=0.85,
-    )
-    (patched_zero,) = patcher_nodes.UC_MOSSImageEditPatcher.execute(
-        base_patcher,
-        preset="balanced_edit",
-        strength=0.0,
-        structure_retention=0.0,
-        uncond_skip_layer_22=False,
-        uncond_skip_layer=-1,
-    )
-    (patched_subject,) = patcher_nodes.UC_MOSSImageEditPatcher.execute(
-        base_patcher,
-        preset="subject_reference",
-        strength=0.80,
-        structure_retention=0.0,
-        uncond_skip_layer_22=False,
-        uncond_skip_layer=-1,
-    )
+    (patched_edit,) = patcher_nodes.UC_MOSSImageEditPatcher.execute(base_patcher, preset="balanced_edit", strength=0.75, structure_retention=0.60, uncond_skip_layer_22=False, reference_latent={"samples": ref_tensor}, mask=mask_tensor, uncond_skip_layer=1, start_percent=0.0, end_percent=0.85)
+    (patched_zero,) = patcher_nodes.UC_MOSSImageEditPatcher.execute(base_patcher, preset="balanced_edit", strength=0.0, structure_retention=0.0, uncond_skip_layer_22=False, uncond_skip_layer=-1)
+    (patched_subject,) = patcher_nodes.UC_MOSSImageEditPatcher.execute(base_patcher, preset="subject_reference", strength=0.80, structure_retention=0.0, uncond_skip_layer_22=False, uncond_skip_layer=-1)
 
     # Verify extra_conds patch extracts reference_latents from conditioning
     extra = patched_edit.model.extra_conds(reference_latents=[ref_tensor])
@@ -1943,11 +1515,7 @@ def test_moss_image_edit_patcher_end_to_end():
     try:
         x_inplace = torch.randn(2, 8, 64)
         ptr_before = x_inplace.data_ptr()
-        res_inplace = patcher_helpers._moss_gated_residual(
-            x_inplace,
-            torch.ones_like(x_inplace),
-            torch.full((2, 1, 64), 0.5),
-        )
+        res_inplace = patcher_helpers._moss_gated_residual(x_inplace, torch.ones_like(x_inplace), torch.full((2, 1, 64), 0.5))
         assert res_inplace.data_ptr() == ptr_before
     finally:
         comfy.model_management.in_training = old_training
@@ -1963,26 +1531,14 @@ def test_moss_image_edit_patcher_end_to_end():
 
         # Zero strength & no mask matches baseline exactly
         patched_zero.apply_layer_patches()
-        zero_opts = {
-            "wrappers": patched_zero.model_options["wrappers"],
-            "cond_or_uncond": [0, 1],
-            "sigmas": torch.tensor([0.5]),
-        }
+        zero_opts = {"wrappers": patched_zero.model_options["wrappers"], "cond_or_uncond": [0, 1], "sigmas": torch.tensor([0.5])}
         zero_out = dit(x, timesteps, context, transformer_options=zero_opts)
         assert torch.allclose(zero_out, baseline_out, atol=1e-5)
 
         # OUTER_SAMPLE anchors noise and rescues non-empty sampler latent_image
-        outer_wrapper = patched_edit.model_options["wrappers"][comfy.patcher_extension.WrappersMP.OUTER_SAMPLE][
-            patcher_helpers.MOSS_IMAGE_EDIT_OUTER_SAMPLE_WRAPPER_KEY
-        ][0]
+        outer_wrapper = patched_edit.model_options["wrappers"][comfy.patcher_extension.WrappersMP.OUTER_SAMPLE][patcher_helpers.MOSS_IMAGE_EDIT_OUTER_SAMPLE_WRAPPER_KEY][0]
         captured_noise = []
-        outer_wrapper(
-            lambda n, *_a, **_kw: captured_noise.append(n),
-            x.clone(),
-            ref_tensor.expand_as(x),
-            None,
-            None,
-        )
+        outer_wrapper(lambda n, *_a, **_kw: captured_noise.append(n), x.clone(), ref_tensor.expand_as(x), None, None)
         assert len(captured_noise) == 1
         assert captured_noise[0].shape == x.shape
         # Inside mask (top-left 2x2) noise is unanchored, outside mask it is anchored toward reference low-pass
@@ -1991,11 +1547,7 @@ def test_moss_image_edit_patcher_end_to_end():
 
         # Diffusion wrapper applies 42-layer reference KV attention, structure guidance, and exact unmasked preservation
         patched_edit.apply_layer_patches()
-        edit_opts = {
-            "wrappers": patched_edit.model_options["wrappers"],
-            "cond_or_uncond": [0, 1],
-            "sigmas": torch.tensor([0.5]),
-        }
+        edit_opts = {"wrappers": patched_edit.model_options["wrappers"], "cond_or_uncond": [0, 1], "sigmas": torch.tensor([0.5])}
         edit_v = dit(x, timesteps, context, transformer_options=edit_opts)
         assert edit_v.shape == baseline_out.shape
         assert not torch.allclose(edit_v, baseline_out, atol=1e-4)
@@ -2006,22 +1558,14 @@ def test_moss_image_edit_patcher_end_to_end():
 
         # Subject reference mode with conditioning ref_latents (even at different spatial size 3x3) runs cleanly
         patched_subject.apply_layer_patches()
-        subject_opts = {
-            "wrappers": patched_subject.model_options["wrappers"],
-            "cond_or_uncond": [0, 1],
-            "sigmas": torch.tensor([0.5]),
-        }
+        subject_opts = {"wrappers": patched_subject.model_options["wrappers"], "cond_or_uncond": [0, 1], "sigmas": torch.tensor([0.5])}
         small_ref = torch.randn(1, 16, 3, 3)
         subject_v = dit(x, timesteps, context, transformer_options=subject_opts, ref_latents=[small_ref])
         assert subject_v.shape == baseline_out.shape
         assert not torch.allclose(subject_v, baseline_out, atol=1e-4)
 
         # Outside sigma window (sigma=0.05 < 0.15 for end_percent=0.85), wrapper is bypassed
-        late_opts = {
-            "wrappers": patched_edit.model_options["wrappers"],
-            "cond_or_uncond": [0, 1],
-            "sigmas": torch.tensor([0.05]),
-        }
+        late_opts = {"wrappers": patched_edit.model_options["wrappers"], "cond_or_uncond": [0, 1], "sigmas": torch.tensor([0.05])}
         late_out = dit(x, timesteps, context, transformer_options=late_opts)
         assert torch.allclose(late_out, baseline_out, atol=1e-5)
     finally:
@@ -2041,24 +1585,7 @@ def test_krea2_edit_patcher_end_to_end():
     assert inputs["cache_text_fusion"].default is True
 
     torch.manual_seed(42)
-    dit = SingleStreamDiT(
-        features=32,
-        tdim=16,
-        txtdim=16,
-        heads=2,
-        kvheads=1,
-        multiplier=1,
-        layers=2,
-        patch=2,
-        channels=4,
-        txtlayers=2,
-        txtheads=2,
-        txtkvheads=1,
-        default_ref_method="index_timestep_zero",
-        device=torch.device("cpu"),
-        dtype=torch.float32,
-        operations=comfy.ops.manual_cast,
-    )
+    dit = SingleStreamDiT(features=32, tdim=16, txtdim=16, heads=2, kvheads=1, multiplier=1, layers=2, patch=2, channels=4, txtlayers=2, txtheads=2, txtkvheads=1, default_ref_method="index_timestep_zero", device=torch.device("cpu"), dtype=torch.float32, operations=comfy.ops.manual_cast)
     with torch.no_grad():
         for name, param in dit.named_parameters():
             if "scale" in name or "lin" in name:
@@ -2123,18 +1650,7 @@ def test_krea2_edit_patcher_end_to_end():
     src_img = torch.rand(1, 64, 64, 3)
 
     (patched,) = patcher_nodes.UC_Krea2EditPatcher.execute(
-        model=base_patcher,
-        source_image=src_img,
-        vae=vae,
-        ref_boost=4.0,
-        ref_boost_a=2.0,
-        boost_mode="Fast / Key Scaling (FlashAttention)",
-        ref_position="beside (right of target)",
-        ref_position_a="aligned (trained)",
-        fit_mode="fit",
-        target_width=64,
-        target_height=64,
-        cache_text_fusion=True,
+        model=base_patcher, source_image=src_img, vae=vae, ref_boost=4.0, ref_boost_a=2.0, boost_mode="Fast / Key Scaling (FlashAttention)", ref_position="beside (right of target)", ref_position_a="aligned (trained)", fit_mode="fit", target_width=64, target_height=64, cache_text_fusion=True
     )
 
     # 1. Verify pre-sampling VAE encode happened during node execution
@@ -2175,9 +1691,7 @@ def test_krea2_edit_patcher_end_to_end():
     assert out_step1.shape == x.shape
 
     # OUTER_SAMPLE scope clears cache on exit
-    outer_wrapper = patched.model_options["wrappers"][comfy.patcher_extension.WrappersMP.OUTER_SAMPLE][
-        patcher_helpers.KREA2_EDIT_OUTER_SAMPLE_WRAPPER_KEY
-    ][0]
+    outer_wrapper = patched.model_options["wrappers"][comfy.patcher_extension.WrappersMP.OUTER_SAMPLE][patcher_helpers.KREA2_EDIT_OUTER_SAMPLE_WRAPPER_KEY][0]
     outer_wrapper(lambda: None)
     assert patched.object_patches["diffusion_model.txtfusion"].cache is None
 
@@ -2225,13 +1739,7 @@ def test_minimax_h3_context_patcher_execution_and_grid_snapping():
             self.wrappers.setdefault(wrapper_type, {}).setdefault(key, []).append(wrapper)
 
     base = FakePatcher()
-    out = patcher_nodes.UC_MiniMaxH3ContextPatcher.execute(
-        base,
-        window_size="124 frames (~5.2s - Standard)",
-        overlap="39 frames (~1.6s - Standard)",
-        blend_profile="pyramid",
-        freenoise=True,
-    )
+    out = patcher_nodes.UC_MiniMaxH3ContextPatcher.execute(base, window_size="124 frames (~5.2s - Standard)", overlap="39 frames (~1.6s - Standard)", blend_profile="pyramid", freenoise=True)
     patched = out.args[0]
     assert patched is not base
     handler = patched.model_options.get("context_handler")
@@ -2248,12 +1756,5 @@ def test_minimax_h3_context_patcher_execution_and_grid_snapping():
     assert "sampler_sample" in patched.wrappers
 
     # Disabled mode leaves model untouched
-    out_disabled = patcher_nodes.UC_MiniMaxH3ContextPatcher.execute(
-        base,
-        window_size="Disabled (Full Latent)",
-    )
+    out_disabled = patcher_nodes.UC_MiniMaxH3ContextPatcher.execute(base, window_size="Disabled (Full Latent)")
     assert out_disabled.args[0] is base
-
-
-
-
