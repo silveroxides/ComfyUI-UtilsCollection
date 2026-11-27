@@ -393,13 +393,18 @@ def test_h3_sla_triton_launch_ladder_retries_and_caches_success(monkeypatch):
 
 def test_h3_sla_dense_step_selection_unions_explicit_and_tail_steps():
     config = patcher_helpers.MiniMaxH3SlaAttentionConfig(dense_steps="0,2-3", dense_tail_steps=1)
-    options = {"sample_sigmas": torch.tensor([4.0, 3.0, 2.0, 1.0, 0.0])}
+    sample_sigmas = torch.tensor([1.0, 0.75, 0.5, 0.25, 0.0])
 
-    assert patcher_helpers._sla_dense_step(options, torch.tensor([4.0]), config) == "sampling step 0 is configured dense"
-    assert patcher_helpers._sla_dense_step(options, torch.tensor([2.0]), config) == "sampling step 2 is configured dense"
-    assert patcher_helpers._sla_dense_step(options, torch.tensor([1.0]), config) == "sampling step 3 is configured dense"
+    def at(sigma):
+        return {"sample_sigmas": sample_sigmas, "sigmas": torch.tensor([sigma])}
+
+    assert patcher_helpers._sla_dense_step(at(1.0), config) == "sampling step 0 is configured dense"
+    assert patcher_helpers._sla_dense_step(at(0.75), config) is None
+    assert patcher_helpers._sla_dense_step(at(0.5), config) == "sampling step 2 is configured dense"
+    assert patcher_helpers._sla_dense_step(at(0.25), config) == "sampling step 3 is configured dense"
     tail_config = patcher_helpers.MiniMaxH3SlaAttentionConfig(dense_steps="", dense_tail_steps=1)
-    assert patcher_helpers._sla_dense_step(options, torch.tensor([1.0]), tail_config) == "one of the final 1 sampler steps is configured dense"
+    assert patcher_helpers._sla_dense_step(at(0.75), tail_config) is None
+    assert patcher_helpers._sla_dense_step(at(0.25), tail_config) == "one of the final 1 sampler steps is configured dense"
 
 
 def test_h3_sla_sampling_scope_reports_each_run(caplog):

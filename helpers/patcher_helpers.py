@@ -11,6 +11,7 @@ import re
 import types
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, replace
+from functools import cached_property
 from pathlib import Path
 from typing import Any
 
@@ -1544,8 +1545,12 @@ class MiniMaxH3SlaAttentionConfig:
             raise ValueError("MiniMax H3 SLA reference-media protection must be Off, Light, or Heavy Enforcement.")
         if self.dense_backend not in SLA_DENSE_BACKENDS:
             raise ValueError("Choose a supported MiniMax H3 SLA dense backend.")
-        _parse_h3_sla_dense_steps(self.dense_steps)
+        _ = self.dense_step_set
         return self
+
+    @cached_property
+    def dense_step_set(self) -> frozenset[int]:
+        return _parse_h3_sla_dense_steps(self.dense_steps)
 
 
 UNIFIED_ATTENTION_MODES = ("disabled", "FlashAttention", "SageAttention", "Sparse / MiniMax H3 SLA", "Sparse / MiniMax H3 Radial")
@@ -2021,23 +2026,25 @@ def _sla_sparse_attention(q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, loo
     raise last_error if last_error is not None else RuntimeError("MiniMax H3 SLA found no viable Triton launch configuration.")
 
 
-def _sla_sampler_step_index(transformer_options: dict[str, Any], timestep: torch.Tensor) -> tuple[int, int] | None:
+def _sla_sampler_step_index(transformer_options: dict[str, Any]) -> tuple[int, int] | None:
+    # The diffusion model's timestep is in model units (sigma * 1000 for H3); the sampler's own sigma is in transformer_options.
     sigmas = transformer_options.get("sample_sigmas")
-    if not isinstance(sigmas, torch.Tensor) or sigmas.ndim != 1 or len(sigmas) < 2:
+    current = transformer_options.get("sigmas")
+    if not isinstance(sigmas, torch.Tensor) or sigmas.ndim != 1 or len(sigmas) < 2 or not isinstance(current, torch.Tensor) or current.numel() == 0:
         return None
-    current = timestep.flatten()[0].to(sigmas.dtype)
+    current = current.flatten()[0].to(sigmas.device, sigmas.dtype)
     index = int((torch.searchsorted(-sigmas, -current, right=True) - 1).clamp(0, len(sigmas) - 2).item())
     return index, len(sigmas) - 1
 
 
-def _sla_dense_step(transformer_options: dict[str, Any], timestep: torch.Tensor, config: MiniMaxH3SlaAttentionConfig) -> str | None:
-    step = _sla_sampler_step_index(transformer_options, timestep)
+def _sla_dense_step(transformer_options: dict[str, Any], config: MiniMaxH3SlaAttentionConfig) -> str | None:
+    step = _sla_sampler_step_index(transformer_options)
     if step is None:
-        if config.dense_tail_steps > 0 or _parse_h3_sla_dense_steps(config.dense_steps):
+        if config.dense_tail_steps > 0 or config.dense_step_set:
             return "sampling schedule is unavailable"
         return None
     index, total_steps = step
-    if index in _parse_h3_sla_dense_steps(config.dense_steps):
+    if index in config.dense_step_set:
         return f"sampling step {index} is configured dense"
     if config.dense_tail_steps > 0 and index >= total_steps - config.dense_tail_steps:
         return f"one of the final {config.dense_tail_steps} sampler steps is configured dense"
@@ -2151,7 +2158,7 @@ def _make_h3_sla_wrapper(config: MiniMaxH3SlaAttentionConfig, state: dict[str, A
         if dense_reason is None and layout is None:
             dense_reason = "MiniMax H3 layout metadata is unavailable"
         elif dense_reason is None:
-            dense_reason = _sla_dense_step(options, timestep, config)
+            dense_reason = _sla_dense_step(options, config)
         if config.disable_fp16_accumulation:
             _set_h3_sla_reduced_precision_accumulation(False)
         current = {"dense": dense_reason is not None, "dense_reason": dense_reason, "call_index": 0, "protected_ranges": tuple(protected_ranges), "reference_ranges": tuple(reference_ranges)}
