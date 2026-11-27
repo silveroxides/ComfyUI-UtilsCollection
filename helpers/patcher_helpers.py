@@ -1127,6 +1127,7 @@ def minimax_h3_block_patch_forward(self: minimax_model.MiniMaxH3Model, x: list[t
     layout = payload.get("layout")
     if layout is None or layout.signature != (text_len, latent_t, lat_h, lat_w, audio_t):
         layout = minimax_model.PackedLayout(text_len, latent_t, lat_h, lat_w, audio_t, keyframes=payload.get("keyframes"), refs=payload.get("refs"))
+    transformer_options["minimax_h3_layout"] = layout
 
     shift_v = float(transformer_options.get("minimax_h3_sigma_shift_video", self.sigma_shift_video))
     shift_a = float(transformer_options.get("minimax_h3_sigma_shift_audio", self.sigma_shift_audio))
@@ -1571,14 +1572,6 @@ def _call_attention_function(attention_function: Callable[..., torch.Tensor]) ->
     return override
 
 
-def _call_attention_with_fallback(attention_function: Callable[..., torch.Tensor]) -> Callable[..., torch.Tensor]:
-
-    def override(original: Callable[..., torch.Tensor], *args: Any, **kwargs: Any) -> torch.Tensor:
-        return attention_function(original, *args, **kwargs)
-
-    return override
-
-
 def _attention_as_nhd(q, k, v, heads: int, already_hnd: bool):
     if already_hnd:
         batch, _, _, head_dim = q.shape
@@ -1675,20 +1668,35 @@ def _parse_h3_sla_dense_steps(value: str) -> frozenset[int]:
     return frozenset(steps)
 
 
+def _attention_on_taken_tensors(attention_function: Callable[..., torch.Tensor]) -> Callable[..., torch.Tensor]:
+
+    def attention(q, k, v, *args: Any, **kwargs: Any) -> torch.Tensor:
+        return attention_function(q.take(), k.take(), v.take(), *args, **kwargs)
+
+    return attention
+
+
+def _optimized_attention_on_containers(q, k, v, *args: Any, **kwargs: Any) -> torch.Tensor:
+    # Called from inside wrap_attn, so kwargs carry its in-wrapper flag and the global backend consumes the containers itself.
+    return comfy.ldm.modules.attention.optimized_attention(q, k, v, *args, **kwargs)
+
+
 def _resolve_h3_sla_dense_backend(backend: str) -> Callable[..., torch.Tensor] | None:
+    """Return a dense attention callable that consumes AttentionTensorContainer q, k, v, or None for the caller's own backend."""
     if backend == "auto":
         return None
     if backend == "pytorch":
-        return _call_attention_function(comfy.ldm.modules.attention.attention_pytorch)
+        return _attention_on_taken_tensors(comfy.ldm.modules.attention.attention_pytorch.__wrapped__)
     if backend == "comfy_kitchen":
         for name in ("attention_comfy_kitchen_int8", "attention_ck", "attention_composable_kernel"):
             candidate = getattr(comfy.ldm.modules.attention, name, None)
             if callable(candidate):
-                return _call_attention_function(candidate)
+                container_function = getattr(candidate, "container_function", None)
+                return container_function if container_function is not None else _attention_on_taken_tensors(getattr(candidate, "__wrapped__", candidate))
         raise RuntimeError("MiniMax H3 SLA dense backend comfy_kitchen is unavailable in this ComfyUI installation.")
     if backend in CUSTOM_SAGE_MODES:
         try:
-            return _call_attention_function(_make_sage_backend(backend, False))
+            return _attention_on_taken_tensors(_make_sage_backend(backend, False))
         except (AttributeError, ImportError) as error:
             raise RuntimeError(f"MiniMax H3 SLA dense backend {backend} is unavailable: {error}") from error
     raise ValueError("Choose a supported MiniMax H3 SLA dense backend.")
@@ -1920,45 +1928,72 @@ def _sla_block_ranges(ranges: tuple[tuple[int, int], ...], block_size: int, bloc
     return tuple(blocks)
 
 
-def _sla_pool_tokens(value: torch.Tensor, block_size: int) -> torch.Tensor:
-    batch, sequence, heads, head_dim = value.shape
-    block_count = math.ceil(sequence / block_size)
-    padded = block_count * block_size
-    if padded != sequence:
-        value = F.pad(value, (0, 0, 0, 0, 0, padded - sequence))
-    pooled = value.transpose(1, 2).reshape(batch, heads, block_count, block_size, head_dim).sum(dim=3)
-    counts = torch.arange(block_count, device=value.device).mul(block_size).add(block_size).clamp(max=sequence)
-    counts = counts.sub(torch.arange(block_count, device=value.device).mul(block_size)).to(pooled.dtype)
-    return pooled / counts.view(1, 1, block_count, 1)
+def _sla_merge_block_ranges(ranges: tuple[tuple[int, int], ...]) -> tuple[tuple[int, int], ...]:
+    merged: list[tuple[int, int]] = []
+    for first, last in sorted(ranges):
+        if merged and first <= merged[-1][1]:
+            merged[-1] = (merged[-1][0], max(merged[-1][1], last))
+        else:
+            merged.append((first, last))
+    return tuple(merged)
 
 
-def _sla_select_blocks(q: torch.Tensor, k: torch.Tensor, config: MiniMaxH3SlaAttentionConfig, protected_ranges: tuple[tuple[int, int], ...], reference_ranges: tuple[tuple[int, int], ...], previous: torch.Tensor | None) -> tuple[torch.Tensor, int, torch.Tensor | None]:
-    pooled_q = _sla_pool_tokens(q, config.block_size).float()
+def _sla_block_means(value: torch.Tensor, block_size: int) -> tuple[torch.Tensor, torch.Tensor]:
+    """Return fp32 per-block token means and the token sum of a [batch, heads, tokens, dim] view, reading it in place."""
+    sequence = value.shape[2]
+    full = sequence // block_size
+    sums = value[:, :, : full * block_size].unflatten(2, (full, block_size)).sum(dim=3, dtype=torch.float32)
+    means = sums / block_size
+    if full * block_size < sequence:
+        tail = value[:, :, full * block_size :].sum(dim=2, keepdim=True, dtype=torch.float32)
+        sums = torch.cat((sums, tail), dim=2)
+        means = torch.cat((means, tail / (sequence - full * block_size)), dim=2)
+    return means, sums.sum(dim=2, keepdim=True)
+
+
+# Routing scores are [batch, heads, query blocks, key blocks] in fp32; heads are scored in chunks to keep this transient bounded.
+SLA_SCORE_CHUNK_BYTES = 256 * 1024 * 1024
+
+
+def _sla_select_blocks(q: torch.Tensor, k: torch.Tensor, config: MiniMaxH3SlaAttentionConfig, protected_ranges: tuple[tuple[int, int], ...], reference_ranges: tuple[tuple[int, int], ...], previous: tuple[torch.Tensor, int] | None) -> tuple[torch.Tensor, int, tuple[torch.Tensor, int] | None]:
+    """Select key blocks for each query block of [batch, heads, tokens, dim] q and k; history entries carry their key-block count."""
     key_block = 64 if config.block_size == 128 else config.block_size
-    pooled_k = _sla_pool_tokens(k, key_block) - k.mean(dim=1, dtype=torch.float32)[:, :, None, :]
-    scores = pooled_q @ pooled_k.transpose(-1, -2)
-    key_blocks = scores.shape[-1]
+    pooled_q, _ = _sla_block_means(q, config.block_size)
+    pooled_k, key_sum = _sla_block_means(k, key_block)
+    pooled_k -= key_sum / k.shape[2]
+    batch, heads, query_blocks = pooled_q.shape[:3]
+    key_blocks = pooled_k.shape[2]
     base_count = max(1, min(key_blocks, int((1.0 - config.sparsity) * key_blocks)))
-    forced = torch.zeros(key_blocks, dtype=torch.bool, device=scores.device)
-    for first, last in _sla_block_ranges(protected_ranges, key_block, key_blocks):
-        forced[first:last] = True
-    if config.stabilize_routing and previous is not None and previous.shape[:3] == scores.shape[:3]:
-        scale = scores.detach().abs().amax(dim=-1, keepdim=True).clamp_min(1e-6)
-        scores.scatter_add_(-1, previous.long(), scale.expand_as(previous) * 0.01)
-    reference_count = 0
+    forced = _sla_merge_block_ranges(_sla_block_ranges(protected_ranges, key_block, key_blocks))
     reference_sparsity = {"Off": None, "Light": SLA_REFERENCE_LIGHT_SPARSITY, "Heavy Enforcement": 0.0}[config.protect_reference_media]
+    references = ()
     if reference_sparsity is not None:
-        for first, last in _sla_block_ranges(reference_ranges, key_block, key_blocks):
-            keep = max(1, min(last - first, math.ceil((1.0 - reference_sparsity) * (last - first))))
+        references = tuple((first, last, max(1, min(last - first, math.ceil((1.0 - reference_sparsity) * (last - first))))) for first, last in _sla_block_ranges(reference_ranges, key_block, key_blocks))
+    selected_count = min(key_blocks, base_count + sum(last - first for first, last in forced) + sum(keep for _, _, keep in references))
+    lookup = torch.empty((batch, heads, query_blocks, selected_count), dtype=torch.int32, device=q.device)
+    history = torch.empty((batch, heads, query_blocks, min(4, selected_count)), dtype=torch.int32, device=q.device) if config.stabilize_routing else None
+    # A prior call with another key-block count (another tile, window or prompt length) would index past these scores.
+    stabilize = config.stabilize_routing and previous is not None and previous[1] == key_blocks and previous[0].shape[:3] == (batch, heads, query_blocks)
+    chunk = max(1, SLA_SCORE_CHUNK_BYTES // (batch * query_blocks * key_blocks * 4))
+    for start in range(0, heads, chunk):
+        stop = min(heads, start + chunk)
+        scores = pooled_q[:, start:stop] @ pooled_k[:, start:stop].transpose(-1, -2)
+        if stabilize:
+            prior = previous[0][:, start:stop]
+            scale = scores.abs().amax(dim=-1, keepdim=True).clamp_min(1e-6)
+            scores.scatter_add_(-1, prior.long(), scale.expand_as(prior) * 0.01)
+        for first, last, keep in references:
             selected_reference = torch.topk(scores[..., first:last], keep, dim=-1, sorted=False).indices + first
             scores.scatter_(-1, selected_reference, float("inf"))
-            reference_count += keep
-    if forced.any():
-        scores[..., forced] = float("inf")
-    selected_count = min(key_blocks, base_count + int(forced.sum().item()) + reference_count)
-    selected = torch.topk(scores, selected_count, dim=-1, sorted=False).indices.to(torch.int32).contiguous()
-    history = selected[..., : min(4, selected_count)].contiguous() if config.stabilize_routing else None
-    return selected, selected_count, history
+        for first, last in forced:
+            scores[..., first:last] = float("inf")
+        selected = torch.topk(scores, selected_count, dim=-1, sorted=False).indices
+        del scores
+        lookup[:, start:stop] = selected
+        if history is not None:
+            history[:, start:stop] = selected[..., : history.shape[-1]]
+        del selected
+    return lookup, selected_count, None if history is None else (history, key_blocks)
 
 
 SLA_TRITON_LAUNCH_LADDER = {(32, 32): ((4, 2), (2, 1), (4, 1), (2, 2)), (64, 64): ((4, 1), (4, 3), (8, 3), (8, 1)), (64, 128): ((4, 2), (8, 2), (4, 1)), (128, 64): ((8, 3), (4, 3), (8, 2), (4, 1)), (128, 128): ((8, 2), (4, 2), (8, 1), (4, 1))}
@@ -1967,34 +2002,33 @@ _SLA_TRITON_CHOSEN: dict[tuple[int, int, int], tuple[int, int]] = {}
 if triton is not None:
 
     @triton.jit
-    def _sla_attention_kernel(Q, K, V, scale: tl.constexpr, topk: tl.constexpr, lookup, output, heads: tl.constexpr, query_length: tl.constexpr, key_length: tl.constexpr, query_blocks: tl.constexpr, head_dim: tl.constexpr, query_block: tl.constexpr, key_block: tl.constexpr):
+    def _sla_attention_kernel(
+        Q, K, V, lookup, output, topk, heads, query_length, key_length, query_blocks, stride_qb, stride_qh, stride_qs, stride_kb, stride_kh, stride_ks, stride_vb, stride_vh, stride_vs, stride_ob, stride_oh, stride_os, scale: tl.constexpr, head_dim: tl.constexpr, query_block: tl.constexpr, key_block: tl.constexpr
+    ):
         query_block_index = tl.program_id(0).to(tl.int64)
         batch_head_index = tl.program_id(1).to(tl.int64)
         batch_index = batch_head_index // heads
         head_index = batch_head_index % heads
-        hidden = heads * head_dim
-        query_offset = batch_index * query_length * hidden + head_index * head_dim
-        key_offset = batch_index * key_length * hidden + head_index * head_dim
         lookup_offset = (batch_head_index * query_blocks + query_block_index) * topk
         row = query_block_index * query_block + tl.arange(0, query_block)
         column = tl.arange(0, key_block)
         dimension = tl.arange(0, head_dim)
-        query_ptr = Q + query_offset + row[:, None] * hidden + dimension[None, :]
-        output_ptr = output + query_offset + row[:, None] * hidden + dimension[None, :]
+        query_ptr = Q + batch_index * stride_qb + head_index * stride_qh + row[:, None] * stride_qs + dimension[None, :]
+        output_ptr = output + batch_index * stride_ob + head_index * stride_oh + row[:, None] * stride_os + dimension[None, :]
+        key_base = K + batch_index * stride_kb + head_index * stride_kh
+        value_base = V + batch_index * stride_vb + head_index * stride_vh
         running_max = tl.full([query_block], -float("inf"), tl.float32)
         running_sum = tl.zeros([query_block], tl.float32)
         running_output = tl.zeros([query_block, head_dim], tl.float32)
         query = tl.load(query_ptr, mask=row[:, None] < query_length, other=0.0)
         for selection_index in tl.range(topk):
             key_block_index = tl.load(lookup + lookup_offset + selection_index).to(tl.int64)
-            key_start = key_block_index * key_block
-            key_valid = key_start + column < key_length
-            key_ptr = K + key_offset + (key_start + column)[None, :] * hidden + dimension[:, None]
-            value_ptr = V + key_offset + (key_start + column)[:, None] * hidden + dimension[None, :]
-            key = tl.load(key_ptr, mask=key_valid[None, :], other=0.0)
+            key_row = key_block_index * key_block + column
+            key_valid = key_row < key_length
+            key = tl.load(key_base + key_row[None, :] * stride_ks + dimension[:, None], mask=key_valid[None, :], other=0.0)
             logits = tl.dot(query, key) * (scale * 1.4426950408889634)
             logits = tl.where(key_valid[None, :], logits, -float("inf"))
-            value = tl.load(value_ptr, mask=key_valid[:, None], other=0.0)
+            value = tl.load(value_base + key_row[:, None] * stride_vs + dimension[None, :], mask=key_valid[:, None], other=0.0)
             local_max = tl.max(logits, 1)
             next_max = tl.maximum(running_max, local_max)
             probabilities = tl.math.exp2(logits - next_max[:, None])
@@ -2006,18 +2040,22 @@ if triton is not None:
 
 
 def _sla_sparse_attention(q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, lookup: torch.Tensor, selected_count: int, config: MiniMaxH3SlaAttentionConfig) -> torch.Tensor:
+    """Attend [batch, heads, tokens, dim] views in place; return [batch, tokens, heads, dim]."""
     if triton is None:
         raise RuntimeError("MiniMax H3 SLA requires Triton.")
-    batch, sequence, heads, head_dim = q.shape
+    batch, heads, sequence, head_dim = q.shape
     key_block = 64 if config.block_size == 128 else config.block_size
     query_blocks = triton.cdiv(sequence, config.block_size)
-    output = torch.empty_like(q)
+    output = torch.empty((batch, sequence, heads, head_dim), dtype=q.dtype, device=q.device)
+    output_hnd = output.transpose(1, 2)
     key = (config.block_size, key_block, head_dim)
     ladder = (_SLA_TRITON_CHOSEN[key],) if key in _SLA_TRITON_CHOSEN else SLA_TRITON_LAUNCH_LADDER[(config.block_size, key_block)]
     last_error = None
     for num_warps, num_stages in ladder:
         try:
-            _sla_attention_kernel[(query_blocks, batch * heads)](q, k, v, head_dim**-0.5, selected_count, lookup, output, heads, sequence, k.shape[1], query_blocks, head_dim, config.block_size, key_block, num_warps=num_warps, num_stages=num_stages)
+            _sla_attention_kernel[(query_blocks, batch * heads)](
+                q, k, v, lookup, output, selected_count, heads, sequence, k.shape[2], query_blocks, *q.stride()[:3], *k.stride()[:3], *v.stride()[:3], *output_hnd.stride()[:3], scale=head_dim**-0.5, head_dim=head_dim, query_block=config.block_size, key_block=key_block, num_warps=num_warps, num_stages=num_stages
+            )
         except triton.runtime.errors.OutOfResources as error:
             last_error = error
             continue
@@ -2059,18 +2097,38 @@ def _report_sla_fallback(state: dict[str, Any], reason: str, level: int = loggin
     logging.getLogger(__name__).log(level, "MiniMax H3 SLA using dense attention: %s", reason)
 
 
-def _run_h3_sla_dense_attention(state: dict[str, Any], original: Callable[..., torch.Tensor], *args: Any, **kwargs: Any) -> torch.Tensor:
-    backend = state.get("dense_backend")
-    if backend is None:
-        return original(*args, **kwargs)
-    return backend(original, *args, **kwargs)
+def _sla_layout_ranges(layout: Any, config: MiniMaxH3SlaAttentionConfig) -> tuple[tuple[tuple[int, int], ...], tuple[tuple[int, int], ...]]:
+    protected_ranges = []
+    reference_ranges = []
+    for start, stop, kind in layout.segments:
+        if config.protect_audio and kind in ("text", "audio", "cond_audio", "ref_audio"):
+            protected_ranges.append((int(start), int(stop)))
+        elif kind in ("cond", "ref_img", "ref_video", "video_ref"):
+            reference_ranges.append((int(start), int(stop)))
+    return tuple(protected_ranges), tuple(reference_ranges)
+
+
+def _run_h3_sla_sparse(q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, current: dict[str, Any], layout: Any, config: MiniMaxH3SlaAttentionConfig, state: dict[str, Any]) -> torch.Tensor:
+    # The model's own layout for this forward: correct for every context window and spatial tile.
+    if "ranges" not in current:
+        current["ranges"] = _sla_layout_ranges(layout, config)
+    q, k, v = (value if value.stride(-1) == 1 else value.contiguous() for value in (q, k, v))
+    call_index = current["call_index"]
+    current["call_index"] = call_index + 1
+    lookup, selected_count, history = _sla_select_blocks(q, k, config, *current["ranges"], state["history"].get(call_index))
+    output = _sla_sparse_attention(q, k, v, lookup, selected_count, config)
+    if history is not None:
+        state["history"][call_index] = history
+    return output
 
 
 def _make_h3_sla_override(config: MiniMaxH3SlaAttentionConfig, state: dict[str, Any]) -> Callable[..., torch.Tensor]:
+    """Return the attention override. Its container_function receives core's AttentionTensorContainer inputs untaken."""
 
-    def override(original, q, k, v, heads, mask=None, skip_reshape=False, skip_output_reshape=False, **kwargs):
+    def run(dense, q, k, v, heads, mask=None, skip_reshape=False, skip_output_reshape=False, **kwargs):
         options = kwargs.get("transformer_options") or {}
         current = options.get(MINIMAX_H3_SLA_STATE_KEY)
+        query = q.peek()
         reason = None
         if state.get("sparse_disabled_reason") is not None:
             reason = state["sparse_disabled_reason"]
@@ -2080,32 +2138,40 @@ def _make_h3_sla_override(config: MiniMaxH3SlaAttentionConfig, state: dict[str, 
             reason = current.get("dense_reason", "this sampler step is configured dense")
         elif mask is not None:
             reason = "the attention call has a mask"
-        elif not skip_reshape or q.ndim != 4 or q.shape[-1] != 128:
+        elif not skip_reshape or query.ndim != 4 or query.shape[-1] != 128:
             reason = "the attention call is not MiniMax H3 packed self-attention"
-        elif q.dtype not in (torch.float16, torch.bfloat16):
-            reason = f"the attention dtype is {q.dtype}"
-        elif q.shape[2] < config.minimum_sequence_length:
-            reason = f"sequence length {q.shape[2]} is below {config.minimum_sequence_length}"
-        elif q.device.type != "cuda":
+        elif query.dtype not in (torch.float16, torch.bfloat16):
+            reason = f"the attention dtype is {query.dtype}"
+        elif query.shape[2] < config.minimum_sequence_length:
+            reason = f"sequence length {query.shape[2]} is below {config.minimum_sequence_length}"
+        elif query.device.type != "cuda":
             reason = "the attention call is not on CUDA"
+        elif options.get("minimax_h3_layout") is None:
+            reason = "MiniMax H3 layout metadata is unavailable"
+        batch, sequence = query.shape[0], query.shape[-2]
+        # Holding a view of the shared qkv buffer here would stop a container-consuming dense backend from freeing it.
+        del query
         if reason is not None:
             _report_sla_fallback(state, reason)
-            return _run_h3_sla_dense_attention(state, original, q, k, v, heads, mask=mask, skip_reshape=skip_reshape, skip_output_reshape=skip_output_reshape, **kwargs)
+            return dense(q, k, v, heads, mask=mask, skip_reshape=skip_reshape, skip_output_reshape=skip_output_reshape, **kwargs)
         try:
-            q_nhd, k_nhd, v_nhd = (value.transpose(1, 2).contiguous() for value in (q, k, v))
-            call_index = current["call_index"]
-            current["call_index"] = call_index + 1
-            lookup, selected_count, history = _sla_select_blocks(q_nhd, k_nhd, config, current["protected_ranges"], current["reference_ranges"], state["history"].get(call_index))
-            output = _sla_sparse_attention(q_nhd, k_nhd, v_nhd, lookup, selected_count, config)
-            if history is not None:
-                state["history"][call_index] = history
-            return output.transpose(1, 2) if skip_output_reshape else output.reshape(q.shape[0], q.shape[2], -1)
+            output = _run_h3_sla_sparse(q.peek(), k.peek(), v.peek(), current, options["minimax_h3_layout"], config, state)
+            return output.transpose(1, 2) if skip_output_reshape else output.reshape(batch, sequence, -1)
         except Exception as error:
             state["history"].clear()
             state["sparse_disabled_reason"] = f"the sparse kernel failed with {error.__class__.__name__}: {error}"
             _report_sla_fallback(state, state["sparse_disabled_reason"], logging.WARNING)
-            return _run_h3_sla_dense_attention(state, original, q, k, v, heads, mask=mask, skip_reshape=skip_reshape, skip_output_reshape=skip_output_reshape, **kwargs)
+        # Outside the except block, so the traceback no longer pins the sparse attempt's tensors.
+        return dense(q, k, v, heads, mask=mask, skip_reshape=skip_reshape, skip_output_reshape=skip_output_reshape, **kwargs)
 
+    def override(original, q, k, v, *args, **kwargs):
+        dense = state.get("dense_backend") or _attention_on_taken_tensors(original)
+        return run(dense, comfy.ldm.modules.attention.AttentionTensorContainer(q), comfy.ldm.modules.attention.AttentionTensorContainer(k), comfy.ldm.modules.attention.AttentionTensorContainer(v), *args, **kwargs)
+
+    def container_function(q, k, v, *args, **kwargs):
+        return run(state.get("dense_backend") or _optimized_attention_on_containers, q, k, v, *args, **kwargs)
+
+    override.container_function = container_function
     return override
 
 
@@ -2144,30 +2210,18 @@ class MiniMaxH3SlaSamplingScope:
 
 def _make_h3_sla_wrapper(config: MiniMaxH3SlaAttentionConfig, state: dict[str, Any]):
 
-    def wrapper(executor, x, timestep, context, transformer_options=None, minimax_payload=None, **kwargs):
+    def wrapper(executor, x, timestep, context, transformer_options=None, **kwargs):
         options = dict(transformer_options or {})
-        layout = (minimax_payload or {}).get("layout")
-        protected_ranges = []
-        reference_ranges = []
-        for start, stop, kind in getattr(layout, "segments", ()) or ():
-            if config.protect_audio and kind in ("text", "audio", "cond_audio", "ref_audio"):
-                protected_ranges.append((int(start), int(stop)))
-            elif kind in ("cond", "ref_img", "ref_video", "video_ref"):
-                reference_ranges.append((int(start), int(stop)))
         dense_reason = state.get("sparse_disabled_reason")
-        if dense_reason is None and layout is None:
-            dense_reason = "MiniMax H3 layout metadata is unavailable"
-        elif dense_reason is None:
+        if dense_reason is None:
             dense_reason = _sla_dense_step(options, config)
         if config.disable_fp16_accumulation:
             _set_h3_sla_reduced_precision_accumulation(False)
-        current = {"dense": dense_reason is not None, "dense_reason": dense_reason, "call_index": 0, "protected_ranges": tuple(protected_ranges), "reference_ranges": tuple(reference_ranges)}
+        current = {"dense": dense_reason is not None, "dense_reason": dense_reason, "call_index": 0}
         if dense_reason is not None:
             state["history"].clear()
             _report_sla_fallback(state, dense_reason)
         options[MINIMAX_H3_SLA_STATE_KEY] = current
-        if minimax_payload is not None:
-            kwargs["minimax_payload"] = minimax_payload
         try:
             return executor(x, timestep, context, options, **kwargs)
         except Exception:
@@ -2190,7 +2244,7 @@ def _patch_h3_sla_attention(model: Any, config: MiniMaxH3SlaAttentionConfig) -> 
     state = {"history": {}, "reported_fallbacks": set(), "sparse_disabled_reason": None, "dense_backend": _resolve_h3_sla_dense_backend(config.dense_backend)}
     options = _ensure_transformer_options(patched)
     options[UNIFIED_ATTENTION_OWNER_KEY] = "Sparse / MiniMax H3 SLA"
-    options["optimized_attention_override"] = _call_attention_with_fallback(_make_h3_sla_override(config, state))
+    options["optimized_attention_override"] = _make_h3_sla_override(config, state)
     patched.remove_wrappers_with_key(comfy.patcher_extension.WrappersMP.DIFFUSION_MODEL, MINIMAX_H3_SLA_WRAPPER_KEY)
     patched.add_wrapper_with_key(comfy.patcher_extension.WrappersMP.DIFFUSION_MODEL, MINIMAX_H3_SLA_WRAPPER_KEY, _make_h3_sla_wrapper(config, state))
     patched.remove_wrappers_with_key(comfy.patcher_extension.WrappersMP.OUTER_SAMPLE, MINIMAX_H3_SLA_SAMPLING_SCOPE_KEY)

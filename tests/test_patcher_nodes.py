@@ -7,6 +7,7 @@ import types
 import pytest
 import torch
 
+import comfy.ldm.modules.attention
 import comfy.model_patcher
 
 
@@ -284,8 +285,8 @@ def test_unified_h3_sla_uses_clone_scoped_override_and_wrapper(monkeypatch):
 
 def test_h3_sla_dense_fallback_and_protected_block_selection(caplog):
     config = patcher_helpers.MiniMaxH3SlaAttentionConfig(sparsity=0.5, block_size=64, minimum_sequence_length=0)
-    q = torch.randn((1, 128, 1, 128))
-    k = torch.randn((1, 128, 1, 128))
+    q = torch.randn((1, 1, 128, 128))
+    k = torch.randn((1, 1, 128, 128))
     selected, count, _history = patcher_helpers._sla_select_blocks(q, k, config, ((0, 64),), (), None)
 
     assert count == 2
@@ -306,7 +307,7 @@ def test_h3_sla_dense_fallback_and_protected_block_selection(caplog):
     override = patcher_helpers._make_h3_sla_override(config, state)
     dense_state = {patcher_helpers.MINIMAX_H3_SLA_STATE_KEY: {"dense": True}}
     with caplog.at_level(logging.INFO, logger=patcher_helpers.__name__):
-        result = override(lambda q, *_args, **_kwargs: q, q.transpose(1, 2), k.transpose(1, 2), k.transpose(1, 2), 1, skip_reshape=True, transformer_options=dense_state)
+        result = override(lambda q, *_args, **_kwargs: q, q, k, k, 1, skip_reshape=True, transformer_options=dense_state)
     assert result.shape == (1, 1, 128, 128)
     assert "MiniMax H3 SLA using dense attention" in caplog.text
 
@@ -318,8 +319,8 @@ def test_h3_sla_selects_each_exposed_block_size(block_size):
         sparsity=0.5,
         minimum_sequence_length=0,
     )
-    q = torch.randn((1, 256, 1, 128))
-    k = torch.randn((1, 256, 1, 128))
+    q = torch.randn((1, 1, 256, 128))
+    k = torch.randn((1, 1, 256, 128))
 
     selected, count, _history = patcher_helpers._sla_select_blocks(q, k, config, (), (), None)
 
@@ -329,8 +330,8 @@ def test_h3_sla_selects_each_exposed_block_size(block_size):
 
 
 def test_h3_sla_reference_protection_modes_add_reference_quota():
-    q = torch.randn((1, 128, 1, 128))
-    k = torch.randn((1, 128, 1, 128))
+    q = torch.randn((1, 1, 128, 128))
+    k = torch.randn((1, 1, 128, 128))
     counts = {}
     for mode in patcher_helpers.SLA_REFERENCE_PROTECTION_MODES:
         _selected, counts[mode], _history = patcher_helpers._sla_select_blocks(
@@ -375,7 +376,7 @@ def test_h3_sla_triton_launch_ladder_retries_and_caches_success(monkeypatch):
     )
     monkeypatch.setattr(patcher_helpers, "_sla_attention_kernel", FakeKernel())
     patcher_helpers._SLA_TRITON_CHOSEN.clear()
-    q = torch.zeros((1, 32, 1, 128))
+    q = torch.zeros((1, 1, 32, 128))
 
     output = patcher_helpers._sla_sparse_attention(
         q,
@@ -386,7 +387,7 @@ def test_h3_sla_triton_launch_ladder_retries_and_caches_success(monkeypatch):
         patcher_helpers.MiniMaxH3SlaAttentionConfig(block_size=32),
     )
 
-    assert output.shape == q.shape
+    assert output.shape == (1, 32, 1, 128)
     assert calls == list(patcher_helpers.SLA_TRITON_LAUNCH_LADDER[(32, 32)][:2])
     assert patcher_helpers._SLA_TRITON_CHOSEN[(32, 32, 128)] == calls[-1]
 
@@ -405,6 +406,39 @@ def test_h3_sla_dense_step_selection_unions_explicit_and_tail_steps():
     tail_config = patcher_helpers.MiniMaxH3SlaAttentionConfig(dense_steps="", dense_tail_steps=1)
     assert patcher_helpers._sla_dense_step(at(0.75), tail_config) is None
     assert patcher_helpers._sla_dense_step(at(0.25), tail_config) == "one of the final 1 sampler steps is configured dense"
+
+
+@pytest.mark.skipif(not torch.cuda.is_available() or patcher_helpers.triton is None, reason="MiniMax H3 SLA runs on CUDA with Triton.")
+@pytest.mark.parametrize("block_size", [32, 128])
+def test_h3_sla_runs_sparse_on_core_attention_inputs_without_payload_layout(block_size):
+    # Spatial tiles and keyframe context windows drop the payload layout; the model still publishes its own per forward.
+    layout = patcher_helpers.minimax_model.PackedLayout(77, 3, 32, 40, 25)
+    heads, sequence = 4, layout.seq_len
+    config = patcher_helpers.MiniMaxH3SlaAttentionConfig(sparsity=0.5, block_size=block_size, minimum_sequence_length=0, dense_steps="", dense_tail_steps=0)
+
+    def dense_backend(*_args, **_kwargs):
+        raise AssertionError(f"SLA fell back to dense attention: {state['reported_fallbacks'] or state['sparse_disabled_reason']}")
+
+    state = {"history": {}, "reported_fallbacks": set(), "sparse_disabled_reason": None, "dense_backend": dense_backend}
+    qkv = torch.randn((sequence, 3 * heads * 128), device="cuda", dtype=torch.bfloat16)
+    q, k, v = (part.view(sequence, heads, 128).transpose(0, 1).unsqueeze(0) for part in qkv.split(heads * 128, dim=-1))
+
+    def executor(_x, _timestep, _context, options, **_kwargs):
+        options["minimax_h3_layout"] = layout
+        containers = (comfy.ldm.modules.attention.AttentionTensorContainer(value) for value in (q, k, v))
+        return comfy.ldm.modules.attention.optimized_attention(*containers, heads, mask=None, skip_reshape=True, transformer_options=options)
+
+    options = {"optimized_attention_override": patcher_helpers._make_h3_sla_override(config, state), "sample_sigmas": torch.tensor([1.0, 0.5, 0.0]), "sigmas": torch.tensor([0.5])}
+    output = patcher_helpers._make_h3_sla_wrapper(config, state)(executor, None, torch.tensor([500.0]), None, options, minimax_payload={})
+
+    # Reference: dense attention restricted to the key blocks routing selected for each query block.
+    lookup, _count, _history = patcher_helpers._sla_select_blocks(q, k, config, *patcher_helpers._sla_layout_ranges(layout, config), None)
+    key_block = 64 if block_size == 128 else block_size
+    selected = torch.zeros((*lookup.shape[:3], -(-sequence // key_block)), dtype=torch.bool, device="cuda").scatter_(-1, lookup.long(), True)
+    allowed = selected.repeat_interleave(block_size, dim=2)[:, :, :sequence].repeat_interleave(key_block, dim=3)[..., :sequence]
+    expected = torch.nn.functional.scaled_dot_product_attention(q.float(), k.float(), v.float(), attn_mask=allowed).transpose(1, 2).reshape(1, sequence, heads * 128)
+    assert output.shape == expected.shape
+    torch.testing.assert_close(output.float(), expected, atol=2e-2, rtol=2e-2)
 
 
 def test_h3_sla_sampling_scope_reports_each_run(caplog):
