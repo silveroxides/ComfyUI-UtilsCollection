@@ -11,6 +11,7 @@ import re
 import types
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, replace
+from functools import cached_property
 from pathlib import Path
 from typing import Any
 
@@ -38,7 +39,6 @@ except ImportError:
 import comfy.ldm.modules.attention
 import comfy.model_management
 import comfy.model_patcher
-import comfy.model_prefetch
 import comfy.patcher_extension
 import comfy.utils
 import folder_paths
@@ -943,46 +943,72 @@ class MiniMaxH3Cache:
             return float(timestep)
         return None
 
-    def _store_residual(self, residual: torch.Tensor, state: _MiniMaxH3WindowState | None = None) -> None:
-        if state is None:
-            state = self._active_state
-        if self.device == "cuda" and residual.device.type != "cuda":
-            raise ValueError("MiniMax H3 cache device is set to cuda, but the model is not running on CUDA.")
+    @staticmethod
+    def _target_rows(hidden_states: torch.Tensor, cache_ranges: tuple[tuple[int, int], ...]) -> tuple[tuple[int, int], ...]:
+        # Only the audio and video rows reach the final layer, so only they need a residual.
+        length = hidden_states.shape[0]
+        rows = tuple((start, min(end, length)) for start, end in cache_ranges if start < min(end, length))
+        return rows or ((0, length),)
 
+    def _residual_device(self, hidden_states: torch.Tensor) -> torch.device:
+        if self.device == "cuda":
+            if hidden_states.device.type != "cuda":
+                raise ValueError("MiniMax H3 cache device is set to cuda, but the model is not running on CUDA.")
+            return hidden_states.device
         if self.device == "cpu":
-            target_device = torch.device("cpu")
-        elif self.device == "cuda":
-            target_device = residual.device
-        else:
-            try:
-                free_mem = comfy.model_management.get_free_memory(residual.device)
-                target_device = torch.device("cpu") if free_mem < 2 * 1024**3 else residual.device
-            except Exception:
-                target_device = residual.device
-
-        residual = residual.detach()
+            return torch.device("cpu")
         try:
-            buffer = state.residual_buffer
-            if buffer is None or buffer.shape != residual.shape or buffer.dtype != residual.dtype or buffer.device != target_device:
-                buffer = torch.empty(residual.shape, dtype=residual.dtype, device=target_device)
-                state.residual_buffer = buffer
-            buffer.copy_(residual, non_blocking=(target_device.type == "cuda"))
-            state.cache_valid = True
+            free_mem = comfy.model_management.get_free_memory(hidden_states.device)
+        except Exception:
+            return hidden_states.device
+        return torch.device("cpu") if free_mem < 2 * 1024**3 else hidden_states.device
+
+    def _residual_storage(self, state: _MiniMaxH3WindowState, hidden_states: torch.Tensor, rows: tuple[tuple[int, int], ...]) -> torch.Tensor:
+        shape = (sum(end - start for start, end in rows), *hidden_states.shape[1:])
+        device = self._residual_device(hidden_states)
+        buffer = state.residual_buffer
+        if buffer is not None and tuple(buffer.shape) == shape and buffer.dtype == hidden_states.dtype and buffer.device == device:
+            return buffer
+        state.residual_buffer = buffer = None
+        try:
+            buffer = torch.empty(shape, dtype=hidden_states.dtype, device=device)
         except torch.OutOfMemoryError:
             if self.device == "cuda":
                 raise
-            state.residual_buffer = residual.to("cpu", copy=True)
-            state.cache_valid = True
+            buffer = torch.empty(shape, dtype=hidden_states.dtype, device="cpu")
+        state.residual_buffer = buffer
+        return buffer
 
-    def _apply_residual(self, hidden_states: torch.Tensor, state: _MiniMaxH3WindowState | None = None) -> torch.Tensor:
-        if state is None:
-            state = self._active_state
+    def _run_and_cache(self, state: _MiniMaxH3WindowState, args: dict[str, Any], original_block: Callable[[dict[str, Any]], dict[str, Any]], hidden_states: torch.Tensor, rows: tuple[tuple[int, int], ...]) -> dict[str, Any]:
+        # Core blocks add into their input in place, so the baseline is copied out first.
+        # It goes straight into the residual buffer, which then becomes output - baseline in place.
+        state.cache_valid = False
+        buffer = self._residual_storage(state, hidden_states, rows)
+        offset = 0
+        for start, end in rows:
+            buffer[offset : offset + end - start].copy_(hidden_states[start:end].detach())
+            offset += end - start
+        result = original_block(args)
+        output = result["img"].detach()
+        offset = 0
+        for start, end in rows:
+            residual = buffer[offset : offset + end - start]
+            torch.sub(output[start:end].to(buffer.device), residual, out=residual)
+            offset += end - start
+        state.cache_valid = True
+        state.accumulated_relative_l1 = 0.0
+        return result
+
+    def _apply_residual(self, hidden_states: torch.Tensor, state: _MiniMaxH3WindowState, rows: tuple[tuple[int, int], ...]) -> torch.Tensor:
         residual = state.residual_buffer if state.cache_valid else None
         if residual is None:
             return hidden_states
-        if residual.device != hidden_states.device or residual.dtype != hidden_states.dtype:
-            residual = residual.to(device=hidden_states.device, dtype=hidden_states.dtype, non_blocking=True)
-        return hidden_states + residual
+        output = hidden_states.clone()
+        offset = 0
+        for start, end in rows:
+            output[start:end] += residual[offset : offset + end - start].to(device=output.device, dtype=output.dtype, non_blocking=True)
+            offset += end - start
+        return output
 
     def __call__(self, args: dict[str, Any], extra_options: dict[str, Any]) -> dict[str, Any]:
         original_block = extra_options["original_block"]
@@ -992,6 +1018,8 @@ class MiniMaxH3Cache:
 
         cache_ranges = tuple(tuple(pair) for pair in args.get("cache_ranges", ()))
         current_layout = (tuple(hidden_states.shape), hidden_states.dtype, hidden_states.device, args.get("block_count"), cache_ranges)
+        rows = self._target_rows(hidden_states, cache_ranges)
+        current_signature = None
 
         if state.layout_signature is None:
             state.layout_signature = current_layout
@@ -1026,7 +1054,7 @@ class MiniMaxH3Cache:
                 if self.verbose:
                     win_tag = f" [window {window_key[0][0]}..{window_key[0][1]}]" if (window_key and window_key[0]) else ""
                     logging.info("[UtilsCollection MiniMax H3 Cache%s] Step %s SKIP (relative L1 %.4f < %.4f).", win_tag, state.step_counter, state.accumulated_relative_l1, self.reuse_threshold)
-                return {"img": self._apply_residual(hidden_states, state)}
+                return {"img": self._apply_residual(hidden_states, state, rows)}
 
             reasons = []
             if not below_threshold:
@@ -1044,23 +1072,9 @@ class MiniMaxH3Cache:
         self.run_count += 1
         state.consecutive_skips = 0
         state.cache_valid = False
-        state.previous_feature_signature = self._feature_signature(hidden_states, cache_ranges)
+        state.previous_feature_signature = current_signature if current_signature is not None else self._feature_signature(hidden_states, cache_ranges)
 
-        try:
-            free_mem = comfy.model_management.get_free_memory(hidden_states.device)
-            offload_baseline = self.device == "cpu" or free_mem < 2 * 1024**3
-        except Exception:
-            offload_baseline = self.device == "cpu"
-
-        start_hidden_states = hidden_states.detach().cpu() if offload_baseline else hidden_states.detach().clone()
-        result = original_block(args)
-        output = result["img"]
-        diff = output - (start_hidden_states.to(output.device) if offload_baseline else start_hidden_states)
-        del start_hidden_states
-        self._store_residual(diff, state)
-        del diff
-        state.accumulated_relative_l1 = 0.0
-        return result
+        return self._run_and_cache(state, args, original_block, hidden_states, rows)
 
 
 class MiniMaxH3SamplingScope:
@@ -1084,162 +1098,41 @@ class MiniMaxH3SamplingScope:
             self.cache.finish()
 
 
-def run_minimax_h3_blocks(model: minimax_model.MiniMaxH3Model, hidden_states: torch.Tensor, timestep_embedding: torch.Tensor, mod_segments: list[tuple[int, int, int]], rope_freqs: torch.Tensor, transformer_options: dict[str, Any], start: int = 0, end: int | None = None) -> torch.Tensor:
-    """Run a bounded H3 block range while preserving Core block replacements."""
+def minimax_h3_block_loop_run_blocks(self: minimax_model.MiniMaxH3Model, h: torch.Tensor, t_emb: torch.Tensor, mod_segments: list[tuple[int, int, Any]], layout: Any, transformer_options: dict[str, Any]) -> torch.Tensor:
+    """Core ``_run_blocks`` behind one model-patchable ``("dit", "block_loop", 0)`` boundary.
 
-    blocks_replace = transformer_options.get("patches_replace", {}).get("dit", {})
-    end = len(model.blocks) if end is None else end
-    blocks = list(model.blocks[start:end])
-    prefetch_queue = comfy.model_prefetch.make_prefetch_queue(blocks, hidden_states.device, transformer_options)
-    for index in range(start, end):
-        block = model.blocks[index]
-        comfy.model_prefetch.prefetch_queue_pop(prefetch_queue, hidden_states.device, block, malloc_scope="block")
-        if ("double_block", index) in blocks_replace:
+    Core ``_forward`` stays in charge of masks, PDD grids and the final layer; only the block stack is wrapped.
+    """
 
-            def block_wrapper(block_args: dict[str, Any]) -> dict[str, torch.Tensor]:
-                return {"img": block(block_args["img"], block_args["t_emb"], block_args["mod_segments"], block_args["rope_freqs"], transformer_options=block_args["transformer_options"])}
+    run_core_blocks = type(self)._run_blocks
+    block_loop = transformer_options.get("patches_replace", {}).get("dit", {}).get(("block_loop", 0))
+    if block_loop is None:
+        return run_core_blocks(self, h, t_emb, mod_segments, layout, transformer_options)
 
-            hidden_states = blocks_replace[("double_block", index)]({"img": hidden_states, "t_emb": timestep_embedding, "mod_segments": mod_segments, "rope_freqs": rope_freqs, "transformer_options": transformer_options}, {"original_block": block_wrapper})["img"]
-        else:
-            hidden_states = block(hidden_states, timestep_embedding, mod_segments, rope_freqs, transformer_options=transformer_options)
-    if prefetch_queue is not None:
-        comfy.model_prefetch.prefetch_queue_pop(prefetch_queue, hidden_states.device, None, malloc_scope="block")
-    return hidden_states
+    def block_loop_wrapper(block_args: dict[str, Any]) -> dict[str, torch.Tensor]:
+        return {"img": run_core_blocks(self, block_args["img"], block_args["t_emb"], block_args["mod_segments"], block_args["layout"], block_args["transformer_options"])}
+
+    target_ranges = tuple((start, end, kind) for start, end, kind in layout.segments if kind in ("audio", "video"))
+    block_args = {
+        "img": h,
+        # The sampler sigma; the caches use it to detect step changes and as noise level.
+        "timestep": transformer_options.get("sigmas"),
+        "t_emb": t_emb,
+        "mod_segments": mod_segments,
+        "layout": layout,
+        "transformer_options": transformer_options,
+        "cache_ranges": tuple((start, end) for start, end, _ in target_ranges),
+        "target_ranges": target_ranges,
+        "block_count": len(self.blocks),
+    }
+    return block_loop(block_args, {"original_block": block_loop_wrapper})["img"]
 
 
-def minimax_h3_block_patch_forward(self: minimax_model.MiniMaxH3Model, x: list[torch.Tensor], timestep: torch.Tensor, context: torch.Tensor, transformer_options: dict[str, Any] = {}, minimax_payload: dict[str, Any] | None = None, **kwargs: Any) -> list[torch.Tensor]:
-    """Current Core H3 forward with one model-patchable block-loop boundary."""
-
-    del kwargs
-    video_x, audio_x = x[0], x[1]
-    orig_t, orig_h, orig_w = video_x.shape[2:5]
-    video_x = comfy.ldm.common_dit.pad_to_patch_size(video_x, self.patch_size)
-    if video_x.shape[0] != 1:
-        raise ValueError("MiniMax H3 supports batch size 1")
-    payload = minimax_payload or {}
-    device = video_x.device
-    dtype = context.dtype
-
-    latent_t, lat_h, lat_w = video_x.shape[2:5]
-    audio_t = audio_x.shape[-1]
-    text_len = context.shape[1]
-    layout = payload.get("layout")
-    if layout is None or layout.signature != (text_len, latent_t, lat_h, lat_w, audio_t):
-        layout = minimax_model.PackedLayout(text_len, latent_t, lat_h, lat_w, audio_t, keyframes=payload.get("keyframes"), refs=payload.get("refs"))
-
-    shift_v = float(transformer_options.get("minimax_h3_sigma_shift_video", self.sigma_shift_video))
-    shift_a = float(transformer_options.get("minimax_h3_sigma_shift_audio", self.sigma_shift_audio))
-    sigma_v = (timestep.flatten()[0] / 1000.0).float().clamp(min=1e-6)
-    t_v = float(1.0 - sigma_v)
-    t_a = float(1.0 - minimax_model.time_shift_sigma(sigma_v, shift_v, shift_a))
-
-    vis_aug = float(payload.get("visual_cond_noise_aug", minimax_model.VISUAL_COND_TIMESTEP))
-    aud_aug = float(payload.get("audio_cond_noise_aug", minimax_model.AUDIO_COND_TIMESTEP))
-    has_vis_cond = any(kind in ("cond", "ref_img") for _, _, kind in layout.segments)
-    has_aud_cond = any(kind in ("cond_audio", "ref_audio") for _, _, kind in layout.segments)
-    seg_t = {"text": t_v, "video": t_v, "audio": t_a, "cond": max(t_v, vis_aug), "ref_img": max(t_v, vis_aug), "cond_audio": max(t_a, aud_aug), "ref_audio": max(t_a, aud_aug)}
-    unique_t = sorted({t_v, t_a} | ({seg_t["cond"]} if has_vis_cond else set()) | ({seg_t["cond_audio"]} if has_aud_cond else set()))
-    t_row = {value: index for index, value in enumerate(unique_t)}
-    seg_tag = {"text": 1, "video": 0, "audio": 2, "cond": 0, "ref_img": 0, "cond_audio": 2, "ref_audio": 2}
-
-    text_tags = payload.get("text_token_tags")
-    mod_segments = []
-    for start, end, kind in layout.segments:
-        row_base = t_row[seg_t[kind]] * 3
-        if kind == "text" and text_tags is not None:
-            tags = text_tags.view(-1).tolist()
-            run_start = 0
-            for index in range(1, end - start + 1):
-                if index == end - start or tags[index] != tags[run_start]:
-                    mod_segments.append((start + run_start, start + index, row_base + int(tags[run_start])))
-                    run_start = index
-        else:
-            mod_segments.append((start, end, row_base + seg_tag[kind]))
-
-    if hasattr(self, "_embed_and_pack"):
-        hidden_states = self._embed_and_pack(video_x, audio_x, context, layout, payload, transformer_options)
-    else:
-        img_update = layout.img_update.to(device)
-        audio_update = layout.audio_update.to(device)
-        video_rows = minimax_model.patchify_video(video_x.to(torch.float32), self.patch_size)
-        audio_rows = minimax_model.pack_audio(audio_x.to(torch.float32))
-        cond_video_rows = self._cond_video_rows(payload, device)
-        cond_audio_rows = self._cond_audio_rows(payload, device)
-
-        all_video_rows = video_rows
-        if cond_video_rows is not None:
-            all_video_rows = torch.empty(img_update.shape[0], video_rows.shape[1], dtype=torch.float32, device=device)
-            all_video_rows[~img_update] = cond_video_rows
-            all_video_rows[img_update] = video_rows
-        all_audio_rows = audio_rows
-        if cond_audio_rows is not None:
-            all_audio_rows = torch.empty(audio_update.shape[0], audio_rows.shape[1], dtype=torch.float32, device=device)
-            all_audio_rows[~audio_update] = cond_audio_rows
-            all_audio_rows[audio_update] = audio_rows
-
-        video_embed = self.video_patch_proj(all_video_rows).to(dtype)
-        audio_embed = self.audio_patch_proj(all_audio_rows).to(dtype)
-        text_states = context[0]
-        if text_states.shape[-1] != self.hidden_size:
-            text_states = self.token_refiner(self.condition_proj(text_states), transformer_options=transformer_options)
-
-        hidden_states = torch.empty(layout.seq_len, self.hidden_size, dtype=dtype, device=device)
-        video_offset = audio_offset = 0
-        for start, end, kind in layout.segments:
-            length = end - start
-            if kind == "text":
-                hidden_states[start:end] = text_states
-            elif kind in ("cond", "ref_img", "video"):
-                hidden_states[start:end] = video_embed[video_offset : video_offset + length]
-                video_offset += length
-            else:
-                hidden_states[start:end] = audio_embed[audio_offset : audio_offset + length]
-                audio_offset += length
-    out_v_dtype = video_x.dtype
-    out_a_dtype = audio_x.dtype
-    del video_x, audio_x
-
-    t_values = torch.tensor(unique_t, dtype=torch.float32, device=device)
-    if self.use_adaln_curves:
-        table = comfy.model_management.cast_to(self.adaln_t_table, device=device)
-        position = t_values.clamp(0.0, 1.0) * (table.shape[0] - 1)
-        lower = position.floor().long().clamp(max=table.shape[0] - 2)
-        timestep_embedding = torch.lerp(table[lower], table[lower + 1], (position - lower).unsqueeze(1))
-    else:
-        timestep_embedding = self.time_embedder(t_values).to(dtype)
-
-    rope_freqs = minimax_model.rope_rotation_table(self.rope_freqs(layout.position_ids, device), dtype)
-    blocks_replace = transformer_options.get("patches_replace", {}).get("dit", {})
-    cache_ranges = tuple((start, end) for start, end, kind in layout.segments if kind in ("audio", "video"))
-    if ("block_loop", 0) in blocks_replace:
-
-        def block_loop_wrapper(block_args: dict[str, Any]) -> dict[str, torch.Tensor]:
-            return {"img": run_minimax_h3_blocks(self, block_args["img"], block_args["t_emb"], block_args["mod_segments"], block_args["rope_freqs"], block_args["transformer_options"], block_args.get("start", 0), block_args.get("end"))}
-
-        hidden_states = blocks_replace[("block_loop", 0)](
-            {
-                "img": hidden_states,
-                "timestep": timestep,
-                "t_emb": timestep_embedding,
-                "mod_segments": mod_segments,
-                "rope_freqs": rope_freqs,
-                "transformer_options": transformer_options,
-                "cache_ranges": cache_ranges,
-                "target_ranges": tuple((start, end, kind) for start, end, kind in layout.segments if kind in ("audio", "video")),
-                "block_count": len(self.blocks),
-            },
-            {"original_block": block_loop_wrapper},
-        )["img"]
-    else:
-        hidden_states = run_minimax_h3_blocks(self, hidden_states, timestep_embedding, mod_segments, rope_freqs, transformer_options)
-
-    video_seg = next((start, end, t_row[seg_t["video"]]) for start, end, kind in layout.segments if kind == "video")
-    audio_seg = next((start, end, t_row[seg_t["audio"]]) for start, end, kind in layout.segments if kind == "audio")
-    video_result, audio_result = self.final_layer(hidden_states, timestep_embedding, video_seg, audio_seg, sigma_v, transformer_options.get("sample_sigmas"), (shift_v, shift_a))
-    video_out = minimax_model.unpatchify_video(video_result, latent_t, lat_h // 2, lat_w // 2, self.latents_dim, self.patch_size)
-    video_out = video_out[:, :, :orig_t, :orig_h, :orig_w]
-    audio_out = minimax_model.unpack_audio(audio_result)
-    return [-video_out.to(out_v_dtype), -audio_out.to(out_a_dtype)]
+def _install_minimax_h3_block_loop(patched_model: Any, diffusion_model: Any, cache: Any) -> None:
+    if not callable(getattr(type(diffusion_model), "_run_blocks", None)):
+        raise ValueError("MiniMax H3 Cache needs MiniMaxH3Model._run_blocks from ComfyUI core (2026-11-10 or newer); update ComfyUI.")
+    patched_model.add_object_patch("diffusion_model._run_blocks", types.MethodType(minimax_h3_block_loop_run_blocks, diffusion_model))
+    patched_model.set_model_patch_replace(cache, "dit", "block_loop", 0)
 
 
 def patch_minimax_h3_cache_model(model: Any, reuse_threshold: float, start_percent: float, end_percent: float, max_steps: int, device: str, verbose: bool) -> Any:
@@ -1256,9 +1149,7 @@ def patch_minimax_h3_cache_model(model: Any, reuse_threshold: float, start_perce
     cache = MiniMaxH3Cache(reuse_threshold=reuse_threshold, start_percent=start_percent, end_percent=end_percent, max_steps=max_steps, device=device, verbose=verbose)
     if hasattr(patched_model, "model_options"):
         patched_model.model_options[MINIMAX_H3_CACHE_OWNER_KEY] = True
-    bound_forward = types.MethodType(minimax_h3_block_patch_forward, diffusion_model)
-    patched_model.add_object_patch("diffusion_model._forward", bound_forward)
-    patched_model.set_model_patch_replace(cache, "dit", "block_loop", 0)
+    _install_minimax_h3_block_loop(patched_model, diffusion_model, cache)
     patched_model.add_wrapper(comfy.patcher_extension.WrappersMP.OUTER_SAMPLE, MiniMaxH3SamplingScope(cache))
     return patched_model
 
@@ -1368,6 +1259,8 @@ class MiniMaxH3DiffusionCache(MiniMaxH3Cache):
 
         cache_ranges = tuple(tuple(pair) for pair in args.get("cache_ranges", ()))
         current_layout = (tuple(hidden_states.shape), hidden_states.dtype, hidden_states.device, args.get("block_count"), cache_ranges)
+        rows = self._target_rows(hidden_states, cache_ranges)
+        current_signature = None
 
         if state.layout_signature is None:
             state.layout_signature = current_layout
@@ -1406,7 +1299,7 @@ class MiniMaxH3DiffusionCache(MiniMaxH3Cache):
                 if self.verbose:
                     win_tag = f" [window {window_key[0][0]}..{window_key[0][1]}]" if (window_key and window_key[0]) else ""
                     logging.info("[UtilsCollection MiniMax H3 Diffusion Cache%s] Step %s (noise %.3f) SKIP (relative L1 %.4f < %.4f, delta noise %.3f <= %.3f).", win_tag, state.step_counter, normalized_noise, state.accumulated_relative_l1, self.reuse_threshold, noise_delta, self.max_noise_span)
-                return {"img": self._apply_residual(hidden_states, state)}
+                return {"img": self._apply_residual(hidden_states, state, rows)}
 
             reasons = []
             if not in_cache_phase:
@@ -1428,23 +1321,9 @@ class MiniMaxH3DiffusionCache(MiniMaxH3Cache):
         state.consecutive_skips = 0
         state.cache_valid = False
         state.cached_at_sigma = normalized_noise
-        state.previous_feature_signature = self._feature_signature(hidden_states, cache_ranges)
+        state.previous_feature_signature = current_signature if current_signature is not None else self._feature_signature(hidden_states, cache_ranges)
 
-        try:
-            free_mem = comfy.model_management.get_free_memory(hidden_states.device)
-            offload_baseline = self.device == "cpu" or free_mem < 2 * 1024**3
-        except Exception:
-            offload_baseline = self.device == "cpu"
-
-        start_hidden_states = hidden_states.detach().cpu() if offload_baseline else hidden_states.detach().clone()
-        result = original_block(args)
-        output = result["img"]
-        diff = output - (start_hidden_states.to(output.device) if offload_baseline else start_hidden_states)
-        del start_hidden_states
-        self._store_residual(diff, state)
-        del diff
-        state.accumulated_relative_l1 = 0.0
-        return result
+        return self._run_and_cache(state, args, original_block, hidden_states, rows)
 
 
 class MiniMaxH3DiffusionSamplingScope:
@@ -1485,9 +1364,7 @@ def patch_minimax_h3_diffusion_cache_model(model: Any, preset: str = "balanced",
     cache = MiniMaxH3DiffusionCache(preset=preset, composition_cutoff=composition_cutoff, detail_protection=detail_protection, drift_tolerance=drift_tolerance, max_noise_span=max_noise_span, device=device, verbose=verbose)
     if hasattr(patched_model, "model_options"):
         patched_model.model_options[MINIMAX_H3_CACHE_OWNER_KEY] = True
-    bound_forward = types.MethodType(minimax_h3_block_patch_forward, diffusion_model)
-    patched_model.add_object_patch("diffusion_model._forward", bound_forward)
-    patched_model.set_model_patch_replace(cache, "dit", "block_loop", 0)
+    _install_minimax_h3_block_loop(patched_model, diffusion_model, cache)
     patched_model.add_wrapper(comfy.patcher_extension.WrappersMP.OUTER_SAMPLE, MiniMaxH3DiffusionSamplingScope(cache))
     return patched_model
 
@@ -1544,8 +1421,12 @@ class MiniMaxH3SlaAttentionConfig:
             raise ValueError("MiniMax H3 SLA reference-media protection must be Off, Light, or Heavy Enforcement.")
         if self.dense_backend not in SLA_DENSE_BACKENDS:
             raise ValueError("Choose a supported MiniMax H3 SLA dense backend.")
-        _parse_h3_sla_dense_steps(self.dense_steps)
+        _ = self.dense_step_set
         return self
+
+    @cached_property
+    def dense_step_set(self) -> frozenset[int]:
+        return _parse_h3_sla_dense_steps(self.dense_steps)
 
 
 UNIFIED_ATTENTION_MODES = ("disabled", "FlashAttention", "SageAttention", "Sparse / MiniMax H3 SLA", "Sparse / MiniMax H3 Radial")
@@ -1562,14 +1443,6 @@ def _call_attention_function(attention_function: Callable[..., torch.Tensor]) ->
     def override(_original: Callable[..., torch.Tensor], *args: Any, **kwargs: Any) -> torch.Tensor:
         wrapped = getattr(attention_function, "__wrapped__", attention_function)
         return wrapped(*args, **kwargs)
-
-    return override
-
-
-def _call_attention_with_fallback(attention_function: Callable[..., torch.Tensor]) -> Callable[..., torch.Tensor]:
-
-    def override(original: Callable[..., torch.Tensor], *args: Any, **kwargs: Any) -> torch.Tensor:
-        return attention_function(original, *args, **kwargs)
 
     return override
 
@@ -1670,20 +1543,35 @@ def _parse_h3_sla_dense_steps(value: str) -> frozenset[int]:
     return frozenset(steps)
 
 
+def _attention_on_taken_tensors(attention_function: Callable[..., torch.Tensor]) -> Callable[..., torch.Tensor]:
+
+    def attention(q, k, v, *args: Any, **kwargs: Any) -> torch.Tensor:
+        return attention_function(q.take(), k.take(), v.take(), *args, **kwargs)
+
+    return attention
+
+
+def _optimized_attention_on_containers(q, k, v, *args: Any, **kwargs: Any) -> torch.Tensor:
+    # Called from inside wrap_attn, so kwargs carry its in-wrapper flag and the global backend consumes the containers itself.
+    return comfy.ldm.modules.attention.optimized_attention(q, k, v, *args, **kwargs)
+
+
 def _resolve_h3_sla_dense_backend(backend: str) -> Callable[..., torch.Tensor] | None:
+    """Return a dense attention callable that consumes AttentionTensorContainer q, k, v, or None for the caller's own backend."""
     if backend == "auto":
         return None
     if backend == "pytorch":
-        return _call_attention_function(comfy.ldm.modules.attention.attention_pytorch)
+        return _attention_on_taken_tensors(comfy.ldm.modules.attention.attention_pytorch.__wrapped__)
     if backend == "comfy_kitchen":
         for name in ("attention_comfy_kitchen_int8", "attention_ck", "attention_composable_kernel"):
             candidate = getattr(comfy.ldm.modules.attention, name, None)
             if callable(candidate):
-                return _call_attention_function(candidate)
+                container_function = getattr(candidate, "container_function", None)
+                return container_function if container_function is not None else _attention_on_taken_tensors(getattr(candidate, "__wrapped__", candidate))
         raise RuntimeError("MiniMax H3 SLA dense backend comfy_kitchen is unavailable in this ComfyUI installation.")
     if backend in CUSTOM_SAGE_MODES:
         try:
-            return _call_attention_function(_make_sage_backend(backend, False))
+            return _attention_on_taken_tensors(_make_sage_backend(backend, False))
         except (AttributeError, ImportError) as error:
             raise RuntimeError(f"MiniMax H3 SLA dense backend {backend} is unavailable: {error}") from error
     raise ValueError("Choose a supported MiniMax H3 SLA dense backend.")
@@ -1915,45 +1803,72 @@ def _sla_block_ranges(ranges: tuple[tuple[int, int], ...], block_size: int, bloc
     return tuple(blocks)
 
 
-def _sla_pool_tokens(value: torch.Tensor, block_size: int) -> torch.Tensor:
-    batch, sequence, heads, head_dim = value.shape
-    block_count = math.ceil(sequence / block_size)
-    padded = block_count * block_size
-    if padded != sequence:
-        value = F.pad(value, (0, 0, 0, 0, 0, padded - sequence))
-    pooled = value.transpose(1, 2).reshape(batch, heads, block_count, block_size, head_dim).sum(dim=3)
-    counts = torch.arange(block_count, device=value.device).mul(block_size).add(block_size).clamp(max=sequence)
-    counts = counts.sub(torch.arange(block_count, device=value.device).mul(block_size)).to(pooled.dtype)
-    return pooled / counts.view(1, 1, block_count, 1)
+def _sla_merge_block_ranges(ranges: tuple[tuple[int, int], ...]) -> tuple[tuple[int, int], ...]:
+    merged: list[tuple[int, int]] = []
+    for first, last in sorted(ranges):
+        if merged and first <= merged[-1][1]:
+            merged[-1] = (merged[-1][0], max(merged[-1][1], last))
+        else:
+            merged.append((first, last))
+    return tuple(merged)
 
 
-def _sla_select_blocks(q: torch.Tensor, k: torch.Tensor, config: MiniMaxH3SlaAttentionConfig, protected_ranges: tuple[tuple[int, int], ...], reference_ranges: tuple[tuple[int, int], ...], previous: torch.Tensor | None) -> tuple[torch.Tensor, int, torch.Tensor | None]:
-    pooled_q = _sla_pool_tokens(q, config.block_size).float()
+def _sla_block_means(value: torch.Tensor, block_size: int) -> tuple[torch.Tensor, torch.Tensor]:
+    """Return fp32 per-block token means and the token sum of a [batch, heads, tokens, dim] view, reading it in place."""
+    sequence = value.shape[2]
+    full = sequence // block_size
+    sums = value[:, :, : full * block_size].unflatten(2, (full, block_size)).sum(dim=3, dtype=torch.float32)
+    means = sums / block_size
+    if full * block_size < sequence:
+        tail = value[:, :, full * block_size :].sum(dim=2, keepdim=True, dtype=torch.float32)
+        sums = torch.cat((sums, tail), dim=2)
+        means = torch.cat((means, tail / (sequence - full * block_size)), dim=2)
+    return means, sums.sum(dim=2, keepdim=True)
+
+
+# Routing scores are [batch, heads, query blocks, key blocks] in fp32; heads are scored in chunks to keep this transient bounded.
+SLA_SCORE_CHUNK_BYTES = 256 * 1024 * 1024
+
+
+def _sla_select_blocks(q: torch.Tensor, k: torch.Tensor, config: MiniMaxH3SlaAttentionConfig, protected_ranges: tuple[tuple[int, int], ...], reference_ranges: tuple[tuple[int, int], ...], previous: tuple[torch.Tensor, int] | None) -> tuple[torch.Tensor, int, tuple[torch.Tensor, int] | None]:
+    """Select key blocks for each query block of [batch, heads, tokens, dim] q and k; history entries carry their key-block count."""
     key_block = 64 if config.block_size == 128 else config.block_size
-    pooled_k = _sla_pool_tokens(k, key_block) - k.mean(dim=1, dtype=torch.float32)[:, :, None, :]
-    scores = pooled_q @ pooled_k.transpose(-1, -2)
-    key_blocks = scores.shape[-1]
+    pooled_q, _ = _sla_block_means(q, config.block_size)
+    pooled_k, key_sum = _sla_block_means(k, key_block)
+    pooled_k -= key_sum / k.shape[2]
+    batch, heads, query_blocks = pooled_q.shape[:3]
+    key_blocks = pooled_k.shape[2]
     base_count = max(1, min(key_blocks, int((1.0 - config.sparsity) * key_blocks)))
-    forced = torch.zeros(key_blocks, dtype=torch.bool, device=scores.device)
-    for first, last in _sla_block_ranges(protected_ranges, key_block, key_blocks):
-        forced[first:last] = True
-    if config.stabilize_routing and previous is not None and previous.shape[:3] == scores.shape[:3]:
-        scale = scores.detach().abs().amax(dim=-1, keepdim=True).clamp_min(1e-6)
-        scores.scatter_add_(-1, previous.long(), scale.expand_as(previous) * 0.01)
-    reference_count = 0
+    forced = _sla_merge_block_ranges(_sla_block_ranges(protected_ranges, key_block, key_blocks))
     reference_sparsity = {"Off": None, "Light": SLA_REFERENCE_LIGHT_SPARSITY, "Heavy Enforcement": 0.0}[config.protect_reference_media]
+    references = ()
     if reference_sparsity is not None:
-        for first, last in _sla_block_ranges(reference_ranges, key_block, key_blocks):
-            keep = max(1, min(last - first, math.ceil((1.0 - reference_sparsity) * (last - first))))
+        references = tuple((first, last, max(1, min(last - first, math.ceil((1.0 - reference_sparsity) * (last - first))))) for first, last in _sla_block_ranges(reference_ranges, key_block, key_blocks))
+    selected_count = min(key_blocks, base_count + sum(last - first for first, last in forced) + sum(keep for _, _, keep in references))
+    lookup = torch.empty((batch, heads, query_blocks, selected_count), dtype=torch.int32, device=q.device)
+    history = torch.empty((batch, heads, query_blocks, min(4, selected_count)), dtype=torch.int32, device=q.device) if config.stabilize_routing else None
+    # A prior call with another key-block count (another tile, window or prompt length) would index past these scores.
+    stabilize = config.stabilize_routing and previous is not None and previous[1] == key_blocks and previous[0].shape[:3] == (batch, heads, query_blocks)
+    chunk = max(1, SLA_SCORE_CHUNK_BYTES // (batch * query_blocks * key_blocks * 4))
+    for start in range(0, heads, chunk):
+        stop = min(heads, start + chunk)
+        scores = pooled_q[:, start:stop] @ pooled_k[:, start:stop].transpose(-1, -2)
+        if stabilize:
+            prior = previous[0][:, start:stop]
+            scale = scores.abs().amax(dim=-1, keepdim=True).clamp_min(1e-6)
+            scores.scatter_add_(-1, prior.long(), scale.expand_as(prior) * 0.01)
+        for first, last, keep in references:
             selected_reference = torch.topk(scores[..., first:last], keep, dim=-1, sorted=False).indices + first
             scores.scatter_(-1, selected_reference, float("inf"))
-            reference_count += keep
-    if forced.any():
-        scores[..., forced] = float("inf")
-    selected_count = min(key_blocks, base_count + int(forced.sum().item()) + reference_count)
-    selected = torch.topk(scores, selected_count, dim=-1, sorted=False).indices.to(torch.int32).contiguous()
-    history = selected[..., : min(4, selected_count)].contiguous() if config.stabilize_routing else None
-    return selected, selected_count, history
+        for first, last in forced:
+            scores[..., first:last] = float("inf")
+        selected = torch.topk(scores, selected_count, dim=-1, sorted=False).indices
+        del scores
+        lookup[:, start:stop] = selected
+        if history is not None:
+            history[:, start:stop] = selected[..., : history.shape[-1]]
+        del selected
+    return lookup, selected_count, None if history is None else (history, key_blocks)
 
 
 SLA_TRITON_LAUNCH_LADDER = {(32, 32): ((4, 2), (2, 1), (4, 1), (2, 2)), (64, 64): ((4, 1), (4, 3), (8, 3), (8, 1)), (64, 128): ((4, 2), (8, 2), (4, 1)), (128, 64): ((8, 3), (4, 3), (8, 2), (4, 1)), (128, 128): ((8, 2), (4, 2), (8, 1), (4, 1))}
@@ -1962,34 +1877,33 @@ _SLA_TRITON_CHOSEN: dict[tuple[int, int, int], tuple[int, int]] = {}
 if triton is not None:
 
     @triton.jit
-    def _sla_attention_kernel(Q, K, V, scale: tl.constexpr, topk: tl.constexpr, lookup, output, heads: tl.constexpr, query_length: tl.constexpr, key_length: tl.constexpr, query_blocks: tl.constexpr, head_dim: tl.constexpr, query_block: tl.constexpr, key_block: tl.constexpr):
+    def _sla_attention_kernel(
+        Q, K, V, lookup, output, topk, heads, query_length, key_length, query_blocks, stride_qb, stride_qh, stride_qs, stride_kb, stride_kh, stride_ks, stride_vb, stride_vh, stride_vs, stride_ob, stride_oh, stride_os, scale: tl.constexpr, head_dim: tl.constexpr, query_block: tl.constexpr, key_block: tl.constexpr
+    ):
         query_block_index = tl.program_id(0).to(tl.int64)
         batch_head_index = tl.program_id(1).to(tl.int64)
         batch_index = batch_head_index // heads
         head_index = batch_head_index % heads
-        hidden = heads * head_dim
-        query_offset = batch_index * query_length * hidden + head_index * head_dim
-        key_offset = batch_index * key_length * hidden + head_index * head_dim
         lookup_offset = (batch_head_index * query_blocks + query_block_index) * topk
         row = query_block_index * query_block + tl.arange(0, query_block)
         column = tl.arange(0, key_block)
         dimension = tl.arange(0, head_dim)
-        query_ptr = Q + query_offset + row[:, None] * hidden + dimension[None, :]
-        output_ptr = output + query_offset + row[:, None] * hidden + dimension[None, :]
+        query_ptr = Q + batch_index * stride_qb + head_index * stride_qh + row[:, None] * stride_qs + dimension[None, :]
+        output_ptr = output + batch_index * stride_ob + head_index * stride_oh + row[:, None] * stride_os + dimension[None, :]
+        key_base = K + batch_index * stride_kb + head_index * stride_kh
+        value_base = V + batch_index * stride_vb + head_index * stride_vh
         running_max = tl.full([query_block], -float("inf"), tl.float32)
         running_sum = tl.zeros([query_block], tl.float32)
         running_output = tl.zeros([query_block, head_dim], tl.float32)
         query = tl.load(query_ptr, mask=row[:, None] < query_length, other=0.0)
         for selection_index in tl.range(topk):
             key_block_index = tl.load(lookup + lookup_offset + selection_index).to(tl.int64)
-            key_start = key_block_index * key_block
-            key_valid = key_start + column < key_length
-            key_ptr = K + key_offset + (key_start + column)[None, :] * hidden + dimension[:, None]
-            value_ptr = V + key_offset + (key_start + column)[:, None] * hidden + dimension[None, :]
-            key = tl.load(key_ptr, mask=key_valid[None, :], other=0.0)
+            key_row = key_block_index * key_block + column
+            key_valid = key_row < key_length
+            key = tl.load(key_base + key_row[None, :] * stride_ks + dimension[:, None], mask=key_valid[None, :], other=0.0)
             logits = tl.dot(query, key) * (scale * 1.4426950408889634)
             logits = tl.where(key_valid[None, :], logits, -float("inf"))
-            value = tl.load(value_ptr, mask=key_valid[:, None], other=0.0)
+            value = tl.load(value_base + key_row[:, None] * stride_vs + dimension[None, :], mask=key_valid[:, None], other=0.0)
             local_max = tl.max(logits, 1)
             next_max = tl.maximum(running_max, local_max)
             probabilities = tl.math.exp2(logits - next_max[:, None])
@@ -2001,18 +1915,22 @@ if triton is not None:
 
 
 def _sla_sparse_attention(q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, lookup: torch.Tensor, selected_count: int, config: MiniMaxH3SlaAttentionConfig) -> torch.Tensor:
+    """Attend [batch, heads, tokens, dim] views in place; return [batch, tokens, heads, dim]."""
     if triton is None:
         raise RuntimeError("MiniMax H3 SLA requires Triton.")
-    batch, sequence, heads, head_dim = q.shape
+    batch, heads, sequence, head_dim = q.shape
     key_block = 64 if config.block_size == 128 else config.block_size
     query_blocks = triton.cdiv(sequence, config.block_size)
-    output = torch.empty_like(q)
+    output = torch.empty((batch, sequence, heads, head_dim), dtype=q.dtype, device=q.device)
+    output_hnd = output.transpose(1, 2)
     key = (config.block_size, key_block, head_dim)
     ladder = (_SLA_TRITON_CHOSEN[key],) if key in _SLA_TRITON_CHOSEN else SLA_TRITON_LAUNCH_LADDER[(config.block_size, key_block)]
     last_error = None
     for num_warps, num_stages in ladder:
         try:
-            _sla_attention_kernel[(query_blocks, batch * heads)](q, k, v, head_dim**-0.5, selected_count, lookup, output, heads, sequence, k.shape[1], query_blocks, head_dim, config.block_size, key_block, num_warps=num_warps, num_stages=num_stages)
+            _sla_attention_kernel[(query_blocks, batch * heads)](
+                q, k, v, lookup, output, selected_count, heads, sequence, k.shape[2], query_blocks, *q.stride()[:3], *k.stride()[:3], *v.stride()[:3], *output_hnd.stride()[:3], scale=head_dim**-0.5, head_dim=head_dim, query_block=config.block_size, key_block=key_block, num_warps=num_warps, num_stages=num_stages
+            )
         except triton.runtime.errors.OutOfResources as error:
             last_error = error
             continue
@@ -2021,23 +1939,25 @@ def _sla_sparse_attention(q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, loo
     raise last_error if last_error is not None else RuntimeError("MiniMax H3 SLA found no viable Triton launch configuration.")
 
 
-def _sla_sampler_step_index(transformer_options: dict[str, Any], timestep: torch.Tensor) -> tuple[int, int] | None:
+def _sla_sampler_step_index(transformer_options: dict[str, Any]) -> tuple[int, int] | None:
+    # The diffusion model's timestep is in model units (sigma * 1000 for H3); the sampler's own sigma is in transformer_options.
     sigmas = transformer_options.get("sample_sigmas")
-    if not isinstance(sigmas, torch.Tensor) or sigmas.ndim != 1 or len(sigmas) < 2:
+    current = transformer_options.get("sigmas")
+    if not isinstance(sigmas, torch.Tensor) or sigmas.ndim != 1 or len(sigmas) < 2 or not isinstance(current, torch.Tensor) or current.numel() == 0:
         return None
-    current = timestep.flatten()[0].to(sigmas.dtype)
+    current = current.flatten()[0].to(sigmas.device, sigmas.dtype)
     index = int((torch.searchsorted(-sigmas, -current, right=True) - 1).clamp(0, len(sigmas) - 2).item())
     return index, len(sigmas) - 1
 
 
-def _sla_dense_step(transformer_options: dict[str, Any], timestep: torch.Tensor, config: MiniMaxH3SlaAttentionConfig) -> str | None:
-    step = _sla_sampler_step_index(transformer_options, timestep)
+def _sla_dense_step(transformer_options: dict[str, Any], config: MiniMaxH3SlaAttentionConfig) -> str | None:
+    step = _sla_sampler_step_index(transformer_options)
     if step is None:
-        if config.dense_tail_steps > 0 or _parse_h3_sla_dense_steps(config.dense_steps):
+        if config.dense_tail_steps > 0 or config.dense_step_set:
             return "sampling schedule is unavailable"
         return None
     index, total_steps = step
-    if index in _parse_h3_sla_dense_steps(config.dense_steps):
+    if index in config.dense_step_set:
         return f"sampling step {index} is configured dense"
     if config.dense_tail_steps > 0 and index >= total_steps - config.dense_tail_steps:
         return f"one of the final {config.dense_tail_steps} sampler steps is configured dense"
@@ -2052,18 +1972,38 @@ def _report_sla_fallback(state: dict[str, Any], reason: str, level: int = loggin
     logging.getLogger(__name__).log(level, "MiniMax H3 SLA using dense attention: %s", reason)
 
 
-def _run_h3_sla_dense_attention(state: dict[str, Any], original: Callable[..., torch.Tensor], *args: Any, **kwargs: Any) -> torch.Tensor:
-    backend = state.get("dense_backend")
-    if backend is None:
-        return original(*args, **kwargs)
-    return backend(original, *args, **kwargs)
+def _sla_layout_ranges(layout: Any, config: MiniMaxH3SlaAttentionConfig) -> tuple[tuple[tuple[int, int], ...], tuple[tuple[int, int], ...]]:
+    protected_ranges = []
+    reference_ranges = []
+    for start, stop, kind in layout.segments:
+        if config.protect_audio and kind in ("text", "audio", "cond_audio", "ref_audio"):
+            protected_ranges.append((int(start), int(stop)))
+        elif kind in ("cond", "ref_img", "ref_video", "video_ref"):
+            reference_ranges.append((int(start), int(stop)))
+    return tuple(protected_ranges), tuple(reference_ranges)
+
+
+def _run_h3_sla_sparse(q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, current: dict[str, Any], layout: Any, config: MiniMaxH3SlaAttentionConfig, state: dict[str, Any]) -> torch.Tensor:
+    # The model's own layout for this forward: correct for every context window and spatial tile.
+    if "ranges" not in current:
+        current["ranges"] = _sla_layout_ranges(layout, config)
+    q, k, v = (value if value.stride(-1) == 1 else value.contiguous() for value in (q, k, v))
+    call_index = current["call_index"]
+    current["call_index"] = call_index + 1
+    lookup, selected_count, history = _sla_select_blocks(q, k, config, *current["ranges"], state["history"].get(call_index))
+    output = _sla_sparse_attention(q, k, v, lookup, selected_count, config)
+    if history is not None:
+        state["history"][call_index] = history
+    return output
 
 
 def _make_h3_sla_override(config: MiniMaxH3SlaAttentionConfig, state: dict[str, Any]) -> Callable[..., torch.Tensor]:
+    """Return the attention override. Its container_function receives core's AttentionTensorContainer inputs untaken."""
 
-    def override(original, q, k, v, heads, mask=None, skip_reshape=False, skip_output_reshape=False, **kwargs):
+    def run(dense, q, k, v, heads, mask=None, skip_reshape=False, skip_output_reshape=False, **kwargs):
         options = kwargs.get("transformer_options") or {}
         current = options.get(MINIMAX_H3_SLA_STATE_KEY)
+        query = q.peek()
         reason = None
         if state.get("sparse_disabled_reason") is not None:
             reason = state["sparse_disabled_reason"]
@@ -2073,32 +2013,40 @@ def _make_h3_sla_override(config: MiniMaxH3SlaAttentionConfig, state: dict[str, 
             reason = current.get("dense_reason", "this sampler step is configured dense")
         elif mask is not None:
             reason = "the attention call has a mask"
-        elif not skip_reshape or q.ndim != 4 or q.shape[-1] != 128:
+        elif not skip_reshape or query.ndim != 4 or query.shape[-1] != 128:
             reason = "the attention call is not MiniMax H3 packed self-attention"
-        elif q.dtype not in (torch.float16, torch.bfloat16):
-            reason = f"the attention dtype is {q.dtype}"
-        elif q.shape[2] < config.minimum_sequence_length:
-            reason = f"sequence length {q.shape[2]} is below {config.minimum_sequence_length}"
-        elif q.device.type != "cuda":
+        elif query.dtype not in (torch.float16, torch.bfloat16):
+            reason = f"the attention dtype is {query.dtype}"
+        elif query.shape[2] < config.minimum_sequence_length:
+            reason = f"sequence length {query.shape[2]} is below {config.minimum_sequence_length}"
+        elif query.device.type != "cuda":
             reason = "the attention call is not on CUDA"
+        elif options.get("minimax_h3_layout") is None:
+            reason = "MiniMax H3 layout metadata is unavailable"
+        batch, sequence = query.shape[0], query.shape[-2]
+        # Holding a view of the shared qkv buffer here would stop a container-consuming dense backend from freeing it.
+        del query
         if reason is not None:
             _report_sla_fallback(state, reason)
-            return _run_h3_sla_dense_attention(state, original, q, k, v, heads, mask=mask, skip_reshape=skip_reshape, skip_output_reshape=skip_output_reshape, **kwargs)
+            return dense(q, k, v, heads, mask=mask, skip_reshape=skip_reshape, skip_output_reshape=skip_output_reshape, **kwargs)
         try:
-            q_nhd, k_nhd, v_nhd = (value.transpose(1, 2).contiguous() for value in (q, k, v))
-            call_index = current["call_index"]
-            current["call_index"] = call_index + 1
-            lookup, selected_count, history = _sla_select_blocks(q_nhd, k_nhd, config, current["protected_ranges"], current["reference_ranges"], state["history"].get(call_index))
-            output = _sla_sparse_attention(q_nhd, k_nhd, v_nhd, lookup, selected_count, config)
-            if history is not None:
-                state["history"][call_index] = history
-            return output.transpose(1, 2) if skip_output_reshape else output.reshape(q.shape[0], q.shape[2], -1)
+            output = _run_h3_sla_sparse(q.peek(), k.peek(), v.peek(), current, options["minimax_h3_layout"], config, state)
+            return output.transpose(1, 2) if skip_output_reshape else output.reshape(batch, sequence, -1)
         except Exception as error:
             state["history"].clear()
             state["sparse_disabled_reason"] = f"the sparse kernel failed with {error.__class__.__name__}: {error}"
             _report_sla_fallback(state, state["sparse_disabled_reason"], logging.WARNING)
-            return _run_h3_sla_dense_attention(state, original, q, k, v, heads, mask=mask, skip_reshape=skip_reshape, skip_output_reshape=skip_output_reshape, **kwargs)
+        # Outside the except block, so the traceback no longer pins the sparse attempt's tensors.
+        return dense(q, k, v, heads, mask=mask, skip_reshape=skip_reshape, skip_output_reshape=skip_output_reshape, **kwargs)
 
+    def override(original, q, k, v, *args, **kwargs):
+        dense = state.get("dense_backend") or _attention_on_taken_tensors(original)
+        return run(dense, comfy.ldm.modules.attention.AttentionTensorContainer(q), comfy.ldm.modules.attention.AttentionTensorContainer(k), comfy.ldm.modules.attention.AttentionTensorContainer(v), *args, **kwargs)
+
+    def container_function(q, k, v, *args, **kwargs):
+        return run(state.get("dense_backend") or _optimized_attention_on_containers, q, k, v, *args, **kwargs)
+
+    override.container_function = container_function
     return override
 
 
@@ -2137,30 +2085,18 @@ class MiniMaxH3SlaSamplingScope:
 
 def _make_h3_sla_wrapper(config: MiniMaxH3SlaAttentionConfig, state: dict[str, Any]):
 
-    def wrapper(executor, x, timestep, context, transformer_options=None, minimax_payload=None, **kwargs):
+    def wrapper(executor, x, timestep, context, transformer_options=None, **kwargs):
         options = dict(transformer_options or {})
-        layout = (minimax_payload or {}).get("layout")
-        protected_ranges = []
-        reference_ranges = []
-        for start, stop, kind in getattr(layout, "segments", ()) or ():
-            if config.protect_audio and kind in ("text", "audio", "cond_audio", "ref_audio"):
-                protected_ranges.append((int(start), int(stop)))
-            elif kind in ("cond", "ref_img", "ref_video", "video_ref"):
-                reference_ranges.append((int(start), int(stop)))
         dense_reason = state.get("sparse_disabled_reason")
-        if dense_reason is None and layout is None:
-            dense_reason = "MiniMax H3 layout metadata is unavailable"
-        elif dense_reason is None:
-            dense_reason = _sla_dense_step(options, timestep, config)
+        if dense_reason is None:
+            dense_reason = _sla_dense_step(options, config)
         if config.disable_fp16_accumulation:
             _set_h3_sla_reduced_precision_accumulation(False)
-        current = {"dense": dense_reason is not None, "dense_reason": dense_reason, "call_index": 0, "protected_ranges": tuple(protected_ranges), "reference_ranges": tuple(reference_ranges)}
+        current = {"dense": dense_reason is not None, "dense_reason": dense_reason, "call_index": 0}
         if dense_reason is not None:
             state["history"].clear()
             _report_sla_fallback(state, dense_reason)
         options[MINIMAX_H3_SLA_STATE_KEY] = current
-        if minimax_payload is not None:
-            kwargs["minimax_payload"] = minimax_payload
         try:
             return executor(x, timestep, context, options, **kwargs)
         except Exception:
@@ -2183,7 +2119,7 @@ def _patch_h3_sla_attention(model: Any, config: MiniMaxH3SlaAttentionConfig) -> 
     state = {"history": {}, "reported_fallbacks": set(), "sparse_disabled_reason": None, "dense_backend": _resolve_h3_sla_dense_backend(config.dense_backend)}
     options = _ensure_transformer_options(patched)
     options[UNIFIED_ATTENTION_OWNER_KEY] = "Sparse / MiniMax H3 SLA"
-    options["optimized_attention_override"] = _call_attention_with_fallback(_make_h3_sla_override(config, state))
+    options["optimized_attention_override"] = _make_h3_sla_override(config, state)
     patched.remove_wrappers_with_key(comfy.patcher_extension.WrappersMP.DIFFUSION_MODEL, MINIMAX_H3_SLA_WRAPPER_KEY)
     patched.add_wrapper_with_key(comfy.patcher_extension.WrappersMP.DIFFUSION_MODEL, MINIMAX_H3_SLA_WRAPPER_KEY, _make_h3_sla_wrapper(config, state))
     patched.remove_wrappers_with_key(comfy.patcher_extension.WrappersMP.OUTER_SAMPLE, MINIMAX_H3_SLA_SAMPLING_SCOPE_KEY)

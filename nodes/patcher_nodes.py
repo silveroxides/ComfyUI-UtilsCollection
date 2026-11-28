@@ -228,14 +228,13 @@ class UC_MiniMaxH3PDDAcc(io.ComfyNode):
 class UC_MiniMaxH3Cache(io.ComfyNode):
     """Apply the MiniMax H3 whole-block-stack cache to a cloned model patcher.
 
-    Implementation invariant: current Core exposes per-block replacements but no
-    replacement boundary around the complete H3 block stack. The local ``_forward``
-    adaptation deliberately adds that missing boundary through
-    ``ModelPatcher.add_object_patch``. Core installs it only while the output clone
-    is patched and restores the original bound method when unpatching; this is not
-    a global class monkey-patch. Replacing it with chained per-block wrappers is not
-    equivalent unless preservation of existing replacements, prefetch behavior,
-    whole-stack residual capture, and ModelPatcher lifecycle is proven end to end.
+    Implementation invariant: Core runs the complete H3 block stack in
+    ``MiniMaxH3Model._run_blocks`` but exposes only per-block replacements. The cache
+    wraps that one method through ``ModelPatcher.add_object_patch`` and calls Core's
+    own ``_run_blocks`` inside it, so Core ``_forward`` (masks, PDD grids, final layer),
+    block replacements and prefetch stay Core's. Core installs the patch only while
+    the output clone is patched and restores the original bound method when
+    unpatching; this is not a global class monkey-patch.
     """
 
     @classmethod
