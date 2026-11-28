@@ -701,102 +701,42 @@ def test_diffusion_cache_sampling_scope_resets_on_error():
     assert cache.step_counter == 0
 
 
-def test_block_runner_preserves_double_block_replacements(monkeypatch):
-    prefetch_events = []
-    monkeypatch.setattr(patcher_helpers.comfy.model_prefetch, "make_prefetch_queue", lambda blocks, device, options: "queue")
-    monkeypatch.setattr(patcher_helpers.comfy.model_prefetch, "prefetch_queue_pop", lambda queue, device, block, malloc_scope=None: prefetch_events.append((block, malloc_scope)))
+def test_cache_wraps_core_run_blocks_and_caches_only_target_rows():
+    # Core blocks add into their input in place; the residual must come from a baseline copied out first.
+    delta = torch.arange(10, dtype=torch.float32)[:, None].expand(10, 8)
+    calls = []
 
-    class Block:
-        def __call__(self, image, *args, **kwargs):
-            return image + 1.0
+    class FakeH3:
+        blocks = [None, None]
 
-    blocks = [Block(), Block()]
-    model = types.SimpleNamespace(blocks=blocks)
+        def _run_blocks(self, h, t_emb, mod_segments, layout, transformer_options):
+            calls.append(transformer_options["sigmas"].item())
+            return h.add_(delta)
 
-    def replacement(args, extra_options):
-        result = extra_options["original_block"](args)
-        return {"img": result["img"] + 10.0}
+    model = FakeH3()
+    layout = types.SimpleNamespace(segments=[(0, 2, "text"), (2, 4, "cond"), (4, 6, "audio"), (6, 10, "video")])
+    cache = _cache(max_steps=2)
+    run_blocks = types.MethodType(patcher_helpers.minimax_h3_block_loop_run_blocks, model)
 
-    output = patcher_helpers.run_minimax_h3_blocks(model, torch.zeros((2, 4)), torch.zeros((1, 4)), [], torch.zeros((1, 4)), {"patches_replace": {"dit": {("double_block", 0): replacement}}})
+    def step(hidden, sigma):
+        options = {"patches_replace": {"dit": {("block_loop", 0): cache}}, "sigmas": torch.tensor([sigma])}
+        return run_blocks(hidden.clone(), None, [], layout, options)
 
-    assert torch.equal(output, torch.full((2, 4), 12.0))
-    assert prefetch_events == [(blocks[0], "block"), (blocks[1], "block"), (None, "block")]
+    first = torch.ones((10, 8))
+    assert torch.equal(step(first, 0.9), first + delta)
+    assert tuple(cache.cached_residual.shape) == (6, 8)
 
-
-def test_cached_forward_matches_current_core_audio_output_contract(monkeypatch):
-    layout = types.SimpleNamespace(signature=(1, 1, 2, 2, 1), segments=[(0, 1, "text"), (1, 3, "audio"), (3, 4, "video")], img_update=torch.ones(1, dtype=torch.bool), audio_update=torch.ones(2, dtype=torch.bool), seq_len=4, position_ids=torch.zeros((4, 3)))
-    video_result = torch.tensor([[1.0, 2.0, 3.0, 4.0]])
-    audio_result = torch.arange(1.0, 9.0).reshape(2, 4)
-    final_layer_args = {}
-
-    def final_layer(hidden, t_emb, video_seg, audio_seg, sigma, sample_sigmas, shifts):
-        final_layer_args.update(sigma=sigma, sample_sigmas=sample_sigmas, shifts=shifts)
-        return video_result, audio_result
-
-    model = types.SimpleNamespace(
-        patch_size=(1, 2, 2),
-        sigma_shift_video=1.0,
-        sigma_shift_audio=1.0,
-        hidden_size=4,
-        use_adaln_curves=False,
-        blocks=[],
-        latents_dim=1,
-        video_patch_proj=lambda rows: rows,
-        audio_patch_proj=lambda rows: rows,
-        _cond_video_rows=lambda payload, device: None,
-        _cond_audio_rows=lambda payload, device: None,
-        time_embedder=lambda values: values[:, None].expand(-1, 4),
-        rope_freqs=lambda position_ids, device: torch.zeros((1, 1)),
-        final_layer=final_layer,
-    )
-    monkeypatch.setattr(patcher_helpers.minimax_model, "rope_rotation_table", lambda frequencies, dtype: frequencies)
-
-    video = torch.zeros((1, 1, 1, 2, 2), dtype=torch.float16)
-    audio = torch.zeros((1, 4, 2, 1), dtype=torch.float16)
-    context = torch.zeros((1, 1, 4), dtype=torch.float32)
-    sample_sigmas = torch.tensor([1.0, 0.5, 0.0])
-
-    assert not hasattr(patcher_helpers.minimax_model, "time_shift_slope")
-    output = patcher_helpers.minimax_h3_block_patch_forward(model, [video, audio], torch.tensor([500.0]), context, transformer_options={"sample_sigmas": sample_sigmas, "minimax_h3_sigma_shift_video": 1.25, "minimax_h3_sigma_shift_audio": 0.75}, minimax_payload={"layout": layout})
-
-    expected_video = -patcher_helpers.minimax_model.unpatchify_video(video_result, 1, 1, 1, 1, (1, 2, 2)).to(video.dtype)
-    expected_audio = -patcher_helpers.minimax_model.unpack_audio(audio_result).to(audio.dtype)
-    assert torch.equal(output[0], expected_video)
-    assert torch.equal(output[1], expected_audio)
-    assert final_layer_args["sigma"].item() == pytest.approx(0.5)
-    assert final_layer_args["sample_sigmas"] is sample_sigmas
-    assert final_layer_args["shifts"] == (1.25, 0.75)
-
-
-def test_cached_forward_supports_core_cond_audio_segments(monkeypatch):
-    layout = types.SimpleNamespace(signature=(1, 1, 2, 2, 1), segments=[(0, 1, "text"), (1, 3, "cond_audio"), (3, 5, "audio"), (5, 6, "video")], img_update=torch.ones(1, dtype=torch.bool), audio_update=torch.tensor([False, False, True, True]), seq_len=6, position_ids=torch.zeros((6, 3)))
-    model = types.SimpleNamespace(
-        patch_size=(1, 2, 2),
-        sigma_shift_video=1.0,
-        sigma_shift_audio=1.0,
-        hidden_size=4,
-        use_adaln_curves=False,
-        blocks=[],
-        latents_dim=1,
-        video_patch_proj=lambda rows: rows,
-        audio_patch_proj=lambda rows: rows,
-        _cond_video_rows=lambda payload, device: None,
-        _cond_audio_rows=lambda payload, device: torch.zeros((2, 4), device=device),
-        time_embedder=lambda values: values[:, None].expand(-1, 4),
-        rope_freqs=lambda position_ids, device: torch.zeros((1, 1)),
-        final_layer=lambda *args: (torch.ones((1, 4)), torch.ones((2, 4))),
-    )
-    monkeypatch.setattr(patcher_helpers.minimax_model, "rope_rotation_table", lambda frequencies, dtype: frequencies)
-
-    output = patcher_helpers.minimax_h3_block_patch_forward(model, [torch.zeros((1, 1, 1, 2, 2), dtype=torch.float16), torch.zeros((1, 4, 2, 1), dtype=torch.float16)], torch.tensor([500.0]), torch.zeros((1, 1, 4), dtype=torch.float32), transformer_options={}, minimax_payload={"layout": layout})
-
-    assert len(output) == 2
+    second = first + 0.001
+    skipped = step(second, 0.8)
+    assert calls == [pytest.approx(0.9)]
+    assert torch.equal(skipped[:4], second[:4])
+    assert torch.allclose(skipped[4:], second[4:] + delta[4:])
 
 
 def test_model_helper_adds_only_reversible_instance_patch(monkeypatch):
 
     class FakeH3:
-        def _forward(self):
+        def _run_blocks(self):
             return "original"
 
     monkeypatch.setattr(patcher_helpers.minimax_model, "MiniMaxH3Model", FakeH3)
@@ -822,15 +762,15 @@ def test_model_helper_adds_only_reversible_instance_patch(monkeypatch):
             self.wrappers.append(args)
 
     original = FakePatcher(diffusion_model)
-    original_class_forward = FakeH3.__dict__["_forward"]
+    original_class_run_blocks = FakeH3.__dict__["_run_blocks"]
     patched = patcher_helpers.patch_minimax_h3_cache_model(original, 0.1, 0.15, 0.9, 2, "auto", False)
 
     assert original.object_patches == {}
-    assert set(patched.object_patches) == {"diffusion_model._forward"}
-    assert patched.object_patches["diffusion_model._forward"].__self__ is diffusion_model
+    assert set(patched.object_patches) == {"diffusion_model._run_blocks"}
+    assert patched.object_patches["diffusion_model._run_blocks"].__self__ is diffusion_model
     assert patched.replacements[0][1:] == ("dit", "block_loop", 0)
     assert patched.wrappers[0][0] == patcher_helpers.comfy.patcher_extension.WrappersMP.OUTER_SAMPLE
-    assert FakeH3.__dict__["_forward"] is original_class_forward
+    assert FakeH3.__dict__["_run_blocks"] is original_class_run_blocks
 
 
 def test_h3_sla_and_cache_preserve_both_model_patcher_contracts(monkeypatch):
@@ -845,6 +785,9 @@ def test_h3_sla_and_cache_preserve_both_model_patcher_contracts(monkeypatch):
     class FakeH3:
         def __init__(self):
             self.blocks = [FakeBlock(), FakeBlock()]
+
+        def _run_blocks(self, h, t_emb, mod_segments, layout, transformer_options):
+            return h
 
     class FakePatcher:
         def __init__(self, diffusion, model_options=None, object_patches=None, replacements=None, wrappers=None):
@@ -879,7 +822,7 @@ def test_h3_sla_and_cache_preserve_both_model_patcher_contracts(monkeypatch):
     config = patcher_helpers.MiniMaxH3SlaAttentionConfig()
 
     def assert_combined(patched):
-        assert "diffusion_model._forward" in patched.object_patches
+        assert "diffusion_model._run_blocks" in patched.object_patches
         assert ("dit", "block_loop", 0) in patched.replacements
         assert "optimized_attention_override" in patched.model_options["transformer_options"]
         assert patcher_helpers.MINIMAX_H3_SLA_WRAPPER_KEY in patched.wrappers[patcher_helpers.comfy.patcher_extension.WrappersMP.DIFFUSION_MODEL]

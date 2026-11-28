@@ -39,7 +39,6 @@ except ImportError:
 import comfy.ldm.modules.attention
 import comfy.model_management
 import comfy.model_patcher
-import comfy.model_prefetch
 import comfy.patcher_extension
 import comfy.utils
 import folder_paths
@@ -1099,163 +1098,41 @@ class MiniMaxH3SamplingScope:
             self.cache.finish()
 
 
-def run_minimax_h3_blocks(model: minimax_model.MiniMaxH3Model, hidden_states: torch.Tensor, timestep_embedding: torch.Tensor, mod_segments: list[tuple[int, int, int]], rope_freqs: torch.Tensor, transformer_options: dict[str, Any], start: int = 0, end: int | None = None) -> torch.Tensor:
-    """Run a bounded H3 block range while preserving Core block replacements."""
+def minimax_h3_block_loop_run_blocks(self: minimax_model.MiniMaxH3Model, h: torch.Tensor, t_emb: torch.Tensor, mod_segments: list[tuple[int, int, Any]], layout: Any, transformer_options: dict[str, Any]) -> torch.Tensor:
+    """Core ``_run_blocks`` behind one model-patchable ``("dit", "block_loop", 0)`` boundary.
 
-    blocks_replace = transformer_options.get("patches_replace", {}).get("dit", {})
-    end = len(model.blocks) if end is None else end
-    blocks = list(model.blocks[start:end])
-    prefetch_queue = comfy.model_prefetch.make_prefetch_queue(blocks, hidden_states.device, transformer_options)
-    for index in range(start, end):
-        block = model.blocks[index]
-        comfy.model_prefetch.prefetch_queue_pop(prefetch_queue, hidden_states.device, block, malloc_scope="block")
-        if ("double_block", index) in blocks_replace:
+    Core ``_forward`` stays in charge of masks, PDD grids and the final layer; only the block stack is wrapped.
+    """
 
-            def block_wrapper(block_args: dict[str, Any]) -> dict[str, torch.Tensor]:
-                return {"img": block(block_args["img"], block_args["t_emb"], block_args["mod_segments"], block_args["rope_freqs"], transformer_options=block_args["transformer_options"])}
+    run_core_blocks = type(self)._run_blocks
+    block_loop = transformer_options.get("patches_replace", {}).get("dit", {}).get(("block_loop", 0))
+    if block_loop is None:
+        return run_core_blocks(self, h, t_emb, mod_segments, layout, transformer_options)
 
-            hidden_states = blocks_replace[("double_block", index)]({"img": hidden_states, "t_emb": timestep_embedding, "mod_segments": mod_segments, "rope_freqs": rope_freqs, "transformer_options": transformer_options}, {"original_block": block_wrapper})["img"]
-        else:
-            hidden_states = block(hidden_states, timestep_embedding, mod_segments, rope_freqs, transformer_options=transformer_options)
-    if prefetch_queue is not None:
-        comfy.model_prefetch.prefetch_queue_pop(prefetch_queue, hidden_states.device, None, malloc_scope="block")
-    return hidden_states
+    def block_loop_wrapper(block_args: dict[str, Any]) -> dict[str, torch.Tensor]:
+        return {"img": run_core_blocks(self, block_args["img"], block_args["t_emb"], block_args["mod_segments"], block_args["layout"], block_args["transformer_options"])}
+
+    target_ranges = tuple((start, end, kind) for start, end, kind in layout.segments if kind in ("audio", "video"))
+    block_args = {
+        "img": h,
+        # The sampler sigma; the caches use it to detect step changes and as noise level.
+        "timestep": transformer_options.get("sigmas"),
+        "t_emb": t_emb,
+        "mod_segments": mod_segments,
+        "layout": layout,
+        "transformer_options": transformer_options,
+        "cache_ranges": tuple((start, end) for start, end, _ in target_ranges),
+        "target_ranges": target_ranges,
+        "block_count": len(self.blocks),
+    }
+    return block_loop(block_args, {"original_block": block_loop_wrapper})["img"]
 
 
-def minimax_h3_block_patch_forward(self: minimax_model.MiniMaxH3Model, x: list[torch.Tensor], timestep: torch.Tensor, context: torch.Tensor, transformer_options: dict[str, Any] = {}, minimax_payload: dict[str, Any] | None = None, **kwargs: Any) -> list[torch.Tensor]:
-    """Current Core H3 forward with one model-patchable block-loop boundary."""
-
-    del kwargs
-    video_x, audio_x = x[0], x[1]
-    orig_t, orig_h, orig_w = video_x.shape[2:5]
-    video_x = comfy.ldm.common_dit.pad_to_patch_size(video_x, self.patch_size)
-    if video_x.shape[0] != 1:
-        raise ValueError("MiniMax H3 supports batch size 1")
-    payload = minimax_payload or {}
-    device = video_x.device
-    dtype = context.dtype
-
-    latent_t, lat_h, lat_w = video_x.shape[2:5]
-    audio_t = audio_x.shape[-1]
-    text_len = context.shape[1]
-    layout = payload.get("layout")
-    if layout is None or layout.signature != (text_len, latent_t, lat_h, lat_w, audio_t):
-        layout = minimax_model.PackedLayout(text_len, latent_t, lat_h, lat_w, audio_t, keyframes=payload.get("keyframes"), refs=payload.get("refs"))
-    transformer_options["minimax_h3_layout"] = layout
-
-    shift_v = float(transformer_options.get("minimax_h3_sigma_shift_video", self.sigma_shift_video))
-    shift_a = float(transformer_options.get("minimax_h3_sigma_shift_audio", self.sigma_shift_audio))
-    sigma_v = (timestep.flatten()[0] / 1000.0).float().clamp(min=1e-6)
-    t_v = float(1.0 - sigma_v)
-    t_a = float(1.0 - minimax_model.time_shift_sigma(sigma_v, shift_v, shift_a))
-
-    vis_aug = float(payload.get("visual_cond_noise_aug", minimax_model.VISUAL_COND_TIMESTEP))
-    aud_aug = float(payload.get("audio_cond_noise_aug", minimax_model.AUDIO_COND_TIMESTEP))
-    has_vis_cond = any(kind in ("cond", "ref_img") for _, _, kind in layout.segments)
-    has_aud_cond = any(kind in ("cond_audio", "ref_audio") for _, _, kind in layout.segments)
-    seg_t = {"text": t_v, "video": t_v, "audio": t_a, "cond": max(t_v, vis_aug), "ref_img": max(t_v, vis_aug), "cond_audio": max(t_a, aud_aug), "ref_audio": max(t_a, aud_aug)}
-    unique_t = sorted({t_v, t_a} | ({seg_t["cond"]} if has_vis_cond else set()) | ({seg_t["cond_audio"]} if has_aud_cond else set()))
-    t_row = {value: index for index, value in enumerate(unique_t)}
-    seg_tag = {"text": 1, "video": 0, "audio": 2, "cond": 0, "ref_img": 0, "cond_audio": 2, "ref_audio": 2}
-
-    text_tags = payload.get("text_token_tags")
-    mod_segments = []
-    for start, end, kind in layout.segments:
-        row_base = t_row[seg_t[kind]] * 3
-        if kind == "text" and text_tags is not None:
-            tags = text_tags.view(-1).tolist()
-            run_start = 0
-            for index in range(1, end - start + 1):
-                if index == end - start or tags[index] != tags[run_start]:
-                    mod_segments.append((start + run_start, start + index, row_base + int(tags[run_start])))
-                    run_start = index
-        else:
-            mod_segments.append((start, end, row_base + seg_tag[kind]))
-
-    if hasattr(self, "_embed_and_pack"):
-        hidden_states = self._embed_and_pack(video_x, audio_x, context, layout, payload, transformer_options)
-    else:
-        img_update = layout.img_update.to(device)
-        audio_update = layout.audio_update.to(device)
-        video_rows = minimax_model.patchify_video(video_x.to(torch.float32), self.patch_size)
-        audio_rows = minimax_model.pack_audio(audio_x.to(torch.float32))
-        cond_video_rows = self._cond_video_rows(payload, device)
-        cond_audio_rows = self._cond_audio_rows(payload, device)
-
-        all_video_rows = video_rows
-        if cond_video_rows is not None:
-            all_video_rows = torch.empty(img_update.shape[0], video_rows.shape[1], dtype=torch.float32, device=device)
-            all_video_rows[~img_update] = cond_video_rows
-            all_video_rows[img_update] = video_rows
-        all_audio_rows = audio_rows
-        if cond_audio_rows is not None:
-            all_audio_rows = torch.empty(audio_update.shape[0], audio_rows.shape[1], dtype=torch.float32, device=device)
-            all_audio_rows[~audio_update] = cond_audio_rows
-            all_audio_rows[audio_update] = audio_rows
-
-        video_embed = self.video_patch_proj(all_video_rows).to(dtype)
-        audio_embed = self.audio_patch_proj(all_audio_rows).to(dtype)
-        text_states = context[0]
-        if text_states.shape[-1] != self.hidden_size:
-            text_states = self.token_refiner(self.condition_proj(text_states), transformer_options=transformer_options)
-
-        hidden_states = torch.empty(layout.seq_len, self.hidden_size, dtype=dtype, device=device)
-        video_offset = audio_offset = 0
-        for start, end, kind in layout.segments:
-            length = end - start
-            if kind == "text":
-                hidden_states[start:end] = text_states
-            elif kind in ("cond", "ref_img", "video"):
-                hidden_states[start:end] = video_embed[video_offset : video_offset + length]
-                video_offset += length
-            else:
-                hidden_states[start:end] = audio_embed[audio_offset : audio_offset + length]
-                audio_offset += length
-    out_v_dtype = video_x.dtype
-    out_a_dtype = audio_x.dtype
-    del video_x, audio_x
-
-    t_values = torch.tensor(unique_t, dtype=torch.float32, device=device)
-    if self.use_adaln_curves:
-        table = comfy.model_management.cast_to(self.adaln_t_table, device=device)
-        position = t_values.clamp(0.0, 1.0) * (table.shape[0] - 1)
-        lower = position.floor().long().clamp(max=table.shape[0] - 2)
-        timestep_embedding = torch.lerp(table[lower], table[lower + 1], (position - lower).unsqueeze(1))
-    else:
-        timestep_embedding = self.time_embedder(t_values).to(dtype)
-
-    rope_freqs = minimax_model.rope_rotation_table(self.rope_freqs(layout.position_ids, device), dtype)
-    blocks_replace = transformer_options.get("patches_replace", {}).get("dit", {})
-    cache_ranges = tuple((start, end) for start, end, kind in layout.segments if kind in ("audio", "video"))
-    if ("block_loop", 0) in blocks_replace:
-
-        def block_loop_wrapper(block_args: dict[str, Any]) -> dict[str, torch.Tensor]:
-            return {"img": run_minimax_h3_blocks(self, block_args["img"], block_args["t_emb"], block_args["mod_segments"], block_args["rope_freqs"], block_args["transformer_options"], block_args.get("start", 0), block_args.get("end"))}
-
-        hidden_states = blocks_replace[("block_loop", 0)](
-            {
-                "img": hidden_states,
-                "timestep": timestep,
-                "t_emb": timestep_embedding,
-                "mod_segments": mod_segments,
-                "rope_freqs": rope_freqs,
-                "transformer_options": transformer_options,
-                "cache_ranges": cache_ranges,
-                "target_ranges": tuple((start, end, kind) for start, end, kind in layout.segments if kind in ("audio", "video")),
-                "block_count": len(self.blocks),
-            },
-            {"original_block": block_loop_wrapper},
-        )["img"]
-    else:
-        hidden_states = run_minimax_h3_blocks(self, hidden_states, timestep_embedding, mod_segments, rope_freqs, transformer_options)
-
-    video_seg = next((start, end, t_row[seg_t["video"]]) for start, end, kind in layout.segments if kind == "video")
-    audio_seg = next((start, end, t_row[seg_t["audio"]]) for start, end, kind in layout.segments if kind == "audio")
-    video_result, audio_result = self.final_layer(hidden_states, timestep_embedding, video_seg, audio_seg, sigma_v, transformer_options.get("sample_sigmas"), (shift_v, shift_a))
-    video_out = minimax_model.unpatchify_video(video_result, latent_t, lat_h // 2, lat_w // 2, self.latents_dim, self.patch_size)
-    video_out = video_out[:, :, :orig_t, :orig_h, :orig_w]
-    audio_out = minimax_model.unpack_audio(audio_result)
-    return [-video_out.to(out_v_dtype), -audio_out.to(out_a_dtype)]
+def _install_minimax_h3_block_loop(patched_model: Any, diffusion_model: Any, cache: Any) -> None:
+    if not callable(getattr(type(diffusion_model), "_run_blocks", None)):
+        raise ValueError("MiniMax H3 Cache needs MiniMaxH3Model._run_blocks from ComfyUI core (2026-11-10 or newer); update ComfyUI.")
+    patched_model.add_object_patch("diffusion_model._run_blocks", types.MethodType(minimax_h3_block_loop_run_blocks, diffusion_model))
+    patched_model.set_model_patch_replace(cache, "dit", "block_loop", 0)
 
 
 def patch_minimax_h3_cache_model(model: Any, reuse_threshold: float, start_percent: float, end_percent: float, max_steps: int, device: str, verbose: bool) -> Any:
@@ -1272,9 +1149,7 @@ def patch_minimax_h3_cache_model(model: Any, reuse_threshold: float, start_perce
     cache = MiniMaxH3Cache(reuse_threshold=reuse_threshold, start_percent=start_percent, end_percent=end_percent, max_steps=max_steps, device=device, verbose=verbose)
     if hasattr(patched_model, "model_options"):
         patched_model.model_options[MINIMAX_H3_CACHE_OWNER_KEY] = True
-    bound_forward = types.MethodType(minimax_h3_block_patch_forward, diffusion_model)
-    patched_model.add_object_patch("diffusion_model._forward", bound_forward)
-    patched_model.set_model_patch_replace(cache, "dit", "block_loop", 0)
+    _install_minimax_h3_block_loop(patched_model, diffusion_model, cache)
     patched_model.add_wrapper(comfy.patcher_extension.WrappersMP.OUTER_SAMPLE, MiniMaxH3SamplingScope(cache))
     return patched_model
 
@@ -1489,9 +1364,7 @@ def patch_minimax_h3_diffusion_cache_model(model: Any, preset: str = "balanced",
     cache = MiniMaxH3DiffusionCache(preset=preset, composition_cutoff=composition_cutoff, detail_protection=detail_protection, drift_tolerance=drift_tolerance, max_noise_span=max_noise_span, device=device, verbose=verbose)
     if hasattr(patched_model, "model_options"):
         patched_model.model_options[MINIMAX_H3_CACHE_OWNER_KEY] = True
-    bound_forward = types.MethodType(minimax_h3_block_patch_forward, diffusion_model)
-    patched_model.add_object_patch("diffusion_model._forward", bound_forward)
-    patched_model.set_model_patch_replace(cache, "dit", "block_loop", 0)
+    _install_minimax_h3_block_loop(patched_model, diffusion_model, cache)
     patched_model.add_wrapper(comfy.patcher_extension.WrappersMP.OUTER_SAMPLE, MiniMaxH3DiffusionSamplingScope(cache))
     return patched_model
 
