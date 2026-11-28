@@ -536,7 +536,7 @@ def test_cpu_cache_preserves_output_shape_and_dtype():
 
 def test_cache_finish_releases_residual_buffer():
     cache = _cache(device="cpu")
-    cache._store_residual(torch.ones((4, 8)))
+    cache(_cache_args(torch.ones((4, 8)), 1000.0), {"original_block": lambda args: {"img": args["img"] + 1.0}})
     assert cache.cached_residual is not None
     assert cache._residual_buffer is not None
 

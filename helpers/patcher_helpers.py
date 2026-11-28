@@ -944,46 +944,72 @@ class MiniMaxH3Cache:
             return float(timestep)
         return None
 
-    def _store_residual(self, residual: torch.Tensor, state: _MiniMaxH3WindowState | None = None) -> None:
-        if state is None:
-            state = self._active_state
-        if self.device == "cuda" and residual.device.type != "cuda":
-            raise ValueError("MiniMax H3 cache device is set to cuda, but the model is not running on CUDA.")
+    @staticmethod
+    def _target_rows(hidden_states: torch.Tensor, cache_ranges: tuple[tuple[int, int], ...]) -> tuple[tuple[int, int], ...]:
+        # Only the audio and video rows reach the final layer, so only they need a residual.
+        length = hidden_states.shape[0]
+        rows = tuple((start, min(end, length)) for start, end in cache_ranges if start < min(end, length))
+        return rows or ((0, length),)
 
+    def _residual_device(self, hidden_states: torch.Tensor) -> torch.device:
+        if self.device == "cuda":
+            if hidden_states.device.type != "cuda":
+                raise ValueError("MiniMax H3 cache device is set to cuda, but the model is not running on CUDA.")
+            return hidden_states.device
         if self.device == "cpu":
-            target_device = torch.device("cpu")
-        elif self.device == "cuda":
-            target_device = residual.device
-        else:
-            try:
-                free_mem = comfy.model_management.get_free_memory(residual.device)
-                target_device = torch.device("cpu") if free_mem < 2 * 1024**3 else residual.device
-            except Exception:
-                target_device = residual.device
-
-        residual = residual.detach()
+            return torch.device("cpu")
         try:
-            buffer = state.residual_buffer
-            if buffer is None or buffer.shape != residual.shape or buffer.dtype != residual.dtype or buffer.device != target_device:
-                buffer = torch.empty(residual.shape, dtype=residual.dtype, device=target_device)
-                state.residual_buffer = buffer
-            buffer.copy_(residual, non_blocking=(target_device.type == "cuda"))
-            state.cache_valid = True
+            free_mem = comfy.model_management.get_free_memory(hidden_states.device)
+        except Exception:
+            return hidden_states.device
+        return torch.device("cpu") if free_mem < 2 * 1024**3 else hidden_states.device
+
+    def _residual_storage(self, state: _MiniMaxH3WindowState, hidden_states: torch.Tensor, rows: tuple[tuple[int, int], ...]) -> torch.Tensor:
+        shape = (sum(end - start for start, end in rows), *hidden_states.shape[1:])
+        device = self._residual_device(hidden_states)
+        buffer = state.residual_buffer
+        if buffer is not None and tuple(buffer.shape) == shape and buffer.dtype == hidden_states.dtype and buffer.device == device:
+            return buffer
+        state.residual_buffer = buffer = None
+        try:
+            buffer = torch.empty(shape, dtype=hidden_states.dtype, device=device)
         except torch.OutOfMemoryError:
             if self.device == "cuda":
                 raise
-            state.residual_buffer = residual.to("cpu", copy=True)
-            state.cache_valid = True
+            buffer = torch.empty(shape, dtype=hidden_states.dtype, device="cpu")
+        state.residual_buffer = buffer
+        return buffer
 
-    def _apply_residual(self, hidden_states: torch.Tensor, state: _MiniMaxH3WindowState | None = None) -> torch.Tensor:
-        if state is None:
-            state = self._active_state
+    def _run_and_cache(self, state: _MiniMaxH3WindowState, args: dict[str, Any], original_block: Callable[[dict[str, Any]], dict[str, Any]], hidden_states: torch.Tensor, rows: tuple[tuple[int, int], ...]) -> dict[str, Any]:
+        # Core blocks add into their input in place, so the baseline is copied out first.
+        # It goes straight into the residual buffer, which then becomes output - baseline in place.
+        state.cache_valid = False
+        buffer = self._residual_storage(state, hidden_states, rows)
+        offset = 0
+        for start, end in rows:
+            buffer[offset : offset + end - start].copy_(hidden_states[start:end].detach())
+            offset += end - start
+        result = original_block(args)
+        output = result["img"].detach()
+        offset = 0
+        for start, end in rows:
+            residual = buffer[offset : offset + end - start]
+            torch.sub(output[start:end].to(buffer.device), residual, out=residual)
+            offset += end - start
+        state.cache_valid = True
+        state.accumulated_relative_l1 = 0.0
+        return result
+
+    def _apply_residual(self, hidden_states: torch.Tensor, state: _MiniMaxH3WindowState, rows: tuple[tuple[int, int], ...]) -> torch.Tensor:
         residual = state.residual_buffer if state.cache_valid else None
         if residual is None:
             return hidden_states
-        if residual.device != hidden_states.device or residual.dtype != hidden_states.dtype:
-            residual = residual.to(device=hidden_states.device, dtype=hidden_states.dtype, non_blocking=True)
-        return hidden_states + residual
+        output = hidden_states.clone()
+        offset = 0
+        for start, end in rows:
+            output[start:end] += residual[offset : offset + end - start].to(device=output.device, dtype=output.dtype, non_blocking=True)
+            offset += end - start
+        return output
 
     def __call__(self, args: dict[str, Any], extra_options: dict[str, Any]) -> dict[str, Any]:
         original_block = extra_options["original_block"]
@@ -993,6 +1019,8 @@ class MiniMaxH3Cache:
 
         cache_ranges = tuple(tuple(pair) for pair in args.get("cache_ranges", ()))
         current_layout = (tuple(hidden_states.shape), hidden_states.dtype, hidden_states.device, args.get("block_count"), cache_ranges)
+        rows = self._target_rows(hidden_states, cache_ranges)
+        current_signature = None
 
         if state.layout_signature is None:
             state.layout_signature = current_layout
@@ -1027,7 +1055,7 @@ class MiniMaxH3Cache:
                 if self.verbose:
                     win_tag = f" [window {window_key[0][0]}..{window_key[0][1]}]" if (window_key and window_key[0]) else ""
                     logging.info("[UtilsCollection MiniMax H3 Cache%s] Step %s SKIP (relative L1 %.4f < %.4f).", win_tag, state.step_counter, state.accumulated_relative_l1, self.reuse_threshold)
-                return {"img": self._apply_residual(hidden_states, state)}
+                return {"img": self._apply_residual(hidden_states, state, rows)}
 
             reasons = []
             if not below_threshold:
@@ -1045,23 +1073,9 @@ class MiniMaxH3Cache:
         self.run_count += 1
         state.consecutive_skips = 0
         state.cache_valid = False
-        state.previous_feature_signature = self._feature_signature(hidden_states, cache_ranges)
+        state.previous_feature_signature = current_signature if current_signature is not None else self._feature_signature(hidden_states, cache_ranges)
 
-        try:
-            free_mem = comfy.model_management.get_free_memory(hidden_states.device)
-            offload_baseline = self.device == "cpu" or free_mem < 2 * 1024**3
-        except Exception:
-            offload_baseline = self.device == "cpu"
-
-        start_hidden_states = hidden_states.detach().cpu() if offload_baseline else hidden_states.detach().clone()
-        result = original_block(args)
-        output = result["img"]
-        diff = output - (start_hidden_states.to(output.device) if offload_baseline else start_hidden_states)
-        del start_hidden_states
-        self._store_residual(diff, state)
-        del diff
-        state.accumulated_relative_l1 = 0.0
-        return result
+        return self._run_and_cache(state, args, original_block, hidden_states, rows)
 
 
 class MiniMaxH3SamplingScope:
@@ -1370,6 +1384,8 @@ class MiniMaxH3DiffusionCache(MiniMaxH3Cache):
 
         cache_ranges = tuple(tuple(pair) for pair in args.get("cache_ranges", ()))
         current_layout = (tuple(hidden_states.shape), hidden_states.dtype, hidden_states.device, args.get("block_count"), cache_ranges)
+        rows = self._target_rows(hidden_states, cache_ranges)
+        current_signature = None
 
         if state.layout_signature is None:
             state.layout_signature = current_layout
@@ -1408,7 +1424,7 @@ class MiniMaxH3DiffusionCache(MiniMaxH3Cache):
                 if self.verbose:
                     win_tag = f" [window {window_key[0][0]}..{window_key[0][1]}]" if (window_key and window_key[0]) else ""
                     logging.info("[UtilsCollection MiniMax H3 Diffusion Cache%s] Step %s (noise %.3f) SKIP (relative L1 %.4f < %.4f, delta noise %.3f <= %.3f).", win_tag, state.step_counter, normalized_noise, state.accumulated_relative_l1, self.reuse_threshold, noise_delta, self.max_noise_span)
-                return {"img": self._apply_residual(hidden_states, state)}
+                return {"img": self._apply_residual(hidden_states, state, rows)}
 
             reasons = []
             if not in_cache_phase:
@@ -1430,23 +1446,9 @@ class MiniMaxH3DiffusionCache(MiniMaxH3Cache):
         state.consecutive_skips = 0
         state.cache_valid = False
         state.cached_at_sigma = normalized_noise
-        state.previous_feature_signature = self._feature_signature(hidden_states, cache_ranges)
+        state.previous_feature_signature = current_signature if current_signature is not None else self._feature_signature(hidden_states, cache_ranges)
 
-        try:
-            free_mem = comfy.model_management.get_free_memory(hidden_states.device)
-            offload_baseline = self.device == "cpu" or free_mem < 2 * 1024**3
-        except Exception:
-            offload_baseline = self.device == "cpu"
-
-        start_hidden_states = hidden_states.detach().cpu() if offload_baseline else hidden_states.detach().clone()
-        result = original_block(args)
-        output = result["img"]
-        diff = output - (start_hidden_states.to(output.device) if offload_baseline else start_hidden_states)
-        del start_hidden_states
-        self._store_residual(diff, state)
-        del diff
-        state.accumulated_relative_l1 = 0.0
-        return result
+        return self._run_and_cache(state, args, original_block, hidden_states, rows)
 
 
 class MiniMaxH3DiffusionSamplingScope:
